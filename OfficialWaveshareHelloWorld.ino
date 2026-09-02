@@ -54,9 +54,9 @@ Arduino_XCA9554SWSPI *expander = new Arduino_XCA9554SWSPI(7, 0, 2, 1, &Wire, 0x2
 esp_lcd_panel_handle_t rgbPanel = nullptr;
 SemaphoreHandle_t rgbColorTransferDoneSemaphore = nullptr;
 void *rgbFrameBuffer0 = nullptr;
+void *rgbFrameBuffer1 = nullptr;
 
 lv_display_t *displayDriver = nullptr;
-lv_color16_t *displayBuffer = nullptr;
 lv_indev_t *touchDriver = nullptr;
 
 // Oficjalny sterownik GT911 z biblioteki SensorLib wymagany dla dotyku Waveshare.
@@ -579,9 +579,9 @@ bool initialiseNativeRgbPanel() {
   config.timings.flags.pclk_idle_high = 0;
   config.data_width = 16;
   config.bits_per_pixel = 16;
-  // Single framebuffer w PSRAM + dwa wewnętrzne bufory bounce DMA.
-  // Ten tryb ogranicza underrun PSRAM podczas renderowania LVGL.
-  config.num_fbs = 1;
+  // Dwa framebuffery w PSRAM (double_fb) + bufory bounce DMA. LVGL renderuje
+  // do niewidocznego bufora, esp_lcd przelacza je bez kopiowania i bez tearingu.
+  config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
   // 30 linii × 480 = 14400 pikseli; 230400 / 14400 = 16 (calkowite).
   // DMA uzywa 2 buforow bounce: 2 × 30 × 480 × 2 = 57.6 KB.
@@ -613,7 +613,7 @@ bool initialiseNativeRgbPanel() {
   config.flags.disp_active_low = 1;
   config.flags.refresh_on_demand = 0;
   config.flags.fb_in_psram = 1;
-  config.flags.double_fb = 0;
+  config.flags.double_fb = 1;
   config.flags.no_fb = 0;
   config.flags.bb_invalidate_cache = 1;
   
@@ -644,8 +644,8 @@ bool initialiseNativeRgbPanel() {
     Serial.printf("LCD: inicjalizacja panelu blad 0x%x.\n", static_cast<unsigned>(error));
     return false;
   }
-  error = esp_lcd_rgb_panel_get_frame_buffer(rgbPanel, 1, &rgbFrameBuffer0);
-  if (error != ESP_OK || !rgbFrameBuffer0) {
+  error = esp_lcd_rgb_panel_get_frame_buffer(rgbPanel, 2, &rgbFrameBuffer0, &rgbFrameBuffer1);
+  if (error != ESP_OK || !rgbFrameBuffer0 || !rgbFrameBuffer1) {
     Serial.printf("LCD: pobranie dwoch framebufferow blad 0x%x.\n", static_cast<unsigned>(error));
     return false;
   }
@@ -655,20 +655,16 @@ bool initialiseNativeRgbPanel() {
 }
 
 void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMap) {
-  // PARTIAL render mode przekazuje tylko zmieniony obszar. Bounce buffery
-  // po stronie esp_lcd chronią odczyt DMA przed krótkimi skokami PSRAM.
-  const int x1 = area->x1;
-  const int y1 = area->y1;
-  const int x2 = area->x2 + 1;
-  const int y2 = area->y2 + 1;
-  const esp_err_t error = esp_lcd_panel_draw_bitmap(
-      rgbPanel, x1, y1, x2, y2, pixelMap);
-  if (error != ESP_OK) {
-    Serial.printf("LCD: draw_bitmap blad 0x%x.\n", static_cast<unsigned>(error));
-  }
-  if (error == ESP_OK && rgbColorTransferDoneSemaphore &&
-      xSemaphoreTake(rgbColorTransferDoneSemaphore, pdMS_TO_TICKS(250)) != pdTRUE) {
-    Serial.println("LCD: timeout zakonczenia kopiowania klatki.");
+  // DIRECT render mode: LVGL renderuje calą klatkę do niewidocznego framebuffera,
+  // ktorego adres przekazuje w pixelMap. draw_bitmap na pelnym obszarze przelacza
+  // framebuffery po stronie esp_lcd (bez kopiowania i bez tearingu przy krawedzi).
+  // Odrysowujemy dopiero na ostatnim wywolaniu flush danej klatki.
+  if (lv_display_flush_is_last(display)) {
+    const esp_err_t error = esp_lcd_panel_draw_bitmap(
+        rgbPanel, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, pixelMap);
+    if (error != ESP_OK) {
+      Serial.printf("LCD: draw_bitmap blad 0x%x.\n", static_cast<unsigned>(error));
+    }
   }
   lv_display_flush_ready(display);
 }
@@ -934,60 +930,52 @@ bool deleteEntryByIndex(int entryIndex, String &removedDescription) {
   removedDescription = "";
   if (!storageReady || entryIndex < 0) return false;
 
+  // Przetwarzanie STRUMIENIOWE wiersz po wierszu: nie trzymamy calego pliku w RAM.
+  // Jeden przebieg zrodla -> zapis do pliku tymczasowego z pominieciem wybranego
+  // wiersza. Dzieki temu operacja dziala niezaleznie od rozmiaru historii i nie
+  // tworzy duzego, fragmentujacego bloku w RAM wewnetrznym (dawniej caly plik + substringi).
   File src = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!src) return false;
 
-  size_t fileSize = src.size();
-  size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (fileSize > freeHeap * 9 / 10) {
-    Serial.printf("Usun: plik %u B za duzy dla wolnego heapa %u B.\n",
-                  static_cast<unsigned>(fileSize), static_cast<unsigned>(freeHeap));
+  File dst = LittleFS.open("/karmienia.tmp", FILE_WRITE);
+  if (!dst) {
     src.close();
     return false;
   }
+  dst.println("data,godzina,typ,ml,piers_lewa_min,piers_prawa_min");
 
-  String body;
-  int dataCount = 0;
-  src.readStringUntil('\n');
+  // WAZNE: lineIndex z panelu WWW (handleApiEntries) to fizyczna pozycja wiersza po
+  // naglowku, liczona dla KAZDEJ linii — takze pustej i nieparsowalnej. Musimy liczyc
+  // tak samo, inaczej usuniemy niewlasciwy wpis. Zachowujemy wiersze bez zmian
+  // (bez trim), pomijamy wylacznie ten o pasujacym indeksie.
+  src.readStringUntil('\n'); // pomijamy naglowek zrodla
+  int dataIndex = 0;
+  bool removedFound = false;
   while (src.available()) {
     String line = src.readStringUntil('\n');
-    line.trim();
-    if (line.length() == 0) continue;
-    if (dataCount) body += '\n';
-    body += line;
-    ++dataCount;
+    // Usuwamy tylko koncowy CR/LF, bez naruszania tresci wiersza.
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
+    if (dataIndex == entryIndex) {
+      String trimmed = line;
+      trimmed.trim();
+      CsvEntry removed;
+      if (parseCsvLine(trimmed, removed)) removedDescription = describeCsvEntry(removed);
+      removedFound = true;
+      // pomijamy ten wiersz w zapisie
+    } else {
+      dst.println(line);
+    }
+    ++dataIndex;
   }
   src.close();
-
-  if (entryIndex >= dataCount) return false;
-
-  // Znajdz n-ty wpis w body
-  int entryStart = 0;
-  for (int i = 0; i < entryIndex; ++i) {
-    int nl = body.indexOf('\n', entryStart);
-    if (nl < 0) return false;
-    entryStart = nl + 1;
-  }
-  int entryEnd = body.indexOf('\n', entryStart);
-  String removedLine = entryEnd < 0 ? body.substring(entryStart) : body.substring(entryStart, entryEnd);
-  CsvEntry removed;
-  if (!parseCsvLine(removedLine, removed)) return false;
-  removedDescription = describeCsvEntry(removed);
-
-  // Buduj nowy plik bez tego wiersza
-  File dst = LittleFS.open("/karmienia.tmp", FILE_WRITE);
-  if (!dst) return false;
-  dst.println("data,godzina,typ,ml,piers_lewa_min,piers_prawa_min");
-  int pos = 0;
-  for (int i = 0; i < dataCount; ++i) {
-    int nl = body.indexOf('\n', pos);
-    String one = nl < 0 ? body.substring(pos) : body.substring(pos, nl);
-    one.trim();
-    if (i != entryIndex && one.length()) dst.println(one);
-    if (nl < 0) break;
-    pos = nl + 1;
-  }
   dst.close();
+
+  if (!removedFound || entryIndex >= dataIndex) {
+    LittleFS.remove("/karmienia.tmp");
+    return false;
+  }
 
   if (!LittleFS.rename("/karmienia.tmp", DATA_FILE_PATH)) {
     LittleFS.remove("/karmienia.tmp");
@@ -1352,7 +1340,10 @@ void handleWebRoot() {
 void handleApiStatus() {
   const time_t now = time(nullptr);
   String payload;
-  payload.reserve(6500); // status + 5 dni kalendarza + sysinfo
+  // Realny rozmiar to ~1.8-2.2 KB (5 dni kalendarza + status + sysinfo). Rezerwacja
+  // 2560 B pokrywa go z zapasem bez wczesniejszego blokowania 6.5 KB przy kazdym
+  // pollingu co 10 s. Jedna rezerwacja = brak serii realloc-ow fragmentujacych RAM.
+  payload.reserve(2560);
   payload = "{";
   payload += "\"now\":\"" + jsonEscape(timeIsValid ? formatDateTime(now) : "Brak potwierdzonego czasu") + "\",";
   payload += "\"nowIso\":\"" + jsonEscape(webDateTime(now)) + "\",";
@@ -3560,8 +3551,32 @@ void fetchWeatherNow() {
     http.useHTTP10(true);
     httpCode = http.GET();
     if (httpCode == 200) {
-      body = http.getString();
-      Serial.printf("Pogoda: odpowiedz %u B.\n", static_cast<unsigned>(body.length()));
+      // Odczyt strumieniowy do jednego, z gory zarezerwowanego bufora.
+      // Rezerwacja eliminuje serie realloc-ow (kazda fragmentowalaby RAM wewnetrzny),
+      // a twardy limit chroni przed OOM, gdyby API zwrocilo nietypowo duza odpowiedz.
+      constexpr size_t WEATHER_BODY_LIMIT = 12288; // 12 KB — zapytanie na 2 dni miesci sie z zapasem
+      const int declaredLen = http.getSize();
+      size_t reserveLen = (declaredLen > 0)
+                              ? min(static_cast<size_t>(declaredLen) + 1, WEATHER_BODY_LIMIT)
+                              : 4096;
+      body.reserve(reserveLen);
+      WiFiClient *stream = http.getStreamPtr();
+      uint8_t chunk[512];
+      while (http.connected() && body.length() < WEATHER_BODY_LIMIT) {
+        const size_t avail = stream->available();
+        if (avail == 0) {
+          if (!stream->connected()) break;
+          delay(5);
+          continue;
+        }
+        const size_t toRead = min(avail, sizeof(chunk));
+        const int n = stream->readBytes(chunk, toRead);
+        if (n <= 0) break;
+        body.concat(reinterpret_cast<const char *>(chunk), static_cast<size_t>(n));
+      }
+      Serial.printf("Pogoda: odpowiedz %u B (limit %u B).\n",
+                    static_cast<unsigned>(body.length()),
+                    static_cast<unsigned>(WEATHER_BODY_LIMIT));
     } else {
       Serial.printf("Pogoda: HTTP %d. Kolejna proba za 60 s.\n", httpCode);
     }
@@ -3724,26 +3739,19 @@ void setup() {
   lastLvglTickMs = millis();
   Serial.println("INIT: tick LVGL ustawiony");
 
-  // Bufor czesciowy LVGL w PSRAM: ogranicza zuzycie rzadkiego RAM wewnetrznego,
-  // ktory jest potrzebny m.in. dla TLS (Telegram) i obslugi Wi-Fi.
-  constexpr uint16_t DRAW_BUFFER_LINES = 15;
-  const size_t drawBufferBytes = SCREEN_WIDTH * DRAW_BUFFER_LINES * sizeof(lv_color16_t);
-  Serial.printf("INIT: alokacja bufora LVGL %u B, PSRAM wolny %u B, RAM wewnetrzny wolny %u B\n",
-                static_cast<unsigned>(drawBufferBytes),
-                static_cast<unsigned>(ESP.getFreePsram()),
-                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
-  displayBuffer = static_cast<lv_color16_t *>(heap_caps_malloc(drawBufferBytes, MALLOC_CAP_SPIRAM));
-  Serial.printf("INIT: alokacja bufora LVGL zakonczona (%p)\n", displayBuffer);
-  if (!displayBuffer) {
-    Serial.println("Brak PSRAM dla bufora LVGL.");
-    while (true) delay(1000);
-  }
-  Serial.println(String("LVGL: bufor czesciowy PSRAM: ") + String(drawBufferBytes) + " B");
+  // Tryb DIRECT: LVGL renderuje wprost do dwoch framebufferow panelu w PSRAM
+  // (pobranych z esp_lcd). Brak osobnego bufora czesciowego = mniej zuzycia RAM
+  // wewnetrznego i brak kopiowania/tearingu przy krawedzi w displayFlush().
+  const size_t fbBytes = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(lv_color16_t);
+  Serial.printf("INIT: LVGL DIRECT na 2 FB panelu (%p, %p), po %u B, PSRAM wolny %u B\n",
+                rgbFrameBuffer0, rgbFrameBuffer1,
+                static_cast<unsigned>(fbBytes),
+                static_cast<unsigned>(ESP.getFreePsram()));
 
   displayDriver = lv_display_create(SCREEN_WIDTH, SCREEN_HEIGHT);
   Serial.println("INIT: display LVGL utworzony");
   lv_display_set_flush_cb(displayDriver, displayFlush);
-  lv_display_set_buffers(displayDriver, displayBuffer, nullptr, drawBufferBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_set_buffers(displayDriver, rgbFrameBuffer0, rgbFrameBuffer1, fbBytes, LV_DISPLAY_RENDER_MODE_DIRECT);
 
   touchDriver = lv_indev_create();
   Serial.println("INIT: input LVGL utworzony");
