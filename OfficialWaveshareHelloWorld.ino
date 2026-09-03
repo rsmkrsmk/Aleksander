@@ -135,6 +135,11 @@ lv_obj_t *homeCounterBar = nullptr;
 lv_obj_t *ssClockCard = nullptr;
 lv_obj_t *ssWeatherCard = nullptr;
 lv_obj_t *ssHourLabels[3] = {nullptr, nullptr, nullptr};
+lv_obj_t *ssNextFeedLabel = nullptr;   // sugestia nastepnego karmienia
+lv_obj_t *ssDayBandCard = nullptr;     // karta pasma doby
+lv_obj_t *ssDayBandTrack = nullptr;    // wlasciwe pasmo 0-24h (kontener na markery)
+int ssDayBandStamp = -1;               // sygnatura ostatnio narysowanego pasma (unikamy przerysowan)
+String ssRenderedNextFeed;
 int ssLastIconCode = -999;
 lv_timer_t *ssClockTimer = nullptr;
 String ssRenderedClock;
@@ -203,6 +208,10 @@ bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
 int lastWeightG = 0;                // ostatnia zapisana waga (g); 0 = brak wpisu
+int avgFeedingGapMin = 0;           // sredni odstep miedzy karmieniami (min); 0 = za malo danych
+time_t nextFeedingEta = 0;          // przewidywany czas nastepnego karmienia (0 = brak predykcji)
+bool sleepInProgress = false;       // true gdy ostatnie zdarzenie snu to SEN_START (dziecko spi)
+time_t sleepStartedTime = 0;        // czas rozpoczecia biezacego snu (0 = nie spi)
 bool deleteModeActive = false;         // tryb wyboru wpisu do usuniecia
 int pendingDeleteIndex = -1;            // indeks oczekujacy na potwierdzenie (-1 = brak)
 
@@ -288,6 +297,8 @@ void retryWiFiConnection();
 bool syncTimeFromNTP();
 bool initialiseStorage();
 void loadLatestEntries();
+void recomputeFeedingRhythm();
+String nextFeedingSuggestion();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
 bool isMilkType(const String &entryType);
 String milkTypeLabel(const String &entryType);
@@ -339,6 +350,7 @@ void createPumpingScreen();
 void createOtherScreen();
 void otherOpenEvent(lv_event_t *event);
 void backToOtherEvent(lv_event_t *event);
+void sleepToggleEvent(lv_event_t *event);
 void createWeightScreen();
 void weightOpenEvent(lv_event_t *event);
 void weightSaveEvent(lv_event_t *event);
@@ -372,6 +384,7 @@ void enterScreensaver();
 void exitScreensaver();
 void updateScreensaverContent();
 void applyScreensaverVisibility();
+void drawDayBand(int nowMin);
 void fetchWeatherNow();
 void weatherTask(void *parameter);
 void requestWeatherFetch();
@@ -905,6 +918,8 @@ void loadLatestEntries() {
   lastFeedingTime = 0;
   lastMilkTime = 0;
   lastWeightG = 0;
+  sleepInProgress = false;
+  sleepStartedTime = 0;
   if (!storageReady) return;
 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
@@ -929,8 +944,71 @@ void loadLatestEntries() {
     if (entry.type == "WAGA") {
       lastWeightG = entry.ml; // gramy zapisane w kolumnie ml
     }
+    if (entry.type == "SEN_START") {
+      sleepInProgress = true;
+      sleepStartedTime = stamp;
+    } else if (entry.type == "SEN_STOP") {
+      sleepInProgress = false;
+      sleepStartedTime = 0;
+    }
   }
   file.close();
+  recomputeFeedingRhythm(); // odswiez sugestie nastepnego karmienia
+}
+
+// Srednia odstepow miedzy KARMIENIAMI (tylko typ KARMIENIE) z ostatnich dni oraz
+// przewidywany czas nastepnego karmienia. Jeden przebieg pliku (bez trzymania w RAM).
+// Bierze pod uwage odstepy 30 min .. 8 h (odrzuca noc/anomalie). Wynik w globalach
+// avgFeedingGapMin i nextFeedingEta. Wymaga min. 3 karmien w oknie.
+void recomputeFeedingRhythm() {
+  avgFeedingGapMin = 0;
+  nextFeedingEta = 0;
+  if (!storageReady) return;
+
+  // Okno: dzis + 2 dni wstecz (wystarczajaco reprezentatywne, malo pamieci).
+  const time_t windowStart = dayOffsetFromToday(2);
+
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) return;
+  file.readStringUntil('\n');
+  time_t prev = 0;
+  long sumMin = 0;
+  int count = 0;
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    CsvEntry entry;
+    if (!parseCsvLine(line, entry)) continue;
+    if (entry.type != "KARMIENIE") continue;
+    const time_t stamp = csvDateTimeToEpoch(entry.date, entry.time);
+    if (stamp < windowStart) continue;
+    if (prev > 0) {
+      const long gap = static_cast<long>(difftime(stamp, prev) / 60);
+      // Sensowne odstepy dzienne: 30 min .. 8 h. Odrzuca dlugie przerwy nocne i duble.
+      if (gap >= 30 && gap <= 480) {
+        sumMin += gap;
+        ++count;
+      }
+    }
+    prev = stamp;
+  }
+  file.close();
+
+  if (count >= 2) {
+    avgFeedingGapMin = static_cast<int>(sumMin / count);
+    if (lastFeedingTime) nextFeedingEta = lastFeedingTime + static_cast<time_t>(avgFeedingGapMin) * 60;
+  }
+}
+
+// Tekst sugestii nastepnego karmienia (dla wygaszacza i ekranu glownego).
+String nextFeedingSuggestion() {
+  if (!nextFeedingEta || !avgFeedingGapMin) return String();
+  struct tm t;
+  localtime_r(&nextFeedingEta, &t);
+  char hhmm[6];
+  strftime(hhmm, sizeof(hhmm), "%H:%M", &t);
+  return String("NASTEPNE KARMIENIE ~") + hhmm;
 }
 
 // --------------------------- Cofanie ostatniego wpisu ----------------------------
@@ -1381,6 +1459,9 @@ void handleApiStatus() {
   payload += "\"lastMilk\":\"" + jsonEscape(lastMilk) + "\",";
   payload += "\"lastFeedingAgo\":\"" + jsonEscape(lastFeedingTime ? formatAgoText(lastFeedingTime) : String()) + "\",";
   payload += "\"lastFeedingAgeMin\":" + String(lastFeedingTime ? static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60) : -1) + ",";
+  payload += "\"avgFeedingGapMin\":" + String(avgFeedingGapMin) + ",";
+  payload += "\"nextFeedingIso\":\"" + jsonEscape(nextFeedingEta ? webDateTime(nextFeedingEta) : String()) + "\",";
+  payload += "\"sleepInProgress\":" + String(sleepInProgress ? "true" : "false") + ",";
   payload += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   payload += "\"storage\":" + String(storageReady ? "true" : "false") + ",";
   payload += "\"timeValid\":" + String(timeIsValid ? "true" : "false") + ",";
@@ -1682,7 +1763,8 @@ void handleApiEvent() {
   }
   const String type = webServer.arg("type");
   const bool validType = type == "PIELUCHA_MOKRA" || type == "PIELUCHA_BRUDNA" ||
-                         type == "WITAMINA_D" || type == "ODCIAGANIE" || type == "WAGA";
+                         type == "WITAMINA_D" || type == "ODCIAGANIE" || type == "WAGA" ||
+                         type == "SEN_START" || type == "SEN_STOP";
   if (!validType) {
     sendJson(400, "{\"message\":\"Nieznany typ zdarzenia.\"}");
     return;
@@ -2372,6 +2454,14 @@ void backToOtherEvent(lv_event_t *event) {
 }
 
 // Ekran INNE: grupuje szybkie akcje PIELUCHA i ODCIAG POKARMU pod jednym miejscem.
+// Sen jednym dotknieciem: przelacza ZASNAL/OBUDZIL SIE wg biezacego stanu.
+void sleepToggleEvent(lv_event_t *event) {
+  if (!timeIsValid || !storageReady) return;
+  appendEntry(sleepInProgress ? "SEN_STOP" : "SEN_START", time(nullptr), 0);
+  deleteModeActive = false;
+  createHomeScreen();
+}
+
 void createOtherScreen() {
   resetReusableScreen(otherScreen);
 
@@ -2379,11 +2469,20 @@ void createOtherScreen() {
   lv_obj_t *backButton = createButton(otherScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
   lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
 
-  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 120, 452, 90, COLOR_BLUE);
+  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 96, 452, 74, COLOR_BLUE);
   lv_obj_add_event_cb(diaperBtn, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 226, 452, 90, COLOR_ORANGE);
+  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 180, 452, 74, COLOR_ORANGE);
   lv_obj_add_event_cb(pumpingBtn, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
-  createLabel(otherScreen, "Pielucha i odciaganie pokarmu.", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 330);
+  // Przycisk snu zmienia tekst/kolor zaleznie od tego, czy dziecko aktualnie spi.
+  lv_obj_t *sleepBtn = createButton(otherScreen,
+                                    sleepInProgress ? "OBUDZIL SIE" : "ZASNAL",
+                                    14, 264, 452, 74,
+                                    sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
+  lv_obj_add_event_cb(sleepBtn, sleepToggleEvent, LV_EVENT_CLICKED, nullptr);
+  createLabel(otherScreen,
+              sleepInProgress ? "Dziecko spi — dotknij OBUDZIL SIE po przebudzeniu."
+                              : "Pielucha, odciaganie, sen.",
+              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 350);
 
   loadReusableScreen(otherScreen);
 }
@@ -2615,49 +2714,79 @@ void createHomeScreen() {
   lv_obj_add_event_cb(chartButton, chartButtonEvent, LV_EVENT_CLICKED, nullptr);
 
   // ===================== WYGASZACZ =====================
-  // Karta zegara: zegar + data + ostatnie karmienie
-  ssClockCard = createCard(homeScreen, 14, 152, 452, 140);
+  // Uklad (gora ekranu tipCard/ageCard 44..144 pozostaja widoczne):
+  //   Karta zegara      150..250  (zegar + data + ostatnie/nastepne karmienie)
+  //   Pasmo doby        256..300  (karmienia/pieluchy na osi 0-24h)
+  //   Karta pogody      306..470  (ikona + temp + opis + min/max + 3h + ubior)
 
-  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 8);
+  // --- Karta zegara ---
+  ssClockCard = createCard(homeScreen, 14, 150, 452, 100);
+
+  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 6, 6);
   lv_obj_set_style_text_font(ssClockLabel, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_CENTER, 0);
-  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 1, 9);
+  lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_LEFT, 0);
+  // ssClockShadowLabel nieuzywany w nowym ukladzie (plaski, czysty zegar), ale
+  // pozostaje utworzony i ukryty aby applyScreensaverVisibility/aktualizacje dzialaly.
+  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 6, 6);
   lv_obj_set_style_text_font(ssClockShadowLabel, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_align(ssClockShadowLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
 
-  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 65);
-  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_14, 0);
+  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -6, 14);
+  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_align(ssDateLabel, LV_TEXT_ALIGN_RIGHT, 0);
 
-  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_TOP_MID, 0, 95);
+  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_BOTTOM_LEFT, 6, 4);
   lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_14, 0);
 
-  // Karta pogody: ikona, temperatura, opis, min/max, 3 godziny, porada ubioru
-  ssWeatherCard = createCard(homeScreen, 14, 290, 452, 180);
+  ssNextFeedLabel = createLabel(ssClockCard, "", COLOR_BLUE, LV_ALIGN_BOTTOM_RIGHT, -6, 4);
+  lv_obj_set_style_text_font(ssNextFeedLabel, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_align(ssNextFeedLabel, LV_TEXT_ALIGN_RIGHT, 0);
+
+  // --- Pasmo doby (karmienia + pieluchy na osi 0-24h) ---
+  ssDayBandCard = createCard(homeScreen, 14, 256, 452, 46);
+  lv_obj_set_style_pad_all(ssDayBandCard, 6, 0);
+  lv_obj_t *bandTitle = createLabel(ssDayBandCard, "DZIS", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 2, 0);
+  lv_obj_set_style_text_font(bandTitle, &lv_font_montserrat_10, 0);
+  ssDayBandTrack = lv_obj_create(ssDayBandCard);
+  lv_obj_remove_style_all(ssDayBandTrack);
+  lv_obj_set_pos(ssDayBandTrack, 2, 14);
+  lv_obj_set_size(ssDayBandTrack, 436, 16);
+  lv_obj_set_style_radius(ssDayBandTrack, 8, 0);
+  lv_obj_set_style_bg_color(ssDayBandTrack, COLOR_TONAL_GREEN, 0);
+  lv_obj_set_style_bg_opa(ssDayBandTrack, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(ssDayBandTrack, LV_OBJ_FLAG_SCROLLABLE);
+  ssDayBandStamp = -1;
+
+  // --- Karta pogody ---
+  ssWeatherCard = createCard(homeScreen, 14, 306, 452, 164);
 
   ssIconBox = lv_obj_create(ssWeatherCard);
   lv_obj_remove_style_all(ssIconBox);
-  lv_obj_set_size(ssIconBox, 100, 100);
-  lv_obj_set_pos(ssIconBox, 8, 8);
+  lv_obj_set_size(ssIconBox, 96, 96);
+  lv_obj_set_pos(ssIconBox, 6, 8);
   ssLastIconCode = -999;
 
-  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 120, 4);
+  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 116, 6);
   lv_obj_set_style_text_font(ssTempLabel, &lv_font_montserrat_36, 0);
 
-  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 122, 54);
-  lv_obj_set_width(ssDescLabel, 310);
+  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 118, 52);
+  lv_obj_set_width(ssDescLabel, 314);
+  lv_obj_set_style_text_font(ssDescLabel, &lv_font_montserrat_14, 0);
   lv_label_set_long_mode(ssDescLabel, LV_LABEL_LONG_WRAP);
 
-  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 122, 82);
+  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 118, 74);
+  lv_obj_set_style_text_font(ssMinMaxLabel, &lv_font_montserrat_14, 0);
 
   for (uint8_t i = 0; i < 3; ++i) {
     ssHourLabels[i] = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID,
-                                  static_cast<int>(-148 + i * 148), 116);
-    lv_obj_set_width(ssHourLabels[i], 136);
+                                  static_cast<int>(-140 + i * 140), 104);
+    lv_obj_set_width(ssHourLabels[i], 132);
     lv_obj_set_style_text_align(ssHourLabels[i], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(ssHourLabels[i], &lv_font_montserrat_12, 0);
   }
 
-  ssDressLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 148);
-  lv_obj_set_width(ssDressLabel, 428);
+  ssDressLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_BOTTOM_MID, 0, -2);
+  lv_obj_set_width(ssDressLabel, 430);
   lv_obj_set_style_text_align(ssDressLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_font(ssDressLabel, &lv_font_montserrat_10, 0);
   lv_label_set_long_mode(ssDressLabel, LV_LABEL_LONG_WRAP);
@@ -2669,6 +2798,7 @@ void createHomeScreen() {
   ssRenderedMinMax = "";
   ssRenderedDress = "";
   ssRenderedLastFeeding = "";
+  ssRenderedNextFeed = "";
   for (uint8_t i = 0; i < 3; ++i) ssRenderedHours[i] = "";
 
   applyScreensaverVisibility();
@@ -3161,6 +3291,8 @@ String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight
   if (type == "ODCIAGANIE") return String("Odciaganie ") + hhmm + " - " + ml + " ml";
   if (type == "WITAMINA_D") return String("Witamina D podana ") + hhmm;
   if (type == "WAGA") return String("Waga ") + hhmm + " - " + ml + " g";
+  if (type == "SEN_START") return String("Zasnal ") + hhmm;
+  if (type == "SEN_STOP") return String("Obudzil sie ") + hhmm;
   return type + " " + hhmm;
 }
 
@@ -3431,110 +3563,224 @@ void drawWeatherIcon(lv_obj_t *box, int wmoCode) {
     if (angleDeg) lv_obj_set_style_transform_angle(o, angleDeg * 10, 0);
   };
 
-  const bool night = nightModeActive;
-  const lv_color_t cSun = lv_color_hex(night ? 0xD9C24A : 0xE8A13A);
-  const lv_color_t cSunLight = lv_color_hex(night ? 0xE8D468 : 0xF5C060);
-  const lv_color_t cCloud = lv_color_mix(COLOR_CARD, COLOR_BLUE, LV_OPA_40);
-  const lv_color_t cCloudDark = lv_color_mix(COLOR_BLUE, COLOR_MUTED, LV_OPA_30);
-  const lv_color_t cRain = COLOR_BLUE;
-  const lv_color_t cYellow = COLOR_YELLOW;
-  const lv_color_t cFog = COLOR_MUTED;
-  const lv_color_t cWhite = lv_color_white();
+  // Zaokraglony prostokat (do plaskiej podstawy chmury i korpusu).
+  auto roundRect = [&](int x, int y, int w, int h, int r, lv_color_t c) {
+    lv_obj_t *o = lv_obj_create(box);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_style_radius(o, r, 0);
+    lv_obj_set_style_bg_color(o, c, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+  };
 
-  // Wspólna chmura: trzy kule + dolne wypelnienie
-  auto cloud = [&]() {
-    dot(30, 48, 14, cCloud);
-    dot(52, 38, 18, cCloud);
-    dot(72, 44, 16, cCloud);
-    dot(44, 56, 10, cCloud);
-    pill(50, 52, 60, 20, 0, cCloud);
+  const bool night = nightModeActive;
+  const lv_color_t cSun = lv_color_hex(night ? 0xE8CF55 : 0xF3A72E);
+  const lv_color_t cSunGlow = lv_color_hex(night ? 0x5A5326 : 0xFBE0A6);
+  const lv_color_t cCloud = night ? lv_color_hex(0xB9C6D6) : lv_color_hex(0xE4ECF5);
+  const lv_color_t cCloudEdge = night ? lv_color_hex(0x8FA0B4) : lv_color_hex(0xC3D2E2);
+  const lv_color_t cRain = lv_color_hex(night ? 0x7C9BD1 : 0x4E7FC4);
+  const lv_color_t cYellow = lv_color_hex(0xF2C438);
+  const lv_color_t cFog = COLOR_MUTED;
+  const lv_color_t cWhite = night ? lv_color_hex(0xE8EFF7) : lv_color_white();
+
+  // Puszysta chmura z plaska podstawa: cieniowany obrys + jasniejsze wypelnienie.
+  auto cloud = [&](int baseY) {
+    // cien/obrys
+    dot(32, baseY - 6, 15, cCloudEdge);
+    dot(54, baseY - 16, 19, cCloudEdge);
+    dot(72, baseY - 8, 16, cCloudEdge);
+    roundRect(18, baseY - 2, 60, 18, 9, cCloudEdge);
+    // wypelnienie (lekko wyzej, tworzy delikatny gradient warstwowy)
+    dot(33, baseY - 8, 12, cCloud);
+    dot(54, baseY - 18, 16, cCloud);
+    dot(71, baseY - 10, 13, cCloud);
+    roundRect(20, baseY - 3, 56, 14, 7, cCloud);
   };
 
   switch (weatherKindOf(wmoCode)) {
     case W_SUN: {
-      // Główna tarcza slonca
-      dot(50, 50, 22, cSunLight);
-      dot(50, 50, 18, cSun);
-      // 12 promieni co 30 stopni
+      // 12 promieni (naprzemiennie dlugie/krotkie) wokol tarczy
       for (int i = 0; i < 12; ++i) {
-        const float deg = i * 30.0f;
-        const float rad = deg * 3.14159f / 180.0f;
-        const int len = (i % 3 == 0) ? 18 : 14; // dluższe co trzeci
-        const int cx = 50 + static_cast<int>(cosf(rad) * 30.0f);
-        const int cy = 50 + static_cast<int>(sinf(rad) * 30.0f);
-        const int angle = (i % 3 == 0) ? -static_cast<int>(deg) : -(static_cast<int>(deg) + 15);
-        pill(cx, cy, len, 5, angle, cSun);
+        const float rad = i * 30.0f * 3.14159f / 180.0f;
+        const int len = (i % 2 == 0) ? 16 : 10;
+        const int cx = 48 + static_cast<int>(cosf(rad) * 34.0f);
+        const int cy = 48 + static_cast<int>(sinf(rad) * 34.0f);
+        pill(cx, cy, len, 5, static_cast<int>(i * 30.0f), cSun);
       }
+      // Miekka poswiata + tarcza
+      dot(48, 48, 26, cSunGlow);
+      dot(48, 48, 20, cSun);
       break;
     }
     case W_PARTLY: {
-      // Slonce w górnym-lewym rogu
-      dot(28, 24, 12, cSun);
-      static const int rays[6][3] = {
-          {44, 22, 0}, {14, 22, 0}, {22, 12, 90}, {22, 38, 90},
-          {38, 14, 45}, {14, 36, 45}};
-      for (const auto &r : rays) pill(r[0], r[1], 10, 4, r[2], cSun);
-      // Chmura przesłaniająca dolna-prawa czesc
-      dot(48, 44, 14, cCloudDark);
-      dot(66, 36, 18, cCloud);
-      dot(84, 44, 15, cCloud);
-      dot(62, 52, 12, cCloud);
-      pill(66, 48, 58, 18, 0, cCloud);
+      // Slonce w gornym-lewym rogu z krotkimi promieniami
+      for (int i = 0; i < 8; ++i) {
+        const float rad = i * 45.0f * 3.14159f / 180.0f;
+        const int cx = 34 + static_cast<int>(cosf(rad) * 22.0f);
+        const int cy = 32 + static_cast<int>(sinf(rad) * 22.0f);
+        pill(cx, cy, 9, 4, static_cast<int>(i * 45.0f), cSun);
+      }
+      dot(34, 32, 15, cSunGlow);
+      dot(34, 32, 11, cSun);
+      // Chmura zaslaniajaca dolna-prawa czesc
+      cloud(64);
       break;
     }
     case W_CLOUD: {
-      dot(20, 46, 12, cCloudDark);
-      dot(38, 34, 18, cCloud);
-      dot(58, 38, 20, cCloud);
-      dot(76, 44, 14, cCloud);
-      dot(48, 52, 16, cCloud);
-      dot(68, 52, 12, cCloudDark);
-      pill(50, 50, 72, 22, 0, cCloud);
+      // Dwie chmury (mniejsza z tylu ciemniejsza, wieksza z przodu jasna)
+      dot(64, 40, 13, cCloudEdge);
+      dot(78, 46, 11, cCloudEdge);
+      roundRect(54, 40, 34, 14, 7, cCloudEdge);
+      cloud(58);
       break;
     }
     case W_FOG: {
-      for (int i = 0; i < 6; ++i) {
-        const int y = 16 + i * 14;
-        const int len = 60 + (i % 2 == 0 ? 0 : 20);
-        const int offset = (i % 2 == 0 ? 20 : 10);
-        pill(50 + offset, y, len, 6, 0, cFog);
+      // Chmura + poziome smugi mgly
+      cloud(46);
+      for (int i = 0; i < 3; ++i) {
+        const int y = 62 + i * 11;
+        const int len = (i == 1) ? 64 : 52;
+        pill(48 + (i == 2 ? -6 : 4), y, len, 5, 0, cFog);
       }
       break;
     }
     case W_RAIN: {
-      cloud();
-      // 6 kropli deszczu (bardziej strome — 20 stopni zamiast 25)
-      static const int drops[6][3] = {
-          {28, 74, 12}, {40, 82, 16}, {54, 76, 12},
-          {66, 86, 14}, {78, 78, 12}, {90, 88, 10}};
-      for (const auto &d : drops) pill(d[0], d[1], d[2], 4, 20, cRain);
+      cloud(44);
+      // 4 krople: kropla = kula + ostry czubek (pill pochylony)
+      static const int dx[4] = {30, 46, 62, 76};
+      for (int i = 0; i < 4; ++i) {
+        const int x = dx[i], y = 66 + (i % 2) * 8;
+        pill(x, y, 5, 12, 18, cRain);
+        dot(x + 1, y + 5, 3, cRain);
+      }
       break;
     }
     case W_SNOW: {
-      cloud();
-      // 6 płatków sniegu: krzyzyk + kropka w srodku
-      static const int sx[6] = {28, 42, 56, 70, 82, 50};
-      static const int sy[6] = {80, 74, 88, 78, 84, 98};
-      for (int i = 0; i < 6; ++i) {
-        pill(sx[i], sy[i], 10, 3, 0, cWhite);
-        pill(sx[i], sy[i], 10, 3, 90, cWhite);
-        dot(sx[i], sy[i], 2, cWhite);
+      cloud(44);
+      // 3 platki: 3 skrzyzowane belki + jasny srodek
+      static const int fx[3] = {34, 54, 74};
+      static const int fy[3] = {70, 78, 70};
+      for (int i = 0; i < 3; ++i) {
+        pill(fx[i], fy[i], 12, 3, 0, cWhite);
+        pill(fx[i], fy[i], 12, 3, 60, cWhite);
+        pill(fx[i], fy[i], 12, 3, 120, cWhite);
+        dot(fx[i], fy[i], 2, cWhite);
       }
       break;
     }
     case W_STORM: {
-      cloud();
-      // Błyskawica: trzy odcinki tworzace zygzak
-      pill(52, 70, 18, 6, 120, cYellow);
-      pill(40, 90, 14, 6, 60, cYellow);
-      pill(56, 80, 10, 6, 130, cYellow);
-      // 3 krople deszczu
-      pill(20, 74, 10, 4, 20, cRain);
-      pill(72, 82, 12, 4, 20, cRain);
-      pill(86, 72, 8, 4, 20, cRain);
+      cloud(42);
+      // Blyskawica: gruby zygzak z kilku nakladajacych sie belek
+      pill(50, 60, 20, 8, 115, cYellow);
+      pill(44, 74, 16, 8, 60, cYellow);
+      pill(54, 82, 14, 8, 118, cYellow);
+      dot(48, 71, 4, cYellow);
       break;
     }
   }
+}
+
+// Pasmo doby: karmienia (pomaranczowe), butelki (niebieskie), pieluchy (zielone)
+// na osi 0-24h. Znacznik "teraz" (cienka kreska). Rysowane z CSV dnia; przerysowanie
+// tylko gdy zmieni sie liczba zdarzen lub minuta (oszczedza odswiezanie panelu RGB).
+void drawDayBand(int nowMin) {
+  if (!ssDayBandTrack) return;
+  if (!storageReady) return;
+
+  const String today = dateIso(dayOffsetFromToday(0));
+  // Lekka sygnatura: liczba karmien+butelek+pieluch dzis + biezaca minuta/5.
+  DaySummary s;
+  dayStats(dayOffsetFromToday(0), s);
+  const int sig = (s.feedingCount * 1000 + s.milkCount * 100 + (s.diaperWet + s.diaperDirty) * 10 + (sleepInProgress ? 1 : 0)) * 300 + nowMin / 5;
+  if (sig == ssDayBandStamp) return;
+  ssDayBandStamp = sig;
+
+  lv_obj_clean(ssDayBandTrack);
+  const int trackW = 436;
+
+  // Znacznik "teraz"
+  {
+    lv_obj_t *nowTick = lv_obj_create(ssDayBandTrack);
+    lv_obj_remove_style_all(nowTick);
+    lv_obj_set_size(nowTick, 2, 16);
+    lv_obj_set_pos(nowTick, static_cast<int>(nowMin / 1440.0f * trackW) - 1, 0);
+    lv_obj_set_style_bg_color(nowTick, COLOR_TEXT, 0);
+    lv_obj_set_style_bg_opa(nowTick, LV_OPA_50, 0);
+  }
+
+  // Najpierw pasma snu (pod markerami): pary SEN_START -> SEN_STOP.
+  {
+    File sf = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+    if (sf) {
+      sf.readStringUntil('\n');
+      int sleepStart = -1;
+      while (sf.available()) {
+        String line = sf.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) continue;
+        if (!line.startsWith(today + ",")) continue;
+        CsvEntry e;
+        if (!parseCsvLine(line, e)) continue;
+        if (e.time.length() < 5) continue;
+        const int mins = e.time.substring(0, 2).toInt() * 60 + e.time.substring(3, 5).toInt();
+        if (e.type == "SEN_START") {
+          sleepStart = mins;
+        } else if (e.type == "SEN_STOP" && sleepStart >= 0) {
+          const int x1 = static_cast<int>(sleepStart / 1440.0f * trackW);
+          const int x2 = static_cast<int>(mins / 1440.0f * trackW);
+          lv_obj_t *span = lv_obj_create(ssDayBandTrack);
+          lv_obj_remove_style_all(span);
+          lv_obj_set_size(span, max(x2 - x1, 2), 16);
+          lv_obj_set_pos(span, x1, 0);
+          lv_obj_set_style_bg_color(span, lv_color_hex(0x6E5FA6), 0);
+          lv_obj_set_style_bg_opa(span, LV_OPA_40, 0);
+          sleepStart = -1;
+        }
+      }
+      // Sen trwajacy do teraz (bez SEN_STOP).
+      if (sleepStart >= 0) {
+        const int x1 = static_cast<int>(sleepStart / 1440.0f * trackW);
+        const int x2 = static_cast<int>(nowMin / 1440.0f * trackW);
+        lv_obj_t *span = lv_obj_create(ssDayBandTrack);
+        lv_obj_remove_style_all(span);
+        lv_obj_set_size(span, max(x2 - x1, 2), 16);
+        lv_obj_set_pos(span, x1, 0);
+        lv_obj_set_style_bg_color(span, lv_color_hex(0x6E5FA6), 0);
+        lv_obj_set_style_bg_opa(span, LV_OPA_40, 0);
+      }
+      sf.close();
+    }
+  }
+
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) return;
+  file.readStringUntil('\n');
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    if (!line.startsWith(today + ",")) continue;
+    CsvEntry entry;
+    if (!parseCsvLine(line, entry)) continue;
+    lv_color_t c;
+    bool show = true;
+    if (entry.type == "KARMIENIE") c = COLOR_ORANGE;
+    else if (isMilkType(entry.type)) c = COLOR_BLUE;
+    else if (entry.type == "PIELUCHA_MOKRA" || entry.type == "PIELUCHA_BRUDNA") c = COLOR_GREEN;
+    else show = false;
+    if (!show) continue;
+    if (entry.time.length() < 5) continue;
+    const int mins = entry.time.substring(0, 2).toInt() * 60 + entry.time.substring(3, 5).toInt();
+    lv_obj_t *m = lv_obj_create(ssDayBandTrack);
+    lv_obj_remove_style_all(m);
+    lv_obj_set_size(m, 5, 16);
+    lv_obj_set_pos(m, static_cast<int>(mins / 1440.0f * trackW) - 2, 0);
+    lv_obj_set_style_radius(m, 2, 0);
+    lv_obj_set_style_bg_color(m, c, 0);
+    lv_obj_set_style_bg_opa(m, LV_OPA_COVER, 0);
+  }
+  file.close();
 }
 
 void updateScreensaverContent() {
@@ -3552,34 +3798,38 @@ void updateScreensaverContent() {
   if (currentLocalTime(nowInfo)) {
     char buf[8];
     strftime(buf, sizeof(buf), "%H:%M", &nowInfo);
-    setLabelTextIfChanged(ssClockShadowLabel, ssRenderedClock, String(buf));
     setLabelTextIfChanged(ssClockLabel, ssRenderedClock, String(buf));
     static const char *DAYS[] = {"NIEDZIELA", "PONIEDZIALEK", "WTOREK", "SRODA",
                                  "CZWARTEK", "PIATEK", "SOBOTA"};
     char dbuf[8];
     strftime(dbuf, sizeof(dbuf), "%d.%m", &nowInfo);
     setLabelTextIfChanged(ssDateLabel, ssRenderedDate,
-                          String(DAYS[nowInfo.tm_wday]) + " - " + dbuf);
+                          String(DAYS[nowInfo.tm_wday]) + "\n" + dbuf);
     // Ostatnie karmienie na wygaszaczu z kolorowym znacznikiem
     String feedingText;
     lv_color_t feedingColor = COLOR_MUTED;
     if (lastFeedingTime) {
       const long elapsedMin = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
       if (elapsedMin >= 0 && elapsedMin < COUNTER_BLINK_MIN) {
-        feedingText = "OSTATNIE KARMIENIE: " + formatAgoText(lastFeedingTime);
+        feedingText = "Ostatnie: " + formatAgoText(lastFeedingTime);
       } else {
-        feedingText = "CZAS NA KARMIENIE: " + formatAgoText(lastFeedingTime);
+        feedingText = "Czas na karmienie! " + formatAgoText(lastFeedingTime);
       }
       feedingColor = feedingAgeColor(lastFeedingTime);
     } else {
-      feedingText = "OSTATNIE KARMIENIE: brak wpisu";
+      feedingText = "Brak wpisu karmienia";
     }
     setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
     if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
+    // Sugestia nastepnego karmienia (srednia odstepow)
+    const String nextText = nextFeedingSuggestion();
+    setLabelTextIfChanged(ssNextFeedLabel, ssRenderedNextFeed, nextText);
+    // Pasmo doby (przerysowywane tylko przy zmianie minuty aby oszczedzac RGB)
+    drawDayBand(nowInfo.tm_hour * 60 + nowInfo.tm_min);
   } else {
-    setLabelTextIfChanged(ssClockShadowLabel, ssRenderedClock, "--:--");
     setLabelTextIfChanged(ssClockLabel, ssRenderedClock, "--:--");
     setLabelTextIfChanged(ssDateLabel, ssRenderedDate, "");
+    setLabelTextIfChanged(ssNextFeedLabel, ssRenderedNextFeed, "");
   }
 
   if (!currentWeather.valid) {
@@ -3629,16 +3879,18 @@ void applyScreensaverVisibility() {
     if (screensaverActive) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
   }
-  lv_obj_t *widgets[] = {ssClockCard, ssWeatherCard,
-                         ssClockShadowLabel, ssClockLabel, ssDateLabel, ssIconBox,
+  lv_obj_t *widgets[] = {ssClockCard, ssWeatherCard, ssDayBandCard, ssDayBandTrack,
+                         ssClockLabel, ssDateLabel, ssIconBox,
                          ssTempLabel, ssDescLabel, ssMinMaxLabel, ssDressLabel,
-                         ssLastFeedingLabel,
+                         ssLastFeedingLabel, ssNextFeedLabel,
                          ssHourLabels[0], ssHourLabels[1], ssHourLabels[2]};
   for (lv_obj_t *o : widgets) {
     if (!o) continue;
     if (screensaverActive) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
   }
+  // ssClockShadowLabel pozostaje ukryty w obu trybach (plaski zegar w nowym ukladzie).
+  if (ssClockShadowLabel) lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
 }
 
 void enterScreensaver() {

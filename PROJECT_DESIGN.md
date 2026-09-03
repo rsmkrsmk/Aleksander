@@ -42,6 +42,7 @@ Starsze wpisy z 4 kolumnami pozostają czytelne (minuty = 0).
 | `ODCIAGANIE` | ✔ | 0 | zapas pokarmu |
 | `WITAMINA_D` | 0 | 0 | dawka dzienna (raz na dobę) |
 | `WAGA` | ✔ (gramy w kolumnie `ml`) | 0 | pomiar masy ciała |
+| `SEN_START` / `SEN_STOP` | 0 | 0 | początek / koniec snu (pasmo doby) |
 
 > Uwaga: dla typu `WAGA` kolumna `ml` przechowuje **gramy** (np. `3700`), a nie mililitry. Zakres 2000–15000 g.
 
