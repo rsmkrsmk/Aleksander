@@ -17,9 +17,12 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-#define LV_MEM_CUSTOM 1 // AJAY
-#define LV_MEM_SIZE (128U * 1024U) //AJAY
-#define LV_MEM_CUSTOM_INCLUDE <stdlib.h> //AJAY
+// UWAGA: ponizsze trzy dyrektywy pochodza z LVGL 8 i w LVGL 9 sa IGNOROWANE.
+// Alokator w LVGL 9 konfiguruje sie przez LV_USE_STDLIB_MALLOC (patrz nizej).
+// Zostawione zakomentowane, aby nie wprowadzaly w blad.
+// #define LV_MEM_CUSTOM 1
+// #define LV_MEM_SIZE (128U * 1024U)
+// #define LV_MEM_CUSTOM_INCLUDE <stdlib.h>
 
 /* If you need to include anything here, do it inside the `__ASSEMBLY__` guard */
 #if  0 && defined(__ASSEMBLY__)
@@ -44,6 +47,8 @@
  * - LV_STDLIB_RTTHREAD:    RT-Thread implementation
  * - LV_STDLIB_CUSTOM:      Implement the functions externally
  */
+// BUILTIN + pula w PSRAM: wbudowany alokator LVGL, ale jego pula jest pobierana
+// z PSRAM (patrz LV_MEM_POOL_ALLOC nizej), nie z deficytowego RAM wewnetrznego.
 #define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
 
 /** Possible values
@@ -72,8 +77,10 @@
 #define LV_STDARG_INCLUDE       <stdarg.h>
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
-    /** Size of memory available for `lv_malloc()` in bytes (>= 2kB) */
-    // #define LV_MEM_SIZE (64 * 1024U)          /**< [bytes] */ ///AJAY
+    /** Rozmiar puli lv_malloc(). 64 KB wystarcza dla tego UI (etykiety, karty,
+     *  suwaki, kilka ekranow). Pula jest pobierana z PSRAM (LV_MEM_POOL_ALLOC nizej),
+     *  wiec te 64 KB NIE obciazaja deficytowego RAM wewnetrznego. */
+    #define LV_MEM_SIZE (64U * 1024U)          /**< [bytes] */
 
     /** Size of the memory expand for `lv_malloc()` in bytes */
     #define LV_MEM_POOL_EXPAND_SIZE 0
@@ -82,6 +89,8 @@
     #define LV_MEM_ADR 0     /**< 0: unused*/
     /* Instead of an address give a memory allocator that will be called to get a memory pool for LVGL. E.g. my_malloc */
     #if LV_MEM_ADR == 0
+        /* Pula LVGL pobierana z PSRAM zamiast statycznej tablicy w RAM wewnetrznym.
+         * Wymaga wlaczonego OPI PSRAM w Arduino IDE (i tak wymagane przez ten projekt). */
         #ifndef LV_MEM_POOL_INCLUDE
         #define LV_MEM_POOL_INCLUDE <esp_heap_caps.h>
         #define LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM)

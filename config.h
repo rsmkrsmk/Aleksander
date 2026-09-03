@@ -16,6 +16,12 @@ constexpr int BIRTH_YEAR = 2026;
 constexpr int ML_MIN = 10;
 constexpr int ML_MAX = 120;
 constexpr int DEFAULT_ML = 30;
+// Zakres wagi dziecka w gramach (ekran WAGA i walidacja API). Domyslnie 3700 g.
+constexpr int WEIGHT_MIN_G = 2000;
+constexpr int WEIGHT_MAX_G = 15000;
+constexpr int DEFAULT_WEIGHT_G = 3700;
+// Waga urodzeniowa (g) — punkt startowy krzywej oczekiwanej wagi w panelu WWW.
+constexpr int BIRTH_WEIGHT_G = 3080;
 // Progi belki licznika na ekranie glownym (minuty od ostatniego karmienia).
 constexpr uint16_t COUNTER_WARN_MIN = 180;  // zolty pas — zbliza sie pora
 constexpr uint16_t COUNTER_BLINK_MIN = 240; // miganie biel/czerien — czas na karmienie

@@ -54,9 +54,9 @@ Arduino_XCA9554SWSPI *expander = new Arduino_XCA9554SWSPI(7, 0, 2, 1, &Wire, 0x2
 esp_lcd_panel_handle_t rgbPanel = nullptr;
 SemaphoreHandle_t rgbColorTransferDoneSemaphore = nullptr;
 void *rgbFrameBuffer0 = nullptr;
+void *rgbFrameBuffer1 = nullptr;
 
 lv_display_t *displayDriver = nullptr;
-lv_color16_t *displayBuffer = nullptr;
 lv_indev_t *touchDriver = nullptr;
 
 // Oficjalny sterownik GT911 z biblioteki SensorLib wymagany dla dotyku Waveshare.
@@ -135,6 +135,13 @@ lv_obj_t *homeCounterBar = nullptr;
 lv_obj_t *ssClockCard = nullptr;
 lv_obj_t *ssWeatherCard = nullptr;
 lv_obj_t *ssHourLabels[3] = {nullptr, nullptr, nullptr};
+lv_obj_t *ssNextFeedLabel = nullptr;   // (nieuzywany osobno) — scalony w linii karmienia
+lv_obj_t *ssDayBandCard = nullptr;     // karta statystyk dnia
+lv_obj_t *ssDayBandTrack = nullptr;    // (alias karty statystyk)
+lv_obj_t *ssStatValue[3] = {nullptr, nullptr, nullptr}; // KARMIENIA / NAJDL. PRZERWA / SR. PRZERWA
+int ssDayBandStamp = -1;               // sygnatura ostatnio odswiezonych statystyk
+String ssRenderedNextFeed;
+String ssRenderedStat[3];
 int ssLastIconCode = -999;
 lv_timer_t *ssClockTimer = nullptr;
 String ssRenderedClock;
@@ -150,10 +157,14 @@ String ssRenderedHours[3];
 lv_obj_t *feedingCard = nullptr;
 lv_obj_t *milkCard = nullptr;
 lv_obj_t *feedFormButton = nullptr;
-lv_obj_t *diaperButton = nullptr;
-lv_obj_t *pumpingHomeButton = nullptr;
+lv_obj_t *otherHomeButton = nullptr;   // "INNE" -> ekran z pielucha i odciagiem
+lv_obj_t *weightHomeButton = nullptr;  // "WAGA" -> ekran wpisu wagi
 lv_obj_t *calendarButton = nullptr;
 lv_obj_t *chartButton = nullptr;
+
+// Waga: aktualny wybor w gramach na ekranie WAGA (domyslnie DEFAULT_WEIGHT_G).
+int selectedWeightG = DEFAULT_WEIGHT_G;
+lv_obj_t *weightValueLabel = nullptr;
 
 // Zagregowana statystyka jednego dnia — zasila ekran główny, kalendarz,
 // PODSUMOWANIE oraz API WWW. Rozpoznaje wszystkie typy wpisów CSV.
@@ -169,6 +180,7 @@ struct DaySummary {
   int diaperDirty;
   int pumpingMl;
   bool vitaminD;
+  int weightG;   // ostatnia zapisana waga danego dnia (g); 0 = brak
 };
 
 // Grupa pogody dla ikony/opisu wygaszacza (kody wttr.in mapowane na WMO).
@@ -197,6 +209,13 @@ String backupFileName;
 bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
+int lastWeightG = 0;                // ostatnia zapisana waga (g); 0 = brak wpisu
+int avgFeedingGapMin = 0;           // sredni odstep miedzy karmieniami DZIS (min); 0 = za malo danych
+int longestFeedingGapMin = 0;       // najdluzsza przerwa miedzy karmieniami DZIS (min)
+int todayFeedingCount = 0;          // liczba karmien DZIS (tylko typ KARMIENIE)
+time_t nextFeedingEta = 0;          // przewidywany czas nastepnego karmienia = ostatnie + 4h
+bool sleepInProgress = false;       // true gdy ostatnie zdarzenie snu to SEN_START (dziecko spi)
+time_t sleepStartedTime = 0;        // czas rozpoczecia biezacego snu (0 = nie spi)
 bool deleteModeActive = false;         // tryb wyboru wpisu do usuniecia
 int pendingDeleteIndex = -1;            // indeks oczekujacy na potwierdzenie (-1 = brak)
 
@@ -223,6 +242,8 @@ lv_obj_t *dayDetailScreen = nullptr;
 lv_obj_t *chartScreen = nullptr;
 lv_obj_t *pumpingScreen = nullptr;
 lv_obj_t *diaperScreen = nullptr;
+lv_obj_t *otherScreen = nullptr;   // ekran INNE: pielucha + odciag pokarmu
+lv_obj_t *weightScreen = nullptr;  // ekran WAGA: wybor wagi w gramach
 lv_obj_t *homeLedWifi = nullptr;
 lv_obj_t *homeLedMemory = nullptr;
 lv_obj_t *homeLedTime = nullptr;
@@ -280,6 +301,9 @@ void retryWiFiConnection();
 bool syncTimeFromNTP();
 bool initialiseStorage();
 void loadLatestEntries();
+void recomputeFeedingRhythm();
+String nextFeedingClock();
+String formatGapShort(int minutes);
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
 bool isMilkType(const String &entryType);
 String milkTypeLabel(const String &entryType);
@@ -326,11 +350,22 @@ void diaperQuickEvent(lv_event_t *event);
 void pumpingOpenEvent(lv_event_t *event);
 void pumpingSaveEvent(lv_event_t *event);
 void vitaminToggleEvent(lv_event_t *event);
+void createDiaperScreen();
+void createPumpingScreen();
+void createOtherScreen();
+void otherOpenEvent(lv_event_t *event);
+void backToOtherEvent(lv_event_t *event);
+void sleepToggleEvent(lv_event_t *event);
+void createWeightScreen();
+void weightOpenEvent(lv_event_t *event);
+void weightSaveEvent(lv_event_t *event);
+void weightStepEvent(lv_event_t *event);
 
 void startWebServer();
 void handleWebRoot();
 void handleApiStatus();
 void handleApiEntries();
+void handleApiWeightSeries();
 void handleApiEntry();
 void handleApiDeleteEntry();
 void handleApiSendBackup();
@@ -386,7 +421,7 @@ void prepareScreen(lv_obj_t *screen) {
 
 void createReusableScreenRoots() {
   lv_obj_t **screens[] = {&homeScreen, &formScreen, &calendarScreen, &dayDetailScreen, &chartScreen,
-                          &pumpingScreen, &diaperScreen};
+                          &pumpingScreen, &diaperScreen, &otherScreen, &weightScreen};
   for (lv_obj_t **screen : screens) {
     *screen = lv_obj_create(nullptr);
     prepareScreen(*screen);
@@ -579,9 +614,9 @@ bool initialiseNativeRgbPanel() {
   config.timings.flags.pclk_idle_high = 0;
   config.data_width = 16;
   config.bits_per_pixel = 16;
-  // Single framebuffer w PSRAM + dwa wewnętrzne bufory bounce DMA.
-  // Ten tryb ogranicza underrun PSRAM podczas renderowania LVGL.
-  config.num_fbs = 1;
+  // Dwa framebuffery w PSRAM (double_fb) + bufory bounce DMA. LVGL renderuje
+  // do niewidocznego bufora, esp_lcd przelacza je bez kopiowania i bez tearingu.
+  config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
   // 30 linii × 480 = 14400 pikseli; 230400 / 14400 = 16 (calkowite).
   // DMA uzywa 2 buforow bounce: 2 × 30 × 480 × 2 = 57.6 KB.
@@ -613,7 +648,7 @@ bool initialiseNativeRgbPanel() {
   config.flags.disp_active_low = 1;
   config.flags.refresh_on_demand = 0;
   config.flags.fb_in_psram = 1;
-  config.flags.double_fb = 0;
+  config.flags.double_fb = 1;
   config.flags.no_fb = 0;
   config.flags.bb_invalidate_cache = 1;
   
@@ -644,8 +679,8 @@ bool initialiseNativeRgbPanel() {
     Serial.printf("LCD: inicjalizacja panelu blad 0x%x.\n", static_cast<unsigned>(error));
     return false;
   }
-  error = esp_lcd_rgb_panel_get_frame_buffer(rgbPanel, 1, &rgbFrameBuffer0);
-  if (error != ESP_OK || !rgbFrameBuffer0) {
+  error = esp_lcd_rgb_panel_get_frame_buffer(rgbPanel, 2, &rgbFrameBuffer0, &rgbFrameBuffer1);
+  if (error != ESP_OK || !rgbFrameBuffer0 || !rgbFrameBuffer1) {
     Serial.printf("LCD: pobranie dwoch framebufferow blad 0x%x.\n", static_cast<unsigned>(error));
     return false;
   }
@@ -655,20 +690,16 @@ bool initialiseNativeRgbPanel() {
 }
 
 void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMap) {
-  // PARTIAL render mode przekazuje tylko zmieniony obszar. Bounce buffery
-  // po stronie esp_lcd chronią odczyt DMA przed krótkimi skokami PSRAM.
-  const int x1 = area->x1;
-  const int y1 = area->y1;
-  const int x2 = area->x2 + 1;
-  const int y2 = area->y2 + 1;
-  const esp_err_t error = esp_lcd_panel_draw_bitmap(
-      rgbPanel, x1, y1, x2, y2, pixelMap);
-  if (error != ESP_OK) {
-    Serial.printf("LCD: draw_bitmap blad 0x%x.\n", static_cast<unsigned>(error));
-  }
-  if (error == ESP_OK && rgbColorTransferDoneSemaphore &&
-      xSemaphoreTake(rgbColorTransferDoneSemaphore, pdMS_TO_TICKS(250)) != pdTRUE) {
-    Serial.println("LCD: timeout zakonczenia kopiowania klatki.");
+  // DIRECT render mode: LVGL renderuje calą klatkę do niewidocznego framebuffera,
+  // ktorego adres przekazuje w pixelMap. draw_bitmap na pelnym obszarze przelacza
+  // framebuffery po stronie esp_lcd (bez kopiowania i bez tearingu przy krawedzi).
+  // Odrysowujemy dopiero na ostatnim wywolaniu flush danej klatki.
+  if (lv_display_flush_is_last(display)) {
+    const esp_err_t error = esp_lcd_panel_draw_bitmap(
+        rgbPanel, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, pixelMap);
+    if (error != ESP_OK) {
+      Serial.printf("LCD: draw_bitmap blad 0x%x.\n", static_cast<unsigned>(error));
+    }
   }
   lv_display_flush_ready(display);
 }
@@ -890,6 +921,9 @@ void loadLatestEntries() {
   lastMilk = "Brak zapisanego wpisu";
   lastFeedingTime = 0;
   lastMilkTime = 0;
+  lastWeightG = 0;
+  sleepInProgress = false;
+  sleepStartedTime = 0;
   if (!storageReady) return;
 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
@@ -911,8 +945,83 @@ void loadLatestEntries() {
       lastMilk = formatEntryForUi(line);
       lastMilkTime = stamp;
     }
+    if (entry.type == "WAGA") {
+      lastWeightG = entry.ml; // gramy zapisane w kolumnie ml
+    }
+    if (entry.type == "SEN_START") {
+      sleepInProgress = true;
+      sleepStartedTime = stamp;
+    } else if (entry.type == "SEN_STOP") {
+      sleepInProgress = false;
+      sleepStartedTime = 0;
+    }
   }
   file.close();
+  recomputeFeedingRhythm(); // odswiez sugestie nastepnego karmienia
+}
+
+// Statystyki karmien DZIS (tylko typ KARMIENIE): liczba, najdluzsza i srednia
+// przerwa. Nastepne karmienie liczone SZTYWNO jako ostatnie + 4 h (COUNTER_BLINK_MIN).
+// Jeden przebieg pliku dnia.
+void recomputeFeedingRhythm() {
+  avgFeedingGapMin = 0;
+  longestFeedingGapMin = 0;
+  todayFeedingCount = 0;
+  nextFeedingEta = 0;
+
+  // Nastepne karmienie = ostatnie + 4 h (niezaleznie od danych statystycznych).
+  if (lastFeedingTime) nextFeedingEta = lastFeedingTime + static_cast<time_t>(COUNTER_BLINK_MIN) * 60;
+
+  if (!storageReady) return;
+  const String today = dateIso(dayOffsetFromToday(0));
+
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) return;
+  file.readStringUntil('\n');
+  time_t prev = 0;
+  long sumMin = 0;
+  int gapCount = 0;
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    if (!line.startsWith(today + ",")) continue;
+    CsvEntry entry;
+    if (!parseCsvLine(line, entry)) continue;
+    if (entry.type != "KARMIENIE") continue;
+    ++todayFeedingCount;
+    const time_t stamp = csvDateTimeToEpoch(entry.date, entry.time);
+    if (prev > 0) {
+      const long gap = static_cast<long>(difftime(stamp, prev) / 60);
+      if (gap > 0) {
+        sumMin += gap;
+        ++gapCount;
+        if (gap > longestFeedingGapMin) longestFeedingGapMin = static_cast<int>(gap);
+      }
+    }
+    prev = stamp;
+  }
+  file.close();
+
+  if (gapCount >= 1) avgFeedingGapMin = static_cast<int>(sumMin / gapCount);
+}
+
+// Krotki format przerwy "Xh Ymin" / "Ymin".
+String formatGapShort(int minutes) {
+  if (minutes <= 0) return String("-");
+  const int h = minutes / 60, m = minutes % 60;
+  if (h == 0) return String(m) + "min";
+  return String(h) + "h " + m + "min";
+}
+
+// Godzina nastepnego karmienia jako "HH:MM" (ostatnie + 4h). Pusty gdy brak danych.
+String nextFeedingClock() {
+  if (!nextFeedingEta) return String();
+  struct tm t;
+  localtime_r(&nextFeedingEta, &t);
+  char hhmm[6];
+  strftime(hhmm, sizeof(hhmm), "%H:%M", &t);
+  return String(hhmm);
 }
 
 // --------------------------- Cofanie ostatniego wpisu ----------------------------
@@ -934,60 +1043,52 @@ bool deleteEntryByIndex(int entryIndex, String &removedDescription) {
   removedDescription = "";
   if (!storageReady || entryIndex < 0) return false;
 
+  // Przetwarzanie STRUMIENIOWE wiersz po wierszu: nie trzymamy calego pliku w RAM.
+  // Jeden przebieg zrodla -> zapis do pliku tymczasowego z pominieciem wybranego
+  // wiersza. Dzieki temu operacja dziala niezaleznie od rozmiaru historii i nie
+  // tworzy duzego, fragmentujacego bloku w RAM wewnetrznym (dawniej caly plik + substringi).
   File src = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!src) return false;
 
-  size_t fileSize = src.size();
-  size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (fileSize > freeHeap * 9 / 10) {
-    Serial.printf("Usun: plik %u B za duzy dla wolnego heapa %u B.\n",
-                  static_cast<unsigned>(fileSize), static_cast<unsigned>(freeHeap));
+  File dst = LittleFS.open("/karmienia.tmp", FILE_WRITE);
+  if (!dst) {
     src.close();
     return false;
   }
+  dst.println("data,godzina,typ,ml,piers_lewa_min,piers_prawa_min");
 
-  String body;
-  int dataCount = 0;
-  src.readStringUntil('\n');
+  // WAZNE: lineIndex z panelu WWW (handleApiEntries) to fizyczna pozycja wiersza po
+  // naglowku, liczona dla KAZDEJ linii — takze pustej i nieparsowalnej. Musimy liczyc
+  // tak samo, inaczej usuniemy niewlasciwy wpis. Zachowujemy wiersze bez zmian
+  // (bez trim), pomijamy wylacznie ten o pasujacym indeksie.
+  src.readStringUntil('\n'); // pomijamy naglowek zrodla
+  int dataIndex = 0;
+  bool removedFound = false;
   while (src.available()) {
     String line = src.readStringUntil('\n');
-    line.trim();
-    if (line.length() == 0) continue;
-    if (dataCount) body += '\n';
-    body += line;
-    ++dataCount;
+    // Usuwamy tylko koncowy CR/LF, bez naruszania tresci wiersza.
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
+    if (dataIndex == entryIndex) {
+      String trimmed = line;
+      trimmed.trim();
+      CsvEntry removed;
+      if (parseCsvLine(trimmed, removed)) removedDescription = describeCsvEntry(removed);
+      removedFound = true;
+      // pomijamy ten wiersz w zapisie
+    } else {
+      dst.println(line);
+    }
+    ++dataIndex;
   }
   src.close();
-
-  if (entryIndex >= dataCount) return false;
-
-  // Znajdz n-ty wpis w body
-  int entryStart = 0;
-  for (int i = 0; i < entryIndex; ++i) {
-    int nl = body.indexOf('\n', entryStart);
-    if (nl < 0) return false;
-    entryStart = nl + 1;
-  }
-  int entryEnd = body.indexOf('\n', entryStart);
-  String removedLine = entryEnd < 0 ? body.substring(entryStart) : body.substring(entryStart, entryEnd);
-  CsvEntry removed;
-  if (!parseCsvLine(removedLine, removed)) return false;
-  removedDescription = describeCsvEntry(removed);
-
-  // Buduj nowy plik bez tego wiersza
-  File dst = LittleFS.open("/karmienia.tmp", FILE_WRITE);
-  if (!dst) return false;
-  dst.println("data,godzina,typ,ml,piers_lewa_min,piers_prawa_min");
-  int pos = 0;
-  for (int i = 0; i < dataCount; ++i) {
-    int nl = body.indexOf('\n', pos);
-    String one = nl < 0 ? body.substring(pos) : body.substring(pos, nl);
-    one.trim();
-    if (i != entryIndex && one.length()) dst.println(one);
-    if (nl < 0) break;
-    pos = nl + 1;
-  }
   dst.close();
+
+  if (!removedFound || entryIndex >= dataIndex) {
+    LittleFS.remove("/karmienia.tmp");
+    return false;
+  }
 
   if (!LittleFS.rename("/karmienia.tmp", DATA_FILE_PATH)) {
     LittleFS.remove("/karmienia.tmp");
@@ -1162,6 +1263,7 @@ void refreshDayStats() {
     s.diaperDirty = 0;
     s.pumpingMl = 0;
     s.vitaminD = false;
+    s.weightG = 0;
   }
   if (storageReady) {
     File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
@@ -1193,6 +1295,8 @@ void refreshDayStats() {
             s.pumpingMl += entry.ml;
           } else if (entry.type == "WITAMINA_D") {
             s.vitaminD = true;
+          } else if (entry.type == "WAGA") {
+            s.weightG = entry.ml; // ostatni wpis danego dnia nadpisuje (kolejnosc chronologiczna)
           }
           break;
         }
@@ -1225,6 +1329,7 @@ void dayStats(time_t day, DaySummary &out) {
   out.diaperDirty = 0;
   out.pumpingMl = 0;
   out.vitaminD = false;
+  out.weightG = 0;
   const int index = statsIndexForDay(day);
   if (index < 0) return;
   out = statsData[index];
@@ -1352,7 +1457,10 @@ void handleWebRoot() {
 void handleApiStatus() {
   const time_t now = time(nullptr);
   String payload;
-  payload.reserve(6500); // status + 5 dni kalendarza + sysinfo
+  // Realny rozmiar to ~1.8-2.2 KB (5 dni kalendarza + status + sysinfo). Rezerwacja
+  // 2560 B pokrywa go z zapasem bez wczesniejszego blokowania 6.5 KB przy kazdym
+  // pollingu co 10 s. Jedna rezerwacja = brak serii realloc-ow fragmentujacych RAM.
+  payload.reserve(2560);
   payload = "{";
   payload += "\"now\":\"" + jsonEscape(timeIsValid ? formatDateTime(now) : "Brak potwierdzonego czasu") + "\",";
   payload += "\"nowIso\":\"" + jsonEscape(webDateTime(now)) + "\",";
@@ -1364,12 +1472,17 @@ void handleApiStatus() {
   payload += "\"lastMilk\":\"" + jsonEscape(lastMilk) + "\",";
   payload += "\"lastFeedingAgo\":\"" + jsonEscape(lastFeedingTime ? formatAgoText(lastFeedingTime) : String()) + "\",";
   payload += "\"lastFeedingAgeMin\":" + String(lastFeedingTime ? static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60) : -1) + ",";
+  payload += "\"avgFeedingGapMin\":" + String(avgFeedingGapMin) + ",";
+  payload += "\"nextFeedingIso\":\"" + jsonEscape(nextFeedingEta ? webDateTime(nextFeedingEta) : String()) + "\",";
+  payload += "\"sleepInProgress\":" + String(sleepInProgress ? "true" : "false") + ",";
   payload += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   payload += "\"storage\":" + String(storageReady ? "true" : "false") + ",";
   payload += "\"timeValid\":" + String(timeIsValid ? "true" : "false") + ",";
   payload += "\"minMl\":" + String(ML_MIN) + ",";
   payload += "\"maxMl\":" + String(ML_MAX) + ",";
   payload += "\"defaultMl\":" + String(DEFAULT_ML) + ",";
+  payload += "\"birthWeightG\":" + String(BIRTH_WEIGHT_G) + ",";
+  payload += "\"lastWeightG\":" + String(lastWeightG) + ",";
   payload += "\"calendar\":[";
   for (uint8_t i = 0; i < 5; ++i) {
     const time_t day = dayOffsetFromToday(i);
@@ -1382,6 +1495,7 @@ void handleApiStatus() {
                ",\"piersLeftMin\":" + String(s.piersLeftMin) + ",\"piersRightMin\":" + String(s.piersRightMin) +
                ",\"diaperWet\":" + String(s.diaperWet) + ",\"diaperDirty\":" + String(s.diaperDirty) +
                ",\"pumpingMl\":" + String(s.pumpingMl) + ",\"vitaminD\":" + String(s.vitaminD ? "true" : "false") +
+               ",\"weightG\":" + String(s.weightG) +
                "}";
   }
   payload += "],";
@@ -1442,6 +1556,65 @@ void handleApiEntries() {
   sendJson(200, payload);
 }
 
+// Dzien zycia (0 = dzien urodzenia) dla podanej daty CSV "RRRR-MM-DD".
+long dayOfLifeForDate(const String &isoDate) {
+  if (isoDate.length() != 10) return -1;
+  struct tm d = {};
+  d.tm_year = isoDate.substring(0, 4).toInt() - 1900;
+  d.tm_mon = isoDate.substring(5, 7).toInt() - 1;
+  d.tm_mday = isoDate.substring(8, 10).toInt();
+  d.tm_hour = 12;
+  d.tm_isdst = -1;
+  struct tm birth = {};
+  birth.tm_year = BIRTH_YEAR - 1900;
+  birth.tm_mon = BIRTH_MONTH - 1;
+  birth.tm_mday = BIRTH_DAY;
+  birth.tm_hour = 12;
+  birth.tm_isdst = -1;
+  const time_t td = mktime(&d);
+  const time_t tb = mktime(&birth);
+  return lround(difftime(td, tb) / 86400.0);
+}
+
+// Seria pomiarow wagi do wykresu w panelu WWW: [{day, date, g}] po dniu zycia.
+// Jeden przebieg pliku, budowa strumieniowa (bez trzymania calego CSV w RAM).
+void handleApiWeightSeries() {
+  if (!storageReady) {
+    sendJson(503, "{\"message\":\"Pamiec wewnetrzna jest niedostepna.\"}");
+    return;
+  }
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) {
+    sendJson(500, "{\"message\":\"Nie mozna otworzyc historii.\"}");
+    return;
+  }
+  webServer.sendHeader("Cache-Control", "no-store, max-age=0");
+  webServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  webServer.send(200, "application/json; charset=utf-8", "");
+  webServer.sendContent("{\"birthWeightG\":");
+  webServer.sendContent(String(BIRTH_WEIGHT_G));
+  webServer.sendContent(",\"points\":[");
+  bool first = true;
+  file.readStringUntil('\n');
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    CsvEntry entry;
+    if (!parseCsvLine(line, entry)) continue;
+    if (entry.type != "WAGA") continue;
+    const long dol = dayOfLifeForDate(entry.date);
+    if (dol < 0) continue;
+    String obj = first ? "" : ",";
+    first = false;
+    obj += "{\"day\":" + String(dol) + ",\"date\":\"" + entry.date + "\",\"g\":" + String(entry.ml) + "}";
+    webServer.sendContent(obj);
+  }
+  file.close();
+  webServer.sendContent("]}");
+  webServer.sendContent("");
+}
+
 void handleApiEntry() {
   struct tm currentTime;
   if (!currentLocalTime(currentTime)) {
@@ -1477,6 +1650,20 @@ void handleApiEntry() {
     }
     updateHomeInformation();
     sendJson(201, "{\"message\":\"Wpis mleka zapisany w pamieci urzadzenia.\"}");
+    return;
+  }
+  // Waga: wartosc w gramach (osobny zakres, nie ML_MAX).
+  if (type == "WAGA") {
+    if (ml < WEIGHT_MIN_G || ml > WEIGHT_MAX_G) {
+      sendJson(400, "{\"message\":\"Nieprawidlowa waga (gramy).\"}");
+      return;
+    }
+    if (!appendEntry("WAGA", when, ml)) {
+      sendJson(500, "{\"message\":\"Nie udalo sie zapisac wagi.\"}");
+      return;
+    }
+    updateHomeInformation();
+    sendJson(201, "{\"message\":\"Zapisano wage.\"}");
     return;
   }
   // Pompowanie i zdarzenia jednym dotknieciem przez panel WWW.
@@ -1589,9 +1776,29 @@ void handleApiEvent() {
   }
   const String type = webServer.arg("type");
   const bool validType = type == "PIELUCHA_MOKRA" || type == "PIELUCHA_BRUDNA" ||
-                         type == "WITAMINA_D" || type == "ODCIAGANIE";
+                         type == "WITAMINA_D" || type == "ODCIAGANIE" || type == "WAGA" ||
+                         type == "SEN_START" || type == "SEN_STOP";
   if (!validType) {
     sendJson(400, "{\"message\":\"Nieznany typ zdarzenia.\"}");
+    return;
+  }
+
+  time_t when = time(nullptr);
+  if (webServer.hasArg("when")) parseWebDateTime(webServer.arg("when"), when);
+
+  // Waga: wartosc w gramach (osobny zakres, poza ML_MAX).
+  if (type == "WAGA") {
+    const int grams = webServer.arg("ml").toInt();
+    if (grams < WEIGHT_MIN_G || grams > WEIGHT_MAX_G) {
+      sendJson(400, "{\"message\":\"Nieprawidlowa waga (gramy).\"}");
+      return;
+    }
+    if (!appendEntry("WAGA", when, grams)) {
+      sendJson(500, "{\"message\":\"Nie udalo sie zapisac wagi.\"}");
+      return;
+    }
+    updateHomeInformation();
+    sendJson(201, "{\"message\":\"Zapisano wage.\"}");
     return;
   }
 
@@ -1600,9 +1807,6 @@ void handleApiEvent() {
     sendJson(400, "{\"message\":\"Podaj ilosc odciagnietego mleka.\"}");
     return;
   }
-
-  time_t when = time(nullptr);
-  if (webServer.hasArg("when")) parseWebDateTime(webServer.arg("when"), when);
 
   if (type == "WITAMINA_D") {
     DaySummary s;
@@ -1772,6 +1976,7 @@ void startWebServer() {
     webServer.on("/", HTTP_GET, handleWebRoot);
     webServer.on("/api/status", HTTP_GET, handleApiStatus);
     webServer.on("/api/entries", HTTP_GET, handleApiEntries);
+    webServer.on("/api/weight-series", HTTP_GET, handleApiWeightSeries);
     webServer.on("/api/entry", HTTP_POST, handleApiEntry);
     webServer.on("/api/delete-entry", HTTP_POST, handleApiDeleteEntry);
     webServer.on("/api/send-backup", HTTP_POST, handleApiSendBackup);
@@ -2213,7 +2418,7 @@ void createPumpingScreen() {
 
   createLabel(pumpingScreen, "ODCIAGANIE MLEKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_t *backButton = createButton(pumpingScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(backButton, backToOtherEvent, LV_EVENT_CLICKED, nullptr);
 
   lv_obj_t *card = createCard(pumpingScreen, 14, 110, 452, 140);
   pumpingValueLabel = createLabel(card, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 12);
@@ -2243,7 +2448,7 @@ void createDiaperScreen() {
 
   createLabel(diaperScreen, "PIELUCHA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_t *backButton = createButton(diaperScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(backButton, backToOtherEvent, LV_EVENT_CLICKED, nullptr);
 
   static char TYPE_WET[] = "PIELUCHA_MOKRA";
   static char TYPE_DIRTY[] = "PIELUCHA_BRUDNA";
@@ -2254,6 +2459,120 @@ void createDiaperScreen() {
   createLabel(diaperScreen, "Zapisuje biezacy czas jednym dotyknieciem.", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 330);
 
   loadReusableScreen(diaperScreen);
+}
+
+// Powrot z ekranow PIELUCHA/ODCIAGANIE do wspolnego ekranu INNE.
+void backToOtherEvent(lv_event_t *event) {
+  createOtherScreen();
+}
+
+// Ekran INNE: grupuje szybkie akcje PIELUCHA i ODCIAG POKARMU pod jednym miejscem.
+// Sen jednym dotknieciem: przelacza ZASNAL/OBUDZIL SIE wg biezacego stanu.
+void sleepToggleEvent(lv_event_t *event) {
+  if (!timeIsValid || !storageReady) return;
+  appendEntry(sleepInProgress ? "SEN_STOP" : "SEN_START", time(nullptr), 0);
+  deleteModeActive = false;
+  createHomeScreen();
+}
+
+void createOtherScreen() {
+  resetReusableScreen(otherScreen);
+
+  createLabel(otherScreen, "INNE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *backButton = createButton(otherScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
+  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 96, 452, 74, COLOR_BLUE);
+  lv_obj_add_event_cb(diaperBtn, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 180, 452, 74, COLOR_ORANGE);
+  lv_obj_add_event_cb(pumpingBtn, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
+  // Przycisk snu zmienia tekst/kolor zaleznie od tego, czy dziecko aktualnie spi.
+  lv_obj_t *sleepBtn = createButton(otherScreen,
+                                    sleepInProgress ? "OBUDZIL SIE" : "ZASNAL",
+                                    14, 264, 452, 74,
+                                    sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
+  lv_obj_add_event_cb(sleepBtn, sleepToggleEvent, LV_EVENT_CLICKED, nullptr);
+  createLabel(otherScreen,
+              sleepInProgress ? "Dziecko spi — dotknij OBUDZIL SIE po przebudzeniu."
+                              : "Pielucha, odciaganie, sen.",
+              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 350);
+
+  loadReusableScreen(otherScreen);
+}
+
+// Ekran WAGA: wybor wagi dziecka w gramach i zapis wpisu typu WAGA.
+void weightStepEvent(lv_event_t *event) {
+  const int delta = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
+  selectedWeightG = constrain(selectedWeightG + delta, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  if (weightValueLabel) lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
+}
+
+void weightSliderEvent(lv_event_t *event) {
+  lv_obj_t *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+  const int raw = lv_slider_get_value(slider);
+  // Skok co 10 g.
+  int snapped = ((raw + 5) / 10) * 10;
+  snapped = constrain(snapped, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  lv_slider_set_value(slider, snapped, LV_ANIM_OFF);
+  selectedWeightG = snapped;
+  if (weightValueLabel) lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
+}
+
+void weightSaveEvent(lv_event_t *event) {
+  if (!timeIsValid || !storageReady) return;
+  appendEntry("WAGA", time(nullptr), selectedWeightG);
+  deleteModeActive = false;
+  createHomeScreen();
+}
+
+void createWeightScreen() {
+  resetReusableScreen(weightScreen);
+  weightValueLabel = nullptr;
+
+  createLabel(weightScreen, "WAGA DZIECKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *backButton = createButton(weightScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
+  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *card = createCard(weightScreen, 14, 96, 452, 168);
+  weightValueLabel = createLabel(card, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_text_font(weightValueLabel, &lv_font_montserrat_36, 0);
+  lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
+
+  // Precyzyjne kroki -10/+10 g.
+  lv_obj_t *minus10 = createButton(card, "-10", 8, 66, 84, 44, COLOR_MUTED);
+  lv_obj_add_event_cb(minus10, weightStepEvent, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(-10)));
+  lv_obj_t *plus10 = createButton(card, "+10", 336, 66, 84, 44, COLOR_GREEN);
+  lv_obj_add_event_cb(plus10, weightStepEvent, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(10)));
+
+  lv_obj_t *slider = lv_slider_create(card);
+  lv_obj_set_pos(slider, 100, 80);
+  lv_obj_set_size(slider, 228, 12);
+  lv_slider_set_range(slider, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  lv_slider_set_value(slider, selectedWeightG, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(slider, COLOR_BORDER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(slider, COLOR_GREEN, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(slider, COLOR_GREEN, LV_PART_KNOB);
+  lv_obj_add_event_cb(slider, weightSliderEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+  createLabel(card, "2000 g", COLOR_MUTED, LV_ALIGN_BOTTOM_LEFT, 12, -6);
+  createLabel(card, "15000 g", COLOR_MUTED, LV_ALIGN_BOTTOM_RIGHT, -12, -6);
+
+  lv_obj_t *saveButton = createButton(weightScreen, "ZAPISZ WAGE", 14, 280, 290, 50, COLOR_GREEN);
+  lv_obj_add_event_cb(saveButton, weightSaveEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *cancelButton = createButton(weightScreen, "ANULUJ", 316, 280, 150, 50, COLOR_MUTED);
+  lv_obj_add_event_cb(cancelButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  loadReusableScreen(weightScreen);
+}
+
+void otherOpenEvent(lv_event_t *event) {
+  createOtherScreen();
+}
+
+void weightOpenEvent(lv_event_t *event) {
+  // Zacznij od ostatniej znanej wagi (jesli jest), inaczej wartosc domyslna.
+  if (lastWeightG > 0) selectedWeightG = constrain(lastWeightG, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  else selectedWeightG = DEFAULT_WEIGHT_G;
+  createWeightScreen();
 }
 
 void createCalendarScreen() {
@@ -2396,10 +2715,10 @@ void createHomeScreen() {
   feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 268, 452, 48, COLOR_ORANGE);
   lv_obj_add_event_cb(feedFormButton, feedingButtonEvent, LV_EVENT_CLICKED, nullptr);
 
-  diaperButton = createButton(homeScreen, "PIELUCHA", 14, 324, 220, 40, COLOR_BLUE);
-  lv_obj_add_event_cb(diaperButton, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
-  pumpingHomeButton = createButton(homeScreen, "ODCIAG POKARMU", 246, 324, 220, 40, COLOR_BLUE);
-  lv_obj_add_event_cb(pumpingHomeButton, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
+  otherHomeButton = createButton(homeScreen, "INNE", 14, 324, 220, 40, COLOR_BLUE);
+  lv_obj_add_event_cb(otherHomeButton, otherOpenEvent, LV_EVENT_CLICKED, nullptr);
+  weightHomeButton = createButton(homeScreen, "WAGA", 246, 324, 220, 40, COLOR_BLUE);
+  lv_obj_add_event_cb(weightHomeButton, weightOpenEvent, LV_EVENT_CLICKED, nullptr);
 
   calendarButton = createButton(homeScreen, "KALENDARZ", 14, 372, 220, 40, COLOR_BLUE);
   lv_obj_add_event_cb(calendarButton, calendarButtonEvent, LV_EVENT_CLICKED, nullptr);
@@ -2408,52 +2727,112 @@ void createHomeScreen() {
   lv_obj_add_event_cb(chartButton, chartButtonEvent, LV_EVENT_CLICKED, nullptr);
 
   // ===================== WYGASZACZ =====================
-  // Karta zegara: zegar + data + ostatnie karmienie
-  ssClockCard = createCard(homeScreen, 14, 152, 452, 140);
+  // Uklad (gora ekranu tipCard/ageCard 44..144 pozostaja widoczne):
+  //   Karta zegara      150..250  (zegar + data + ostatnie/nastepne karmienie)
+  //   Pasmo doby        256..300  (karmienia/pieluchy na osi 0-24h)
+  //   Karta pogody      306..470  (ikona + temp + opis + min/max + 3h + ubior)
 
-  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 8);
+  // ===================== WYGASZACZ (nowy uklad) =====================
+  //   Karta zegara      150..238  (88; zegar + data u gory, linia karmienia nizej)
+  //   Karta statystyk   244..292  (48; chudszy pasek 3 liczb)
+  //   Karta pogody      298..474  (176; ikona+temp+opis+minmax, godziny, ubior)
+
+  // --- Karta zegara ---
+  ssClockCard = createCard(homeScreen, 14, 150, 452, 88);
+  lv_obj_set_style_pad_all(ssClockCard, 10, 0);
+
+  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
   lv_obj_set_style_text_font(ssClockLabel, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_CENTER, 0);
-  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 1, 9);
+  lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_LEFT, 0);
+  // ssClockShadowLabel nieuzywany (plaski zegar) — zostaje ukryty.
+  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
   lv_obj_set_style_text_font(ssClockShadowLabel, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_align(ssClockShadowLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
 
-  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 65);
-  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_14, 0);
+  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -4, 4);
+  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_align(ssDateLabel, LV_TEXT_ALIGN_RIGHT, 0);
 
-  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_TOP_MID, 0, 95);
+  // Jedna linia karmienia u dolu karty — odsunieta od zegara (font 14, pelna szerokosc).
+  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_BOTTOM_LEFT, 4, 0);
+  lv_obj_set_width(ssLastFeedingLabel, 424);
   lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_align(ssLastFeedingLabel, LV_TEXT_ALIGN_LEFT, 0);
+  // ssNextFeedLabel nieuzywany osobno (scalony w linii karmienia) — ukryty.
+  ssNextFeedLabel = createLabel(ssClockCard, "", COLOR_BLUE, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
+  lv_obj_add_flag(ssNextFeedLabel, LV_OBJ_FLAG_HIDDEN);
 
-  // Karta pogody: ikona, temperatura, opis, min/max, 3 godziny, porada ubioru
-  ssWeatherCard = createCard(homeScreen, 14, 290, 452, 180);
+  // --- Karta statystyk dnia (chudsza): 3 kafelki liczbowe ---
+  ssDayBandCard = createCard(homeScreen, 14, 244, 452, 48);
+  lv_obj_set_style_pad_all(ssDayBandCard, 6, 0);
+  // ssDayBandTrack sluzy teraz jako niewidoczny kontener 3 kafelkow statystyk.
+  ssDayBandTrack = ssDayBandCard;
+  ssDayBandStamp = -1;
+  const char *statCaps[3] = {"KARMIENIA", "NAJDL. PRZERWA", "SR. PRZERWA"};
+  const int statX[3] = {6, 156, 306};
+  for (uint8_t i = 0; i < 3; ++i) {
+    ssStatValue[i] = createLabel(ssDayBandCard, "-", COLOR_GREEN, LV_ALIGN_TOP_LEFT, statX[i], 0);
+    lv_obj_set_width(ssStatValue[i], 134);
+    lv_obj_set_style_text_align(ssStatValue[i], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(ssStatValue[i], &lv_font_montserrat_16, 0);
+    lv_obj_t *cap = createLabel(ssDayBandCard, statCaps[i], COLOR_MUTED, LV_ALIGN_TOP_LEFT, statX[i], 22);
+    lv_obj_set_width(cap, 134);
+    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(cap, &lv_font_montserrat_10, 0);
+    if (i > 0) {
+      lv_obj_t *sep = lv_obj_create(ssDayBandCard);
+      lv_obj_remove_style_all(sep);
+      lv_obj_set_size(sep, 1, 32);
+      lv_obj_set_pos(sep, statX[i] - 8, 2);
+      lv_obj_set_style_bg_color(sep, COLOR_BORDER, 0);
+      lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
+    }
+  }
+
+  // --- Karta pogody (wyzsza dzieki chudszej karcie statystyk) ---
+  ssWeatherCard = createCard(homeScreen, 14, 298, 452, 176);
 
   ssIconBox = lv_obj_create(ssWeatherCard);
   lv_obj_remove_style_all(ssIconBox);
-  lv_obj_set_size(ssIconBox, 100, 100);
-  lv_obj_set_pos(ssIconBox, 8, 8);
+  lv_obj_set_size(ssIconBox, 92, 92);
+  lv_obj_set_pos(ssIconBox, 4, 6);
   ssLastIconCode = -999;
 
-  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 120, 4);
+  // Gorna czesc: ikona (lewa) + temperatura/opis/minmax (prawa).
+  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 112, 2);
   lv_obj_set_style_text_font(ssTempLabel, &lv_font_montserrat_36, 0);
 
-  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 122, 54);
-  lv_obj_set_width(ssDescLabel, 310);
-  lv_label_set_long_mode(ssDescLabel, LV_LABEL_LONG_WRAP);
+  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 114, 44);
+  lv_obj_set_width(ssDescLabel, 320);
+  lv_obj_set_style_text_font(ssDescLabel, &lv_font_montserrat_14, 0);
+  lv_label_set_long_mode(ssDescLabel, LV_LABEL_LONG_DOT);
 
-  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 122, 82);
+  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 114, 66);
+  lv_obj_set_style_text_font(ssMinMaxLabel, &lv_font_montserrat_14, 0);
 
+  // Srodek: 3 kolejne godziny (pod ikona/temp, w jednym rzedzie).
   for (uint8_t i = 0; i < 3; ++i) {
     ssHourLabels[i] = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID,
-                                  static_cast<int>(-148 + i * 148), 116);
-    lv_obj_set_width(ssHourLabels[i], 136);
+                                  static_cast<int>(-140 + i * 140), 96);
+    lv_obj_set_width(ssHourLabels[i], 128);
     lv_obj_set_style_text_align(ssHourLabels[i], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(ssHourLabels[i], &lv_font_montserrat_12, 0);
   }
 
-  ssDressLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 148);
-  lv_obj_set_width(ssDressLabel, 428);
+  // Dol: porada ubioru na tonalnym pasku (jedna linia z przycieciem — nie zaslania).
+  lv_obj_t *dressBar = lv_obj_create(ssWeatherCard);
+  lv_obj_remove_style_all(dressBar);
+  lv_obj_set_size(dressBar, 428, 26);
+  lv_obj_align(dressBar, LV_ALIGN_BOTTOM_MID, 0, 2);
+  lv_obj_set_style_radius(dressBar, 9, 0);
+  lv_obj_set_style_bg_color(dressBar, COLOR_TONAL_GREEN, 0);
+  lv_obj_set_style_bg_opa(dressBar, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(dressBar, LV_OBJ_FLAG_SCROLLABLE);
+  ssDressLabel = createLabel(dressBar, "", COLOR_MUTED, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_width(ssDressLabel, 414);
   lv_obj_set_style_text_align(ssDressLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_font(ssDressLabel, &lv_font_montserrat_10, 0);
-  lv_label_set_long_mode(ssDressLabel, LV_LABEL_LONG_WRAP);
+  lv_label_set_long_mode(ssDressLabel, LV_LABEL_LONG_DOT);
 
   ssRenderedClock = "";
   ssRenderedDate = "";
@@ -2462,7 +2841,9 @@ void createHomeScreen() {
   ssRenderedMinMax = "";
   ssRenderedDress = "";
   ssRenderedLastFeeding = "";
+  ssRenderedNextFeed = "";
   for (uint8_t i = 0; i < 3; ++i) ssRenderedHours[i] = "";
+  for (uint8_t i = 0; i < 3; ++i) ssRenderedStat[i] = "";
 
   applyScreensaverVisibility();
 
@@ -2951,8 +3332,11 @@ String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight
   if (isMilkType(type)) return milkTypeLabel(type) + String(" ") + hhmm + " - " + ml + " ml";
   if (type == "PIELUCHA_MOKRA") return String("Pielucha mokra ") + hhmm;
   if (type == "PIELUCHA_BRUDNA") return String("Pielucha brudna ") + hhmm;
-  if (type == "ODCIAGANIE") return String("Odcaganie ") + hhmm + " - " + ml + " ml";
+  if (type == "ODCIAGANIE") return String("Odciaganie ") + hhmm + " - " + ml + " ml";
   if (type == "WITAMINA_D") return String("Witamina D podana ") + hhmm;
+  if (type == "WAGA") return String("Waga ") + hhmm + " - " + ml + " g";
+  if (type == "SEN_START") return String("Zasnal ") + hhmm;
+  if (type == "SEN_STOP") return String("Obudzil sie ") + hhmm;
   return type + " " + hhmm;
 }
 
@@ -3223,107 +3607,119 @@ void drawWeatherIcon(lv_obj_t *box, int wmoCode) {
     if (angleDeg) lv_obj_set_style_transform_angle(o, angleDeg * 10, 0);
   };
 
-  const bool night = nightModeActive;
-  const lv_color_t cSun = lv_color_hex(night ? 0xD9C24A : 0xE8A13A);
-  const lv_color_t cSunLight = lv_color_hex(night ? 0xE8D468 : 0xF5C060);
-  const lv_color_t cCloud = lv_color_mix(COLOR_CARD, COLOR_BLUE, LV_OPA_40);
-  const lv_color_t cCloudDark = lv_color_mix(COLOR_BLUE, COLOR_MUTED, LV_OPA_30);
-  const lv_color_t cRain = COLOR_BLUE;
-  const lv_color_t cYellow = COLOR_YELLOW;
-  const lv_color_t cFog = COLOR_MUTED;
-  const lv_color_t cWhite = lv_color_white();
+  // Zaokraglony prostokat (do plaskiej podstawy chmury i korpusu).
+  auto roundRect = [&](int x, int y, int w, int h, int r, lv_color_t c) {
+    lv_obj_t *o = lv_obj_create(box);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_style_radius(o, r, 0);
+    lv_obj_set_style_bg_color(o, c, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+  };
 
-  // Wspólna chmura: trzy kule + dolne wypelnienie
-  auto cloud = [&]() {
-    dot(30, 48, 14, cCloud);
-    dot(52, 38, 18, cCloud);
-    dot(72, 44, 16, cCloud);
-    dot(44, 56, 10, cCloud);
-    pill(50, 52, 60, 20, 0, cCloud);
+  const bool night = nightModeActive;
+  const lv_color_t cSun = lv_color_hex(night ? 0xE8CF55 : 0xF3A72E);
+  const lv_color_t cSunGlow = lv_color_hex(night ? 0x5A5326 : 0xFBE0A6);
+  const lv_color_t cCloud = night ? lv_color_hex(0xB9C6D6) : lv_color_hex(0xE4ECF5);
+  const lv_color_t cCloudEdge = night ? lv_color_hex(0x8FA0B4) : lv_color_hex(0xC3D2E2);
+  const lv_color_t cRain = lv_color_hex(night ? 0x7C9BD1 : 0x4E7FC4);
+  const lv_color_t cYellow = lv_color_hex(0xF2C438);
+  const lv_color_t cFog = COLOR_MUTED;
+  const lv_color_t cWhite = night ? lv_color_hex(0xE8EFF7) : lv_color_white();
+
+  // Puszysta chmura z plaska podstawa: cieniowany obrys + jasniejsze wypelnienie.
+  auto cloud = [&](int baseY) {
+    // cien/obrys
+    dot(32, baseY - 6, 15, cCloudEdge);
+    dot(54, baseY - 16, 19, cCloudEdge);
+    dot(72, baseY - 8, 16, cCloudEdge);
+    roundRect(18, baseY - 2, 60, 18, 9, cCloudEdge);
+    // wypelnienie (lekko wyzej, tworzy delikatny gradient warstwowy)
+    dot(33, baseY - 8, 12, cCloud);
+    dot(54, baseY - 18, 16, cCloud);
+    dot(71, baseY - 10, 13, cCloud);
+    roundRect(20, baseY - 3, 56, 14, 7, cCloud);
   };
 
   switch (weatherKindOf(wmoCode)) {
     case W_SUN: {
-      // Główna tarcza slonca
-      dot(50, 50, 22, cSunLight);
-      dot(50, 50, 18, cSun);
-      // 12 promieni co 30 stopni
+      // 12 promieni (naprzemiennie dlugie/krotkie) wokol tarczy
       for (int i = 0; i < 12; ++i) {
-        const float deg = i * 30.0f;
-        const float rad = deg * 3.14159f / 180.0f;
-        const int len = (i % 3 == 0) ? 18 : 14; // dluższe co trzeci
-        const int cx = 50 + static_cast<int>(cosf(rad) * 30.0f);
-        const int cy = 50 + static_cast<int>(sinf(rad) * 30.0f);
-        const int angle = (i % 3 == 0) ? -static_cast<int>(deg) : -(static_cast<int>(deg) + 15);
-        pill(cx, cy, len, 5, angle, cSun);
+        const float rad = i * 30.0f * 3.14159f / 180.0f;
+        const int len = (i % 2 == 0) ? 16 : 10;
+        const int cx = 48 + static_cast<int>(cosf(rad) * 34.0f);
+        const int cy = 48 + static_cast<int>(sinf(rad) * 34.0f);
+        pill(cx, cy, len, 5, static_cast<int>(i * 30.0f), cSun);
       }
+      // Miekka poswiata + tarcza
+      dot(48, 48, 26, cSunGlow);
+      dot(48, 48, 20, cSun);
       break;
     }
     case W_PARTLY: {
-      // Slonce w górnym-lewym rogu
-      dot(28, 24, 12, cSun);
-      static const int rays[6][3] = {
-          {44, 22, 0}, {14, 22, 0}, {22, 12, 90}, {22, 38, 90},
-          {38, 14, 45}, {14, 36, 45}};
-      for (const auto &r : rays) pill(r[0], r[1], 10, 4, r[2], cSun);
-      // Chmura przesłaniająca dolna-prawa czesc
-      dot(48, 44, 14, cCloudDark);
-      dot(66, 36, 18, cCloud);
-      dot(84, 44, 15, cCloud);
-      dot(62, 52, 12, cCloud);
-      pill(66, 48, 58, 18, 0, cCloud);
+      // Slonce w gornym-lewym rogu z krotkimi promieniami
+      for (int i = 0; i < 8; ++i) {
+        const float rad = i * 45.0f * 3.14159f / 180.0f;
+        const int cx = 34 + static_cast<int>(cosf(rad) * 22.0f);
+        const int cy = 32 + static_cast<int>(sinf(rad) * 22.0f);
+        pill(cx, cy, 9, 4, static_cast<int>(i * 45.0f), cSun);
+      }
+      dot(34, 32, 15, cSunGlow);
+      dot(34, 32, 11, cSun);
+      // Chmura zaslaniajaca dolna-prawa czesc
+      cloud(64);
       break;
     }
     case W_CLOUD: {
-      dot(20, 46, 12, cCloudDark);
-      dot(38, 34, 18, cCloud);
-      dot(58, 38, 20, cCloud);
-      dot(76, 44, 14, cCloud);
-      dot(48, 52, 16, cCloud);
-      dot(68, 52, 12, cCloudDark);
-      pill(50, 50, 72, 22, 0, cCloud);
+      // Dwie chmury (mniejsza z tylu ciemniejsza, wieksza z przodu jasna)
+      dot(64, 40, 13, cCloudEdge);
+      dot(78, 46, 11, cCloudEdge);
+      roundRect(54, 40, 34, 14, 7, cCloudEdge);
+      cloud(58);
       break;
     }
     case W_FOG: {
-      for (int i = 0; i < 6; ++i) {
-        const int y = 16 + i * 14;
-        const int len = 60 + (i % 2 == 0 ? 0 : 20);
-        const int offset = (i % 2 == 0 ? 20 : 10);
-        pill(50 + offset, y, len, 6, 0, cFog);
+      // Chmura + poziome smugi mgly
+      cloud(46);
+      for (int i = 0; i < 3; ++i) {
+        const int y = 62 + i * 11;
+        const int len = (i == 1) ? 64 : 52;
+        pill(48 + (i == 2 ? -6 : 4), y, len, 5, 0, cFog);
       }
       break;
     }
     case W_RAIN: {
-      cloud();
-      // 6 kropli deszczu (bardziej strome — 20 stopni zamiast 25)
-      static const int drops[6][3] = {
-          {28, 74, 12}, {40, 82, 16}, {54, 76, 12},
-          {66, 86, 14}, {78, 78, 12}, {90, 88, 10}};
-      for (const auto &d : drops) pill(d[0], d[1], d[2], 4, 20, cRain);
+      cloud(44);
+      // 4 krople: kropla = kula + ostry czubek (pill pochylony)
+      static const int dx[4] = {30, 46, 62, 76};
+      for (int i = 0; i < 4; ++i) {
+        const int x = dx[i], y = 66 + (i % 2) * 8;
+        pill(x, y, 5, 12, 18, cRain);
+        dot(x + 1, y + 5, 3, cRain);
+      }
       break;
     }
     case W_SNOW: {
-      cloud();
-      // 6 płatków sniegu: krzyzyk + kropka w srodku
-      static const int sx[6] = {28, 42, 56, 70, 82, 50};
-      static const int sy[6] = {80, 74, 88, 78, 84, 98};
-      for (int i = 0; i < 6; ++i) {
-        pill(sx[i], sy[i], 10, 3, 0, cWhite);
-        pill(sx[i], sy[i], 10, 3, 90, cWhite);
-        dot(sx[i], sy[i], 2, cWhite);
+      cloud(44);
+      // 3 platki: 3 skrzyzowane belki + jasny srodek
+      static const int fx[3] = {34, 54, 74};
+      static const int fy[3] = {70, 78, 70};
+      for (int i = 0; i < 3; ++i) {
+        pill(fx[i], fy[i], 12, 3, 0, cWhite);
+        pill(fx[i], fy[i], 12, 3, 60, cWhite);
+        pill(fx[i], fy[i], 12, 3, 120, cWhite);
+        dot(fx[i], fy[i], 2, cWhite);
       }
       break;
     }
     case W_STORM: {
-      cloud();
-      // Błyskawica: trzy odcinki tworzace zygzak
-      pill(52, 70, 18, 6, 120, cYellow);
-      pill(40, 90, 14, 6, 60, cYellow);
-      pill(56, 80, 10, 6, 130, cYellow);
-      // 3 krople deszczu
-      pill(20, 74, 10, 4, 20, cRain);
-      pill(72, 82, 12, 4, 20, cRain);
-      pill(86, 72, 8, 4, 20, cRain);
+      cloud(42);
+      // Blyskawica: gruby zygzak z kilku nakladajacych sie belek
+      pill(50, 60, 20, 8, 115, cYellow);
+      pill(44, 74, 16, 8, 60, cYellow);
+      pill(54, 82, 14, 8, 118, cYellow);
+      dot(48, 71, 4, cYellow);
       break;
     }
   }
@@ -3344,32 +3740,36 @@ void updateScreensaverContent() {
   if (currentLocalTime(nowInfo)) {
     char buf[8];
     strftime(buf, sizeof(buf), "%H:%M", &nowInfo);
-    setLabelTextIfChanged(ssClockShadowLabel, ssRenderedClock, String(buf));
     setLabelTextIfChanged(ssClockLabel, ssRenderedClock, String(buf));
     static const char *DAYS[] = {"NIEDZIELA", "PONIEDZIALEK", "WTOREK", "SRODA",
                                  "CZWARTEK", "PIATEK", "SOBOTA"};
     char dbuf[8];
     strftime(dbuf, sizeof(dbuf), "%d.%m", &nowInfo);
     setLabelTextIfChanged(ssDateLabel, ssRenderedDate,
-                          String(DAYS[nowInfo.tm_wday]) + " - " + dbuf);
-    // Ostatnie karmienie na wygaszaczu z kolorowym znacznikiem
+                          String(DAYS[nowInfo.tm_wday]) + "\n" + dbuf);
+    // Jedna linia karmienia: stan + godzina nastepnego (ostatnie + 4h) w nawiasie.
     String feedingText;
     lv_color_t feedingColor = COLOR_MUTED;
     if (lastFeedingTime) {
       const long elapsedMin = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
+      const String nextClk = nextFeedingClock();
+      const String suffix = nextClk.length() ? (" (nast. ~" + nextClk + ")") : String();
       if (elapsedMin >= 0 && elapsedMin < COUNTER_BLINK_MIN) {
-        feedingText = "OSTATNIE KARMIENIE: " + formatAgoText(lastFeedingTime);
+        feedingText = "Ostatnie: " + formatAgoText(lastFeedingTime) + suffix;
       } else {
-        feedingText = "CZAS NA KARMIENIE: " + formatAgoText(lastFeedingTime);
+        feedingText = "Czas na karmienie!" + suffix;
       }
       feedingColor = feedingAgeColor(lastFeedingTime);
     } else {
-      feedingText = "OSTATNIE KARMIENIE: brak wpisu";
+      feedingText = "Brak wpisu karmienia";
     }
     setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
     if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
+    // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
+    setLabelTextIfChanged(ssStatValue[0], ssRenderedStat[0], String(todayFeedingCount));
+    setLabelTextIfChanged(ssStatValue[1], ssRenderedStat[1], formatGapShort(longestFeedingGapMin));
+    setLabelTextIfChanged(ssStatValue[2], ssRenderedStat[2], formatGapShort(avgFeedingGapMin));
   } else {
-    setLabelTextIfChanged(ssClockShadowLabel, ssRenderedClock, "--:--");
     setLabelTextIfChanged(ssClockLabel, ssRenderedClock, "--:--");
     setLabelTextIfChanged(ssDateLabel, ssRenderedDate, "");
   }
@@ -3414,23 +3814,26 @@ void updateScreensaverContent() {
 
 void applyScreensaverVisibility() {
   lv_obj_t *controls[] = {feedingCard, milkCard, feedFormButton,
-                          diaperButton, pumpingHomeButton, calendarButton, chartButton,
+                          otherHomeButton, weightHomeButton, calendarButton, chartButton,
                           homeCounterBar};
   for (lv_obj_t *o : controls) {
     if (!o) continue;
     if (screensaverActive) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
   }
-  lv_obj_t *widgets[] = {ssClockCard, ssWeatherCard,
-                         ssClockShadowLabel, ssClockLabel, ssDateLabel, ssIconBox,
+  lv_obj_t *widgets[] = {ssClockCard, ssWeatherCard, ssDayBandCard,
+                         ssClockLabel, ssDateLabel, ssIconBox,
                          ssTempLabel, ssDescLabel, ssMinMaxLabel, ssDressLabel,
                          ssLastFeedingLabel,
+                         ssStatValue[0], ssStatValue[1], ssStatValue[2],
                          ssHourLabels[0], ssHourLabels[1], ssHourLabels[2]};
   for (lv_obj_t *o : widgets) {
     if (!o) continue;
     if (screensaverActive) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
   }
+  // ssClockShadowLabel pozostaje ukryty w obu trybach (plaski zegar w nowym ukladzie).
+  if (ssClockShadowLabel) lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
 }
 
 void enterScreensaver() {
@@ -3560,8 +3963,32 @@ void fetchWeatherNow() {
     http.useHTTP10(true);
     httpCode = http.GET();
     if (httpCode == 200) {
-      body = http.getString();
-      Serial.printf("Pogoda: odpowiedz %u B.\n", static_cast<unsigned>(body.length()));
+      // Odczyt strumieniowy do jednego, z gory zarezerwowanego bufora.
+      // Rezerwacja eliminuje serie realloc-ow (kazda fragmentowalaby RAM wewnetrzny),
+      // a twardy limit chroni przed OOM, gdyby API zwrocilo nietypowo duza odpowiedz.
+      constexpr size_t WEATHER_BODY_LIMIT = 12288; // 12 KB — zapytanie na 2 dni miesci sie z zapasem
+      const int declaredLen = http.getSize();
+      size_t reserveLen = (declaredLen > 0)
+                              ? min(static_cast<size_t>(declaredLen) + 1, WEATHER_BODY_LIMIT)
+                              : 4096;
+      body.reserve(reserveLen);
+      WiFiClient *stream = http.getStreamPtr();
+      uint8_t chunk[512];
+      while (http.connected() && body.length() < WEATHER_BODY_LIMIT) {
+        const size_t avail = stream->available();
+        if (avail == 0) {
+          if (!stream->connected()) break;
+          delay(5);
+          continue;
+        }
+        const size_t toRead = min(avail, sizeof(chunk));
+        const int n = stream->readBytes(chunk, toRead);
+        if (n <= 0) break;
+        body.concat(reinterpret_cast<const char *>(chunk), static_cast<size_t>(n));
+      }
+      Serial.printf("Pogoda: odpowiedz %u B (limit %u B).\n",
+                    static_cast<unsigned>(body.length()),
+                    static_cast<unsigned>(WEATHER_BODY_LIMIT));
     } else {
       Serial.printf("Pogoda: HTTP %d. Kolejna proba za 60 s.\n", httpCode);
     }
@@ -3724,26 +4151,19 @@ void setup() {
   lastLvglTickMs = millis();
   Serial.println("INIT: tick LVGL ustawiony");
 
-  // Bufor czesciowy LVGL w PSRAM: ogranicza zuzycie rzadkiego RAM wewnetrznego,
-  // ktory jest potrzebny m.in. dla TLS (Telegram) i obslugi Wi-Fi.
-  constexpr uint16_t DRAW_BUFFER_LINES = 15;
-  const size_t drawBufferBytes = SCREEN_WIDTH * DRAW_BUFFER_LINES * sizeof(lv_color16_t);
-  Serial.printf("INIT: alokacja bufora LVGL %u B, PSRAM wolny %u B, RAM wewnetrzny wolny %u B\n",
-                static_cast<unsigned>(drawBufferBytes),
-                static_cast<unsigned>(ESP.getFreePsram()),
-                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
-  displayBuffer = static_cast<lv_color16_t *>(heap_caps_malloc(drawBufferBytes, MALLOC_CAP_SPIRAM));
-  Serial.printf("INIT: alokacja bufora LVGL zakonczona (%p)\n", displayBuffer);
-  if (!displayBuffer) {
-    Serial.println("Brak PSRAM dla bufora LVGL.");
-    while (true) delay(1000);
-  }
-  Serial.println(String("LVGL: bufor czesciowy PSRAM: ") + String(drawBufferBytes) + " B");
+  // Tryb DIRECT: LVGL renderuje wprost do dwoch framebufferow panelu w PSRAM
+  // (pobranych z esp_lcd). Brak osobnego bufora czesciowego = mniej zuzycia RAM
+  // wewnetrznego i brak kopiowania/tearingu przy krawedzi w displayFlush().
+  const size_t fbBytes = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(lv_color16_t);
+  Serial.printf("INIT: LVGL DIRECT na 2 FB panelu (%p, %p), po %u B, PSRAM wolny %u B\n",
+                rgbFrameBuffer0, rgbFrameBuffer1,
+                static_cast<unsigned>(fbBytes),
+                static_cast<unsigned>(ESP.getFreePsram()));
 
   displayDriver = lv_display_create(SCREEN_WIDTH, SCREEN_HEIGHT);
   Serial.println("INIT: display LVGL utworzony");
   lv_display_set_flush_cb(displayDriver, displayFlush);
-  lv_display_set_buffers(displayDriver, displayBuffer, nullptr, drawBufferBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_set_buffers(displayDriver, rgbFrameBuffer0, rgbFrameBuffer1, fbBytes, LV_DISPLAY_RENDER_MODE_DIRECT);
 
   touchDriver = lv_indev_create();
   Serial.println("INIT: input LVGL utworzony");
