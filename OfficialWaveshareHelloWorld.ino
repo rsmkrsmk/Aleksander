@@ -150,10 +150,14 @@ String ssRenderedHours[3];
 lv_obj_t *feedingCard = nullptr;
 lv_obj_t *milkCard = nullptr;
 lv_obj_t *feedFormButton = nullptr;
-lv_obj_t *diaperButton = nullptr;
-lv_obj_t *pumpingHomeButton = nullptr;
+lv_obj_t *otherHomeButton = nullptr;   // "INNE" -> ekran z pielucha i odciagiem
+lv_obj_t *weightHomeButton = nullptr;  // "WAGA" -> ekran wpisu wagi
 lv_obj_t *calendarButton = nullptr;
 lv_obj_t *chartButton = nullptr;
+
+// Waga: aktualny wybor w gramach na ekranie WAGA (domyslnie DEFAULT_WEIGHT_G).
+int selectedWeightG = DEFAULT_WEIGHT_G;
+lv_obj_t *weightValueLabel = nullptr;
 
 // Zagregowana statystyka jednego dnia — zasila ekran główny, kalendarz,
 // PODSUMOWANIE oraz API WWW. Rozpoznaje wszystkie typy wpisów CSV.
@@ -169,6 +173,7 @@ struct DaySummary {
   int diaperDirty;
   int pumpingMl;
   bool vitaminD;
+  int weightG;   // ostatnia zapisana waga danego dnia (g); 0 = brak
 };
 
 // Grupa pogody dla ikony/opisu wygaszacza (kody wttr.in mapowane na WMO).
@@ -197,6 +202,7 @@ String backupFileName;
 bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
+int lastWeightG = 0;                // ostatnia zapisana waga (g); 0 = brak wpisu
 bool deleteModeActive = false;         // tryb wyboru wpisu do usuniecia
 int pendingDeleteIndex = -1;            // indeks oczekujacy na potwierdzenie (-1 = brak)
 
@@ -223,6 +229,8 @@ lv_obj_t *dayDetailScreen = nullptr;
 lv_obj_t *chartScreen = nullptr;
 lv_obj_t *pumpingScreen = nullptr;
 lv_obj_t *diaperScreen = nullptr;
+lv_obj_t *otherScreen = nullptr;   // ekran INNE: pielucha + odciag pokarmu
+lv_obj_t *weightScreen = nullptr;  // ekran WAGA: wybor wagi w gramach
 lv_obj_t *homeLedWifi = nullptr;
 lv_obj_t *homeLedMemory = nullptr;
 lv_obj_t *homeLedTime = nullptr;
@@ -326,11 +334,21 @@ void diaperQuickEvent(lv_event_t *event);
 void pumpingOpenEvent(lv_event_t *event);
 void pumpingSaveEvent(lv_event_t *event);
 void vitaminToggleEvent(lv_event_t *event);
+void createDiaperScreen();
+void createPumpingScreen();
+void createOtherScreen();
+void otherOpenEvent(lv_event_t *event);
+void backToOtherEvent(lv_event_t *event);
+void createWeightScreen();
+void weightOpenEvent(lv_event_t *event);
+void weightSaveEvent(lv_event_t *event);
+void weightStepEvent(lv_event_t *event);
 
 void startWebServer();
 void handleWebRoot();
 void handleApiStatus();
 void handleApiEntries();
+void handleApiWeightSeries();
 void handleApiEntry();
 void handleApiDeleteEntry();
 void handleApiSendBackup();
@@ -386,7 +404,7 @@ void prepareScreen(lv_obj_t *screen) {
 
 void createReusableScreenRoots() {
   lv_obj_t **screens[] = {&homeScreen, &formScreen, &calendarScreen, &dayDetailScreen, &chartScreen,
-                          &pumpingScreen, &diaperScreen};
+                          &pumpingScreen, &diaperScreen, &otherScreen, &weightScreen};
   for (lv_obj_t **screen : screens) {
     *screen = lv_obj_create(nullptr);
     prepareScreen(*screen);
@@ -886,6 +904,7 @@ void loadLatestEntries() {
   lastMilk = "Brak zapisanego wpisu";
   lastFeedingTime = 0;
   lastMilkTime = 0;
+  lastWeightG = 0;
   if (!storageReady) return;
 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
@@ -906,6 +925,9 @@ void loadLatestEntries() {
     if (isMilkType(entry.type)) {
       lastMilk = formatEntryForUi(line);
       lastMilkTime = stamp;
+    }
+    if (entry.type == "WAGA") {
+      lastWeightG = entry.ml; // gramy zapisane w kolumnie ml
     }
   }
   file.close();
@@ -1150,6 +1172,7 @@ void refreshDayStats() {
     s.diaperDirty = 0;
     s.pumpingMl = 0;
     s.vitaminD = false;
+    s.weightG = 0;
   }
   if (storageReady) {
     File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
@@ -1181,6 +1204,8 @@ void refreshDayStats() {
             s.pumpingMl += entry.ml;
           } else if (entry.type == "WITAMINA_D") {
             s.vitaminD = true;
+          } else if (entry.type == "WAGA") {
+            s.weightG = entry.ml; // ostatni wpis danego dnia nadpisuje (kolejnosc chronologiczna)
           }
           break;
         }
@@ -1213,6 +1238,7 @@ void dayStats(time_t day, DaySummary &out) {
   out.diaperDirty = 0;
   out.pumpingMl = 0;
   out.vitaminD = false;
+  out.weightG = 0;
   const int index = statsIndexForDay(day);
   if (index < 0) return;
   out = statsData[index];
@@ -1361,6 +1387,8 @@ void handleApiStatus() {
   payload += "\"minMl\":" + String(ML_MIN) + ",";
   payload += "\"maxMl\":" + String(ML_MAX) + ",";
   payload += "\"defaultMl\":" + String(DEFAULT_ML) + ",";
+  payload += "\"birthWeightG\":" + String(BIRTH_WEIGHT_G) + ",";
+  payload += "\"lastWeightG\":" + String(lastWeightG) + ",";
   payload += "\"calendar\":[";
   for (uint8_t i = 0; i < 5; ++i) {
     const time_t day = dayOffsetFromToday(i);
@@ -1373,6 +1401,7 @@ void handleApiStatus() {
                ",\"piersLeftMin\":" + String(s.piersLeftMin) + ",\"piersRightMin\":" + String(s.piersRightMin) +
                ",\"diaperWet\":" + String(s.diaperWet) + ",\"diaperDirty\":" + String(s.diaperDirty) +
                ",\"pumpingMl\":" + String(s.pumpingMl) + ",\"vitaminD\":" + String(s.vitaminD ? "true" : "false") +
+               ",\"weightG\":" + String(s.weightG) +
                "}";
   }
   payload += "],";
@@ -1433,6 +1462,65 @@ void handleApiEntries() {
   sendJson(200, payload);
 }
 
+// Dzien zycia (0 = dzien urodzenia) dla podanej daty CSV "RRRR-MM-DD".
+long dayOfLifeForDate(const String &isoDate) {
+  if (isoDate.length() != 10) return -1;
+  struct tm d = {};
+  d.tm_year = isoDate.substring(0, 4).toInt() - 1900;
+  d.tm_mon = isoDate.substring(5, 7).toInt() - 1;
+  d.tm_mday = isoDate.substring(8, 10).toInt();
+  d.tm_hour = 12;
+  d.tm_isdst = -1;
+  struct tm birth = {};
+  birth.tm_year = BIRTH_YEAR - 1900;
+  birth.tm_mon = BIRTH_MONTH - 1;
+  birth.tm_mday = BIRTH_DAY;
+  birth.tm_hour = 12;
+  birth.tm_isdst = -1;
+  const time_t td = mktime(&d);
+  const time_t tb = mktime(&birth);
+  return lround(difftime(td, tb) / 86400.0);
+}
+
+// Seria pomiarow wagi do wykresu w panelu WWW: [{day, date, g}] po dniu zycia.
+// Jeden przebieg pliku, budowa strumieniowa (bez trzymania calego CSV w RAM).
+void handleApiWeightSeries() {
+  if (!storageReady) {
+    sendJson(503, "{\"message\":\"Pamiec wewnetrzna jest niedostepna.\"}");
+    return;
+  }
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) {
+    sendJson(500, "{\"message\":\"Nie mozna otworzyc historii.\"}");
+    return;
+  }
+  webServer.sendHeader("Cache-Control", "no-store, max-age=0");
+  webServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  webServer.send(200, "application/json; charset=utf-8", "");
+  webServer.sendContent("{\"birthWeightG\":");
+  webServer.sendContent(String(BIRTH_WEIGHT_G));
+  webServer.sendContent(",\"points\":[");
+  bool first = true;
+  file.readStringUntil('\n');
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    CsvEntry entry;
+    if (!parseCsvLine(line, entry)) continue;
+    if (entry.type != "WAGA") continue;
+    const long dol = dayOfLifeForDate(entry.date);
+    if (dol < 0) continue;
+    String obj = first ? "" : ",";
+    first = false;
+    obj += "{\"day\":" + String(dol) + ",\"date\":\"" + entry.date + "\",\"g\":" + String(entry.ml) + "}";
+    webServer.sendContent(obj);
+  }
+  file.close();
+  webServer.sendContent("]}");
+  webServer.sendContent("");
+}
+
 void handleApiEntry() {
   struct tm currentTime;
   if (!currentLocalTime(currentTime)) {
@@ -1468,6 +1556,20 @@ void handleApiEntry() {
     }
     updateHomeInformation();
     sendJson(201, "{\"message\":\"Wpis mleka zapisany w pamieci urzadzenia.\"}");
+    return;
+  }
+  // Waga: wartosc w gramach (osobny zakres, nie ML_MAX).
+  if (type == "WAGA") {
+    if (ml < WEIGHT_MIN_G || ml > WEIGHT_MAX_G) {
+      sendJson(400, "{\"message\":\"Nieprawidlowa waga (gramy).\"}");
+      return;
+    }
+    if (!appendEntry("WAGA", when, ml)) {
+      sendJson(500, "{\"message\":\"Nie udalo sie zapisac wagi.\"}");
+      return;
+    }
+    updateHomeInformation();
+    sendJson(201, "{\"message\":\"Zapisano wage.\"}");
     return;
   }
   // Pompowanie i zdarzenia jednym dotknieciem przez panel WWW.
@@ -1580,9 +1682,28 @@ void handleApiEvent() {
   }
   const String type = webServer.arg("type");
   const bool validType = type == "PIELUCHA_MOKRA" || type == "PIELUCHA_BRUDNA" ||
-                         type == "WITAMINA_D" || type == "ODCIAGANIE";
+                         type == "WITAMINA_D" || type == "ODCIAGANIE" || type == "WAGA";
   if (!validType) {
     sendJson(400, "{\"message\":\"Nieznany typ zdarzenia.\"}");
+    return;
+  }
+
+  time_t when = time(nullptr);
+  if (webServer.hasArg("when")) parseWebDateTime(webServer.arg("when"), when);
+
+  // Waga: wartosc w gramach (osobny zakres, poza ML_MAX).
+  if (type == "WAGA") {
+    const int grams = webServer.arg("ml").toInt();
+    if (grams < WEIGHT_MIN_G || grams > WEIGHT_MAX_G) {
+      sendJson(400, "{\"message\":\"Nieprawidlowa waga (gramy).\"}");
+      return;
+    }
+    if (!appendEntry("WAGA", when, grams)) {
+      sendJson(500, "{\"message\":\"Nie udalo sie zapisac wagi.\"}");
+      return;
+    }
+    updateHomeInformation();
+    sendJson(201, "{\"message\":\"Zapisano wage.\"}");
     return;
   }
 
@@ -1591,9 +1712,6 @@ void handleApiEvent() {
     sendJson(400, "{\"message\":\"Podaj ilosc odciagnietego mleka.\"}");
     return;
   }
-
-  time_t when = time(nullptr);
-  if (webServer.hasArg("when")) parseWebDateTime(webServer.arg("when"), when);
 
   if (type == "WITAMINA_D") {
     DaySummary s;
@@ -1763,6 +1881,7 @@ void startWebServer() {
     webServer.on("/", HTTP_GET, handleWebRoot);
     webServer.on("/api/status", HTTP_GET, handleApiStatus);
     webServer.on("/api/entries", HTTP_GET, handleApiEntries);
+    webServer.on("/api/weight-series", HTTP_GET, handleApiWeightSeries);
     webServer.on("/api/entry", HTTP_POST, handleApiEntry);
     webServer.on("/api/delete-entry", HTTP_POST, handleApiDeleteEntry);
     webServer.on("/api/send-backup", HTTP_POST, handleApiSendBackup);
@@ -2204,7 +2323,7 @@ void createPumpingScreen() {
 
   createLabel(pumpingScreen, "ODCIAGANIE MLEKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_t *backButton = createButton(pumpingScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(backButton, backToOtherEvent, LV_EVENT_CLICKED, nullptr);
 
   lv_obj_t *card = createCard(pumpingScreen, 14, 110, 452, 140);
   pumpingValueLabel = createLabel(card, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 12);
@@ -2234,7 +2353,7 @@ void createDiaperScreen() {
 
   createLabel(diaperScreen, "PIELUCHA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_t *backButton = createButton(diaperScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(backButton, backToOtherEvent, LV_EVENT_CLICKED, nullptr);
 
   static char TYPE_WET[] = "PIELUCHA_MOKRA";
   static char TYPE_DIRTY[] = "PIELUCHA_BRUDNA";
@@ -2245,6 +2364,103 @@ void createDiaperScreen() {
   createLabel(diaperScreen, "Zapisuje biezacy czas jednym dotyknieciem.", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 330);
 
   loadReusableScreen(diaperScreen);
+}
+
+// Powrot z ekranow PIELUCHA/ODCIAGANIE do wspolnego ekranu INNE.
+void backToOtherEvent(lv_event_t *event) {
+  createOtherScreen();
+}
+
+// Ekran INNE: grupuje szybkie akcje PIELUCHA i ODCIAG POKARMU pod jednym miejscem.
+void createOtherScreen() {
+  resetReusableScreen(otherScreen);
+
+  createLabel(otherScreen, "INNE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *backButton = createButton(otherScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
+  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 120, 452, 90, COLOR_BLUE);
+  lv_obj_add_event_cb(diaperBtn, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 226, 452, 90, COLOR_ORANGE);
+  lv_obj_add_event_cb(pumpingBtn, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
+  createLabel(otherScreen, "Pielucha i odciaganie pokarmu.", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 330);
+
+  loadReusableScreen(otherScreen);
+}
+
+// Ekran WAGA: wybor wagi dziecka w gramach i zapis wpisu typu WAGA.
+void weightStepEvent(lv_event_t *event) {
+  const int delta = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
+  selectedWeightG = constrain(selectedWeightG + delta, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  if (weightValueLabel) lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
+}
+
+void weightSliderEvent(lv_event_t *event) {
+  lv_obj_t *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+  const int raw = lv_slider_get_value(slider);
+  // Skok co 10 g.
+  int snapped = ((raw + 5) / 10) * 10;
+  snapped = constrain(snapped, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  lv_slider_set_value(slider, snapped, LV_ANIM_OFF);
+  selectedWeightG = snapped;
+  if (weightValueLabel) lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
+}
+
+void weightSaveEvent(lv_event_t *event) {
+  if (!timeIsValid || !storageReady) return;
+  appendEntry("WAGA", time(nullptr), selectedWeightG);
+  deleteModeActive = false;
+  createHomeScreen();
+}
+
+void createWeightScreen() {
+  resetReusableScreen(weightScreen);
+  weightValueLabel = nullptr;
+
+  createLabel(weightScreen, "WAGA DZIECKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *backButton = createButton(weightScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
+  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *card = createCard(weightScreen, 14, 96, 452, 168);
+  weightValueLabel = createLabel(card, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_text_font(weightValueLabel, &lv_font_montserrat_36, 0);
+  lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
+
+  // Precyzyjne kroki -10/+10 g.
+  lv_obj_t *minus10 = createButton(card, "-10", 8, 66, 84, 44, COLOR_MUTED);
+  lv_obj_add_event_cb(minus10, weightStepEvent, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(-10)));
+  lv_obj_t *plus10 = createButton(card, "+10", 336, 66, 84, 44, COLOR_GREEN);
+  lv_obj_add_event_cb(plus10, weightStepEvent, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(10)));
+
+  lv_obj_t *slider = lv_slider_create(card);
+  lv_obj_set_pos(slider, 100, 80);
+  lv_obj_set_size(slider, 228, 12);
+  lv_slider_set_range(slider, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  lv_slider_set_value(slider, selectedWeightG, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(slider, COLOR_BORDER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(slider, COLOR_GREEN, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(slider, COLOR_GREEN, LV_PART_KNOB);
+  lv_obj_add_event_cb(slider, weightSliderEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+  createLabel(card, "2000 g", COLOR_MUTED, LV_ALIGN_BOTTOM_LEFT, 12, -6);
+  createLabel(card, "15000 g", COLOR_MUTED, LV_ALIGN_BOTTOM_RIGHT, -12, -6);
+
+  lv_obj_t *saveButton = createButton(weightScreen, "ZAPISZ WAGE", 14, 280, 290, 50, COLOR_GREEN);
+  lv_obj_add_event_cb(saveButton, weightSaveEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *cancelButton = createButton(weightScreen, "ANULUJ", 316, 280, 150, 50, COLOR_MUTED);
+  lv_obj_add_event_cb(cancelButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  loadReusableScreen(weightScreen);
+}
+
+void otherOpenEvent(lv_event_t *event) {
+  createOtherScreen();
+}
+
+void weightOpenEvent(lv_event_t *event) {
+  // Zacznij od ostatniej znanej wagi (jesli jest), inaczej wartosc domyslna.
+  if (lastWeightG > 0) selectedWeightG = constrain(lastWeightG, WEIGHT_MIN_G, WEIGHT_MAX_G);
+  else selectedWeightG = DEFAULT_WEIGHT_G;
+  createWeightScreen();
 }
 
 void createCalendarScreen() {
@@ -2387,10 +2603,10 @@ void createHomeScreen() {
   feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 268, 452, 48, COLOR_ORANGE);
   lv_obj_add_event_cb(feedFormButton, feedingButtonEvent, LV_EVENT_CLICKED, nullptr);
 
-  diaperButton = createButton(homeScreen, "PIELUCHA", 14, 324, 220, 40, COLOR_BLUE);
-  lv_obj_add_event_cb(diaperButton, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
-  pumpingHomeButton = createButton(homeScreen, "ODCIAG POKARMU", 246, 324, 220, 40, COLOR_BLUE);
-  lv_obj_add_event_cb(pumpingHomeButton, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
+  otherHomeButton = createButton(homeScreen, "INNE", 14, 324, 220, 40, COLOR_BLUE);
+  lv_obj_add_event_cb(otherHomeButton, otherOpenEvent, LV_EVENT_CLICKED, nullptr);
+  weightHomeButton = createButton(homeScreen, "WAGA", 246, 324, 220, 40, COLOR_BLUE);
+  lv_obj_add_event_cb(weightHomeButton, weightOpenEvent, LV_EVENT_CLICKED, nullptr);
 
   calendarButton = createButton(homeScreen, "KALENDARZ", 14, 372, 220, 40, COLOR_BLUE);
   lv_obj_add_event_cb(calendarButton, calendarButtonEvent, LV_EVENT_CLICKED, nullptr);
@@ -2942,8 +3158,9 @@ String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight
   if (isMilkType(type)) return milkTypeLabel(type) + String(" ") + hhmm + " - " + ml + " ml";
   if (type == "PIELUCHA_MOKRA") return String("Pielucha mokra ") + hhmm;
   if (type == "PIELUCHA_BRUDNA") return String("Pielucha brudna ") + hhmm;
-  if (type == "ODCIAGANIE") return String("Odcaganie ") + hhmm + " - " + ml + " ml";
+  if (type == "ODCIAGANIE") return String("Odciaganie ") + hhmm + " - " + ml + " ml";
   if (type == "WITAMINA_D") return String("Witamina D podana ") + hhmm;
+  if (type == "WAGA") return String("Waga ") + hhmm + " - " + ml + " g";
   return type + " " + hhmm;
 }
 
@@ -3405,7 +3622,7 @@ void updateScreensaverContent() {
 
 void applyScreensaverVisibility() {
   lv_obj_t *controls[] = {feedingCard, milkCard, feedFormButton,
-                          diaperButton, pumpingHomeButton, calendarButton, chartButton,
+                          otherHomeButton, weightHomeButton, calendarButton, chartButton,
                           homeCounterBar};
   for (lv_obj_t *o : controls) {
     if (!o) continue;
