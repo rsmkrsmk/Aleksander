@@ -2732,101 +2732,107 @@ void createHomeScreen() {
   //   Pasmo doby        256..300  (karmienia/pieluchy na osi 0-24h)
   //   Karta pogody      306..470  (ikona + temp + opis + min/max + 3h + ubior)
 
-  // --- Karta zegara (150..234): zegar + data + jedna linia karmienia ---
-  ssClockCard = createCard(homeScreen, 14, 150, 452, 84);
+  // ===================== WYGASZACZ (nowy uklad) =====================
+  //   Karta zegara      150..238  (88; zegar + data u gory, linia karmienia nizej)
+  //   Karta statystyk   244..292  (48; chudszy pasek 3 liczb)
+  //   Karta pogody      298..474  (176; ikona+temp+opis+minmax, godziny, ubior)
 
-  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 6, 2);
+  // --- Karta zegara ---
+  ssClockCard = createCard(homeScreen, 14, 150, 452, 88);
+  lv_obj_set_style_pad_all(ssClockCard, 10, 0);
+
+  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
   lv_obj_set_style_text_font(ssClockLabel, &lv_font_montserrat_48, 0);
   lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_LEFT, 0);
   // ssClockShadowLabel nieuzywany (plaski zegar) — zostaje ukryty.
-  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 6, 2);
+  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
   lv_obj_set_style_text_font(ssClockShadowLabel, &lv_font_montserrat_48, 0);
   lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
 
-  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -6, 8);
+  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -4, 4);
   lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_16, 0);
   lv_obj_set_style_text_align(ssDateLabel, LV_TEXT_ALIGN_RIGHT, 0);
 
-  // Jedna linia: "Ostatnie: X temu  (nast. ~HH:MM)" — pelna szerokosc, bez kolizji.
-  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_BOTTOM_LEFT, 6, 2);
-  lv_obj_set_width(ssLastFeedingLabel, 428);
-  lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_16, 0);
+  // Jedna linia karmienia u dolu karty — odsunieta od zegara (font 14, pelna szerokosc).
+  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_BOTTOM_LEFT, 4, 0);
+  lv_obj_set_width(ssLastFeedingLabel, 424);
+  lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_align(ssLastFeedingLabel, LV_TEXT_ALIGN_LEFT, 0);
   // ssNextFeedLabel nieuzywany osobno (scalony w linii karmienia) — ukryty.
-  ssNextFeedLabel = createLabel(ssClockCard, "", COLOR_BLUE, LV_ALIGN_BOTTOM_RIGHT, -6, 2);
+  ssNextFeedLabel = createLabel(ssClockCard, "", COLOR_BLUE, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
   lv_obj_add_flag(ssNextFeedLabel, LV_OBJ_FLAG_HIDDEN);
 
-  // --- Karta statystyk dnia (240..300): 3 kafelki liczbowe ---
-  ssDayBandCard = createCard(homeScreen, 14, 240, 452, 60);
-  lv_obj_set_style_pad_all(ssDayBandCard, 8, 0);
+  // --- Karta statystyk dnia (chudsza): 3 kafelki liczbowe ---
+  ssDayBandCard = createCard(homeScreen, 14, 244, 452, 48);
+  lv_obj_set_style_pad_all(ssDayBandCard, 6, 0);
   // ssDayBandTrack sluzy teraz jako niewidoczny kontener 3 kafelkow statystyk.
   ssDayBandTrack = ssDayBandCard;
   ssDayBandStamp = -1;
   const char *statCaps[3] = {"KARMIENIA", "NAJDL. PRZERWA", "SR. PRZERWA"};
-  const int statX[3] = {8, 158, 308};
+  const int statX[3] = {6, 156, 306};
   for (uint8_t i = 0; i < 3; ++i) {
-    lv_obj_t *cap = createLabel(ssDayBandCard, statCaps[i], COLOR_MUTED, LV_ALIGN_TOP_LEFT, statX[i], 26);
-    lv_obj_set_width(cap, 136);
-    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(cap, &lv_font_montserrat_10, 0);
-    ssStatValue[i] = createLabel(ssDayBandCard, "-", COLOR_GREEN, LV_ALIGN_TOP_LEFT, statX[i], 2);
-    lv_obj_set_width(ssStatValue[i], 136);
+    ssStatValue[i] = createLabel(ssDayBandCard, "-", COLOR_GREEN, LV_ALIGN_TOP_LEFT, statX[i], 0);
+    lv_obj_set_width(ssStatValue[i], 134);
     lv_obj_set_style_text_align(ssStatValue[i], LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(ssStatValue[i], &lv_font_montserrat_16, 0);
+    lv_obj_t *cap = createLabel(ssDayBandCard, statCaps[i], COLOR_MUTED, LV_ALIGN_TOP_LEFT, statX[i], 22);
+    lv_obj_set_width(cap, 134);
+    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(cap, &lv_font_montserrat_10, 0);
     if (i > 0) {
       lv_obj_t *sep = lv_obj_create(ssDayBandCard);
       lv_obj_remove_style_all(sep);
-      lv_obj_set_size(sep, 1, 40);
-      lv_obj_set_pos(sep, statX[i] - 7, 2);
+      lv_obj_set_size(sep, 1, 32);
+      lv_obj_set_pos(sep, statX[i] - 8, 2);
       lv_obj_set_style_bg_color(sep, COLOR_BORDER, 0);
       lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
     }
   }
 
-  // --- Karta pogody ---
-  ssWeatherCard = createCard(homeScreen, 14, 306, 452, 164);
+  // --- Karta pogody (wyzsza dzieki chudszej karcie statystyk) ---
+  ssWeatherCard = createCard(homeScreen, 14, 298, 452, 176);
 
   ssIconBox = lv_obj_create(ssWeatherCard);
   lv_obj_remove_style_all(ssIconBox);
-  lv_obj_set_size(ssIconBox, 96, 96);
-  lv_obj_set_pos(ssIconBox, 6, 8);
+  lv_obj_set_size(ssIconBox, 92, 92);
+  lv_obj_set_pos(ssIconBox, 4, 6);
   ssLastIconCode = -999;
 
   // Gorna czesc: ikona (lewa) + temperatura/opis/minmax (prawa).
-  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 116, 2);
+  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 112, 2);
   lv_obj_set_style_text_font(ssTempLabel, &lv_font_montserrat_36, 0);
 
-  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 118, 44);
-  lv_obj_set_width(ssDescLabel, 316);
+  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 114, 44);
+  lv_obj_set_width(ssDescLabel, 320);
   lv_obj_set_style_text_font(ssDescLabel, &lv_font_montserrat_14, 0);
   lv_label_set_long_mode(ssDescLabel, LV_LABEL_LONG_DOT);
 
-  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 118, 66);
+  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 114, 66);
   lv_obj_set_style_text_font(ssMinMaxLabel, &lv_font_montserrat_14, 0);
 
   // Srodek: 3 kolejne godziny (pod ikona/temp, w jednym rzedzie).
   for (uint8_t i = 0; i < 3; ++i) {
     ssHourLabels[i] = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID,
-                                  static_cast<int>(-140 + i * 140), 88);
+                                  static_cast<int>(-140 + i * 140), 96);
     lv_obj_set_width(ssHourLabels[i], 128);
     lv_obj_set_style_text_align(ssHourLabels[i], LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(ssHourLabels[i], &lv_font_montserrat_12, 0);
   }
 
-  // Dol: porada ubioru na tonalnym pasku, wyraznie oddzielona od godzin.
+  // Dol: porada ubioru na tonalnym pasku (jedna linia z przycieciem — nie zaslania).
   lv_obj_t *dressBar = lv_obj_create(ssWeatherCard);
   lv_obj_remove_style_all(dressBar);
-  lv_obj_set_size(dressBar, 428, 30);
-  lv_obj_set_pos(dressBar, 0, 108);
-  lv_obj_set_style_radius(dressBar, 10, 0);
+  lv_obj_set_size(dressBar, 428, 26);
+  lv_obj_align(dressBar, LV_ALIGN_BOTTOM_MID, 0, 2);
+  lv_obj_set_style_radius(dressBar, 9, 0);
   lv_obj_set_style_bg_color(dressBar, COLOR_TONAL_GREEN, 0);
   lv_obj_set_style_bg_opa(dressBar, LV_OPA_COVER, 0);
   lv_obj_clear_flag(dressBar, LV_OBJ_FLAG_SCROLLABLE);
   ssDressLabel = createLabel(dressBar, "", COLOR_MUTED, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_width(ssDressLabel, 416);
+  lv_obj_set_width(ssDressLabel, 414);
   lv_obj_set_style_text_align(ssDressLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_font(ssDressLabel, &lv_font_montserrat_10, 0);
-  lv_label_set_long_mode(ssDressLabel, LV_LABEL_LONG_WRAP);
+  lv_label_set_long_mode(ssDressLabel, LV_LABEL_LONG_DOT);
 
   ssRenderedClock = "";
   ssRenderedDate = "";
