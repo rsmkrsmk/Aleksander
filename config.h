@@ -44,6 +44,33 @@ constexpr size_t DATA_FILE_ROTATE_BYTES = 256UL * 1024UL;
 // czestszego (niewidocznego) resetu DMA. 2 s to bezpieczny kompromis.
 constexpr uint32_t RGB_RESYNC_INTERVAL_MS = 2000UL;
 
+// -------------------------------- Sen (Napper) ---------------------------------
+// Plik trwalych ustawien na LittleFS (m.in. przelacznik powiadomien snu).
+constexpr char SETTINGS_FILE[] = "/ustawienia.cfg";
+// Granice doby snu: sen zaczynajacy sie w [NIGHT..24) lub [0..DAY) liczymy jako nocny,
+// pozostaly jako drzemke dzienna. Spojne z pasmem nocy day band (21-07).
+constexpr int SLEEP_NIGHT_START_HOUR = 21;
+constexpr int SLEEP_NIGHT_END_HOUR = 7;
+// Wake windows wg wieku (dane Napper). Progi wieku w DNIACH i zakres okna w MINUTACH.
+// Interpolacja liniowa miedzy progami; ponizej 1. progu i powyzej ostatniego — klamrowane.
+// 0-4 tyg:35-60, 4-12 tyg:60-90, 3-4 mc:75-120, 5-7 mc:120-180, 7-10 mc:150-210,
+// 11-14 mc:180-240, 14-24 mc:240-360.
+constexpr int WAKE_WIN_COUNT = 7;
+constexpr int WAKE_WIN_AGE_DAYS[WAKE_WIN_COUNT]  = {0,   28,  84,  150, 210, 330, 420};
+constexpr int WAKE_WIN_MIN_MINUTES[WAKE_WIN_COUNT]= {35,  60,  75,  120, 150, 180, 240};
+constexpr int WAKE_WIN_MAX_MINUTES[WAKE_WIN_COUNT]= {60,  90,  120, 180, 210, 240, 360};
+// Zapotrzebowanie na sen wg wieku (dane Napper/Stanford). Progi w DNIACH, wartosci w MINUTACH.
+// 0 mc:16h(noc8.5/dzien8), 1 mc:15.5h(8.5/7), 3 mc:15h(9.5/5), 6 mc:14h(10/4),
+// 9 mc:14h(11/3), 12 mc:14h(11/2).
+constexpr int SLEEP_NEED_COUNT = 6;
+constexpr int SLEEP_NEED_AGE_DAYS[SLEEP_NEED_COUNT]   = {0,   30,  91,  182, 274, 365};
+constexpr int SLEEP_NEED_NIGHT_MIN[SLEEP_NEED_COUNT]  = {510, 510, 570, 600, 660, 660}; // minuty
+constexpr int SLEEP_NEED_DAY_MIN[SLEEP_NEED_COUNT]    = {480, 420, 300, 240, 180, 120}; // minuty
+// Orientacyjna liczba drzemek dziennych wg wieku (dana pomocnicza, tylko do wyswietlenia).
+constexpr int NAP_TARGET_COUNT = 5;
+constexpr int NAP_TARGET_AGE_DAYS[NAP_TARGET_COUNT] = {0, 120, 210, 365, 550};
+constexpr int NAP_TARGET_NAPS[NAP_TARGET_COUNT]     = {5, 4,   3,   2,   1};
+
 // ------------------------------ Motyw nocny ------------------------------------
 // W tych godzinach urządzenie i panel WWW przechodzą na ciemną paletę
 // oraz łagodniejsze podświetlenie.
