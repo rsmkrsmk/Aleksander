@@ -138,6 +138,7 @@ lv_obj_t *ssDescLabel = nullptr;
 lv_obj_t *ssMinMaxLabel = nullptr;
 lv_obj_t *ssDressLabel = nullptr;
 lv_obj_t *ssLastFeedingLabel = nullptr;
+lv_obj_t *ssSleepLabel = nullptr;   // wygaszacz: 2. wiersz (informacja o drzemce)
 lv_obj_t *homeCounterBar = nullptr;
 lv_obj_t *ssClockCard = nullptr;
 lv_obj_t *ssWeatherCard = nullptr;
@@ -158,6 +159,7 @@ String ssRenderedDescription;
 String ssRenderedMinMax;
 String ssRenderedDress;
 String ssRenderedLastFeeding;
+String ssRenderedSleep;
 String ssRenderedHours[3];
 
 // Dolna czesci home ukrywane w trybie wygaszacza.
@@ -3428,23 +3430,33 @@ void createHomeScreen() {
   ssClockCard = createCard(homeScreen, 14, 150, 452, 88);
   lv_obj_set_style_pad_all(ssClockCard, 10, 0);
 
+  // Lewa kolumna: zegar (font 36 — dostepny w lv_conf) + pod nim dzien tygodnia i data.
   ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
-  lv_obj_set_style_text_font(ssClockLabel, &lv_font_montserrat_48, 0);
+  lv_obj_set_style_text_font(ssClockLabel, &lv_font_montserrat_36, 0);
   lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_LEFT, 0);
   // ssClockShadowLabel nieuzywany (plaski zegar) — zostaje ukryty.
   ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
-  lv_obj_set_style_text_font(ssClockShadowLabel, &lv_font_montserrat_48, 0);
+  lv_obj_set_style_text_font(ssClockShadowLabel, &lv_font_montserrat_36, 0);
   lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
 
-  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -4, 4);
-  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_16, 0);
-  lv_obj_set_style_text_align(ssDateLabel, LV_TEXT_ALIGN_RIGHT, 0);
+  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 4, 46);
+  lv_obj_set_width(ssDateLabel, 130);
+  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_align(ssDateLabel, LV_TEXT_ALIGN_LEFT, 0);
 
-  // Jedna linia karmienia u dolu karty — odsunieta od zegara (font 14, pelna szerokosc).
-  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_BOTTOM_LEFT, 4, 0);
-  lv_obj_set_width(ssLastFeedingLabel, 424);
-  lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_14, 0);
+  // Prawa czesc (od x=146): linia 1 = ostatnie karmienie + (nast. ~HH:MM),
+  // linia 2 = informacja o drzemce. Osobne etykiety, bez zawijania na zegar.
+  // Font 12 (nie 14): dluzsza linia karmienia zawija sie max na 2 wiersze i miesci
+  // z zapasem nad wierszem drzemki (bez nachodzenia w pionie w karcie 68 px wnetrza).
+  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_TOP_LEFT, 146, 4);
+  lv_obj_set_width(ssLastFeedingLabel, 286);
+  lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_12, 0);
   lv_obj_set_style_text_align(ssLastFeedingLabel, LV_TEXT_ALIGN_LEFT, 0);
+  lv_label_set_long_mode(ssLastFeedingLabel, LV_LABEL_LONG_WRAP);
+  ssSleepLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 146, 46);
+  lv_obj_set_width(ssSleepLabel, 286);
+  lv_obj_set_style_text_font(ssSleepLabel, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_align(ssSleepLabel, LV_TEXT_ALIGN_LEFT, 0);
   // ssNextFeedLabel nieuzywany osobno (scalony w linii karmienia) — ukryty.
   ssNextFeedLabel = createLabel(ssClockCard, "", COLOR_BLUE, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
   lv_obj_add_flag(ssNextFeedLabel, LV_OBJ_FLAG_HIDDEN);
@@ -3528,6 +3540,7 @@ void createHomeScreen() {
   ssRenderedMinMax = "";
   ssRenderedDress = "";
   ssRenderedLastFeeding = "";
+  ssRenderedSleep = "";
   ssRenderedNextFeed = "";
   for (uint8_t i = 0; i < 3; ++i) ssRenderedHours[i] = "";
   for (uint8_t i = 0; i < 3; ++i) ssRenderedStat[i] = "";
@@ -4498,12 +4511,12 @@ void updateScreensaverContent() {
     char buf[8];
     strftime(buf, sizeof(buf), "%H:%M", &nowInfo);
     setLabelTextIfChanged(ssClockLabel, ssRenderedClock, String(buf));
-    static const char *DAYS[] = {"NIEDZIELA", "PONIEDZIALEK", "WTOREK", "SRODA",
-                                 "CZWARTEK", "PIATEK", "SOBOTA"};
+    // Krotki dzien tygodnia + data w JEDNEJ linii (pod zegarem), np. "PON 05.09".
+    static const char *DAYS_SHORT[] = {"NIEDZ", "PON", "WT", "SR", "CZW", "PT", "SOB"};
     char dbuf[8];
     strftime(dbuf, sizeof(dbuf), "%d.%m", &nowInfo);
     setLabelTextIfChanged(ssDateLabel, ssRenderedDate,
-                          String(DAYS[nowInfo.tm_wday]) + "\n" + dbuf);
+                          String(DAYS_SHORT[nowInfo.tm_wday]) + " " + dbuf);
     // Jedna linia karmienia: stan + godzina nastepnego (ostatnie + 4h) w nawiasie.
     String feedingText;
     lv_color_t feedingColor = COLOR_MUTED;
@@ -4520,22 +4533,25 @@ void updateScreensaverContent() {
     } else {
       feedingText = "Brak wpisu karmienia";
     }
-    // Subtelna informacja o oknie drzemki dopisana do linii karmienia (bez osobnego
-    // widgetu — karta zegara jest ciasna). Format kompaktowy: " | Drzemka ~HH:MM".
+    setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
+    if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
+    // Drugi wiersz: informacja o drzemce (osobna etykieta pod linia karmienia).
+    String sleepLine;
+    lv_color_t sleepColor = COLOR_MUTED;
     if (sleepInProgress && sleepStartedTime) {
       const long minS = static_cast<long>(difftime(time(nullptr), sleepStartedTime) / 60);
-      feedingText += "  |  Spi: " + formatDurationShort(minS);
+      sleepLine = "Spi: " + formatDurationShort(minS);
     } else if (lastWakeTime > 0) {
       const WakeWindow ww = wakeWindowMinutes(calculateAgeDays());
       const time_t napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
       const time_t napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
       const time_t nowS = time(nullptr);
-      if (nowS < napStart) feedingText += "  |  Drzemka ~" + formatDateTime(napStart).substring(12, 17);
-      else if (nowS <= napEnd) feedingText += "  |  Czas na drzemke";
-      // po przekroczeniu nie zasmiecamy — informacja jest na ekranie SEN
+      if (nowS < napStart) sleepLine = "Drzemka ~" + formatDateTime(napStart).substring(12, 17);
+      else if (nowS <= napEnd) { sleepLine = "Czas na drzemke"; sleepColor = COLOR_YELLOW; }
+      else { sleepLine = "Przekroczone okno czuwania"; sleepColor = COLOR_RED; }
     }
-    setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
-    if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
+    setLabelTextIfChanged(ssSleepLabel, ssRenderedSleep, sleepLine);
+    if (ssSleepLabel) lv_obj_set_style_text_color(ssSleepLabel, sleepColor, 0);
     // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
     // Odswiezamy je NA BIEZACO — przeliczamy rytm co ~30 s (nie tylko przy zapisie),
     // aby "srednia" i "najdluzsza przerwa" uwzglednialy uplyw czasu od ostatniego
@@ -4613,7 +4629,7 @@ void applyScreensaverVisibility() {
   lv_obj_t *widgets[] = {ssClockCard, ssWeatherCard, ssDayBandCard,
                          ssClockLabel, ssDateLabel, ssIconBox,
                          ssTempLabel, ssDescLabel, ssMinMaxLabel, ssDressLabel,
-                         ssLastFeedingLabel,
+                         ssLastFeedingLabel, ssSleepLabel,
                          ssStatValue[0], ssStatValue[1], ssStatValue[2],
                          ssHourLabels[0], ssHourLabels[1], ssHourLabels[2]};
   for (lv_obj_t *o : widgets) {
