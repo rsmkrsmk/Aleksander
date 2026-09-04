@@ -234,6 +234,10 @@ bool sleepInProgress = false;       // true gdy ostatnie zdarzenie snu to SEN_ST
 time_t sleepStartedTime = 0;        // czas rozpoczecia biezacego snu (0 = nie spi)
 time_t lastWakeTime = 0;            // czas ostatniego przebudzenia (SEN_STOP) — start okna czuwania
 bool sleepTelegramEnabled = false;  // powiadomienia Telegram o oknie snu (ustawienie trwale)
+// Flagi jednorazowej wysylki powiadomien o oknie snu (reset przy zasnieciu/nowym czuwaniu).
+time_t sleepNotifyAnchor = 0;       // dla ktorego lastWakeTime wyslano powiadomienia
+bool sleepNotifiedWindow = false;   // wyslano "okno drzemki"
+bool sleepNotifiedOver = false;     // wyslano "przekroczone okno"
 bool deleteModeActive = false;         // tryb wyboru wpisu do usuniecia
 int pendingDeleteIndex = -1;            // indeks oczekujacy na potwierdzenie (-1 = brak)
 
@@ -351,6 +355,7 @@ int napTargetCount(long ageDays);
 int interpTable(long x, const int *xs, const int *ys, int n);
 void loadSettings();
 bool saveSettings();
+void checkSleepNotifications();
 String nextFeedingClock();
 String formatGapShort(int minutes);
 void initWatchdog();
@@ -420,6 +425,7 @@ void sleepOpenEvent(lv_event_t *event);
 String formatDurationShort(long minutes);
 void createDiagnosticsScreen();
 void diagnosticsOpenEvent(lv_event_t *event);
+void sleepTelegramSwitchEvent(lv_event_t *event);
 const char *resetReasonText(int reason);
 void createWeightScreen();
 void weightOpenEvent(lv_event_t *event);
@@ -437,6 +443,7 @@ void handleApiSendBackup();
 void handleApiEvent();
 void handleExportCsv();
 void handleApiImport();
+void handleApiSetting();
 void handleWebNotFound();
 
 bool appendBackupIfDue();
@@ -1255,6 +1262,48 @@ int napTargetCount(long ageDays) {
 // Czy dana godzina nalezy do "nocy" snu (NIGHT_START..24 lub 0..NIGHT_END).
 static bool sleepHourIsNight(int hour) {
   return hour >= SLEEP_NIGHT_START_HOUR || hour < SLEEP_NIGHT_END_HOUR;
+}
+
+// Powiadomienia Telegram o oknie snu — raz na okno czuwania. Wolane cyklicznie z loop().
+// Wysyla: przy wejsciu w okno drzemki (czuwanie >= wakeWindow.min) oraz przy jego
+// przekroczeniu (>= wakeWindow.max). Flagi resetuja sie, gdy zmieni sie lastWakeTime
+// (nowe przebudzenie) albo gdy dziecko spi.
+void checkSleepNotifications() {
+  if (!sleepTelegramEnabled || !timeIsValid) return;
+  // Reset flag przy nowym oknie czuwania lub podczas snu.
+  if (sleepInProgress || lastWakeTime != sleepNotifyAnchor) {
+    sleepNotifyAnchor = lastWakeTime;
+    sleepNotifiedWindow = false;
+    sleepNotifiedOver = false;
+  }
+  if (sleepInProgress || lastWakeTime <= 0) return;
+
+  const WakeWindow ww = wakeWindowMinutes(calculateAgeDays());
+  const time_t nowS = time(nullptr);
+  const time_t napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
+  const time_t napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
+
+  // Ochrona przed falszywym alarmem po restarcie: lastWakeTime bywa stary (z historii).
+  // Nie powiadamiamy o oknie, ktore zamknelo sie dawno (> 30 min po napEnd) — traktujemy
+  // je jako "juz nieaktualne" (dziecko zapewne dawno spi/nie dotyczy). Oznaczamy flagi
+  // jako wyslane, aby nie retro-strzelic po pierwszej synchronizacji NTP.
+  constexpr long STALE_MARGIN_SEC = 30 * 60;
+  if (nowS > napEnd + STALE_MARGIN_SEC) {
+    sleepNotifiedWindow = true;
+    sleepNotifiedOver = true;
+    return;
+  }
+
+  if (!sleepNotifiedOver && nowS > napEnd) {
+    sleepNotifiedOver = true;
+    sleepNotifiedWindow = true; // przekroczenie implikuje, ze okno juz bylo
+    queueTelegram("Aleksander: przekroczone okno czuwania — mozliwe przemeczenie. Warto uspic.");
+  } else if (!sleepNotifiedWindow && nowS >= napStart) {
+    sleepNotifiedWindow = true;
+    queueTelegram(String("Aleksander: okno drzemki (~") +
+                  formatDateTime(napStart).substring(12, 17) + "-" +
+                  formatDateTime(napEnd).substring(12, 17) + "). Dobry moment na sen.");
+  }
 }
 
 // Krotki format przerwy "Xh Ymin" / "Ymin".
@@ -2394,6 +2443,21 @@ void handleApiImport() {
   sendJson(200, payload);
 }
 
+// Zmiana trwalego ustawienia z panelu WWW. Body: key=..., value=... (0/1).
+// Obecnie obslugiwane: sleepTelegram (powiadomienia o oknie snu).
+void handleApiSetting() {
+  const String key = webServer.arg("key");
+  const String value = webServer.arg("value");
+  if (key == "sleepTelegram") {
+    sleepTelegramEnabled = (value.toInt() != 0);
+    saveSettings();
+    sendJson(200, String("{\"message\":\"Zapisano.\",\"sleepTelegram\":") +
+                  (sleepTelegramEnabled ? "true" : "false") + "}");
+    return;
+  }
+  sendJson(400, "{\"message\":\"Nieznane ustawienie.\"}");
+}
+
 void handleWebNotFound() {
   if (webServer.uri().startsWith("/api/")) {
     sendJson(404, "{\"message\":\"Nie znaleziono adresu API.\"}");
@@ -2415,6 +2479,7 @@ void startWebServer() {
     webServer.on("/api/event", HTTP_POST, handleApiEvent);
     webServer.on("/export.csv", HTTP_GET, handleExportCsv);
     webServer.on("/api/import", HTTP_POST, handleApiImport);
+    webServer.on("/api/setting", HTTP_POST, handleApiSetting);
     webServer.onNotFound(handleWebNotFound);
     webRoutesConfigured = true;
   }
@@ -3112,7 +3177,24 @@ void createDiagnosticsScreen() {
   lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
   lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
 
+  // Przelacznik powiadomien Telegram o oknie snu (trwaly — zapis do ustawien).
+  lv_obj_t *sleepTgLabel = createLabel(diagnosticsScreen, "Sen: powiadomienia Telegram",
+                                       COLOR_TEXT, LV_ALIGN_TOP_LEFT, 18, 444);
+  lv_obj_set_style_text_font(sleepTgLabel, &lv_font_montserrat_14, 0);
+  lv_obj_t *sleepTgSwitch = lv_switch_create(diagnosticsScreen);
+  lv_obj_set_pos(sleepTgSwitch, 390, 438);
+  lv_obj_set_size(sleepTgSwitch, 70, 34);
+  if (sleepTelegramEnabled) lv_obj_add_state(sleepTgSwitch, LV_STATE_CHECKED);
+  lv_obj_add_event_cb(sleepTgSwitch, sleepTelegramSwitchEvent, LV_EVENT_VALUE_CHANGED, nullptr);
+
   loadReusableScreen(diagnosticsScreen);
+}
+
+// Zmiana przelacznika powiadomien snu — aktualizuje flage i zapisuje ustawienia.
+void sleepTelegramSwitchEvent(lv_event_t *event) {
+  lv_obj_t *sw = static_cast<lv_obj_t *>(lv_event_get_target(event));
+  sleepTelegramEnabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+  saveSettings();
 }
 
 // Ekran WAGA: wybor wagi dziecka w gramach i zapis wpisu typu WAGA.
@@ -4459,6 +4541,20 @@ void updateScreensaverContent() {
     } else {
       feedingText = "Brak wpisu karmienia";
     }
+    // Subtelna informacja o oknie drzemki dopisana do linii karmienia (bez osobnego
+    // widgetu — karta zegara jest ciasna). Format kompaktowy: " | Drzemka ~HH:MM".
+    if (sleepInProgress && sleepStartedTime) {
+      const long minS = static_cast<long>(difftime(time(nullptr), sleepStartedTime) / 60);
+      feedingText += "  |  Spi: " + formatDurationShort(minS);
+    } else if (lastWakeTime > 0) {
+      const WakeWindow ww = wakeWindowMinutes(calculateAgeDays());
+      const time_t napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
+      const time_t napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
+      const time_t nowS = time(nullptr);
+      if (nowS < napStart) feedingText += "  |  Drzemka ~" + formatDateTime(napStart).substring(12, 17);
+      else if (nowS <= napEnd) feedingText += "  |  Czas na drzemke";
+      // po przekroczeniu nie zasmiecamy — informacja jest na ekranie SEN
+    }
     setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
     if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
     // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
@@ -5255,6 +5351,7 @@ void loop() {
   updateNightMode();
   // Wysylka Telegrama biegnie w telegramTask (rdzen 0) — nie blokuje juz tej petli.
   resyncNtpIfDue();
+  checkSleepNotifications(); // powiadomienia o oknie snu (jesli wlaczone)
 
   // Powrot na ekran glowny po 30 s bezczynnosci na dowolnym ekranie.
   if (!screensaverActive && !otaInProgress && homeScreen &&
