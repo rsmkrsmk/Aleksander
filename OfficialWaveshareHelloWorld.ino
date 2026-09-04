@@ -3586,14 +3586,13 @@ void updateHomeInformation() {
   if (homeLedTime) lv_obj_set_style_bg_color(homeLedTime, timeIsValid ? COLOR_GREEN : COLOR_RED, 0);
 
   // Widoczny pasek licznika czasu od ostatniego karmienia (nad kartami).
+  // Tekst ZAWSZE informuje, kiedy bylo ostatnie karmienie (np. "2h 30min temu");
+  // sygnalizacja "czasu na karmienie" pozostaje wylacznie przez kolor/miganie paska
+  // (patrz updateCounterAlarmVisuals). counterRemainMin nadal steruje wizualizacja.
   String counterText;
   if (lastFeedingTime) {
     const long elapsedMin = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
-    if (elapsedMin >= 0 && elapsedMin < COUNTER_BLINK_MIN) {
-      counterText = "OSTATNIE KARMIENIE: " + formatAgoText(lastFeedingTime);
-    } else {
-      counterText = "CZAS NA KARMIENIE: " + formatAgoText(lastFeedingTime);
-    }
+    counterText = "OSTATNIE KARMIENIE: " + formatAgoText(lastFeedingTime);
     counterRemainMin = (elapsedMin >= 0)
                            ? static_cast<int>(COUNTER_BLINK_MIN - elapsedMin)
                            : -1;
