@@ -3299,7 +3299,8 @@ void updateExtraMilkVisibility() {
   else lv_obj_add_flag(formMilkCard, LV_OBJ_FLAG_HIDDEN);
 
   // Butelka rozwija własną kartę poniżej przycisku. Pozostałe akcje przesuwają się dopiero pod nią.
-  const int actionY = extraMilkEnabled ? 462 : 330;
+  // Karta mleka: y=330, wys.=144 => dol na 474; przyciski akcji tuz pod nia (482).
+  const int actionY = extraMilkEnabled ? 482 : 330;
   if (formSaveButton) lv_obj_set_pos(formSaveButton, 14, actionY);
   if (formCancelButton) lv_obj_set_pos(formCancelButton, 316, actionY);
   if (formStatusLabel) lv_obj_set_pos(formStatusLabel, 25, actionY + 54);
@@ -3505,24 +3506,28 @@ void createFormScreen() {
   formBottleToggleLabel = lv_obj_get_child(formBottleToggleButton, 0);
   lv_obj_add_event_cb(formBottleToggleButton, toggleBottleEvent, LV_EVENT_CLICKED, nullptr);
 
-  formMilkCard = createCard(formScreen, 14, 330, 452, 124);
+  // Wysokosc 144: obszar wewnetrzny (144 - 2*12 padding = 120) miesci suwak, podpisy
+  // i rzad przyciskow MATKI/MODYFIKOWANE (dol na y=114) bez wychodzenia poza karte.
+  formMilkCard = createCard(formScreen, 14, 330, 452, 144);
   lv_obj_set_style_bg_color(formMilkCard, lv_color_mix(COLOR_CARD, COLOR_BLUE, 12), 0);
   createLabel(formMilkCard, "BUTELKA - ILOSC I RODZAJ", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
   formMilkMlLabel = createLabel(formMilkCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 24);
   lv_obj_t *milkSlider = lv_slider_create(formMilkCard);
-  lv_obj_set_pos(milkSlider, 24, 46);
-  lv_obj_set_size(milkSlider, 384, 10);
+  lv_obj_set_pos(milkSlider, 8, 46);
+  lv_obj_set_size(milkSlider, 412, 10);
   lv_slider_set_range(milkSlider, ML_MIN, ML_MAX);
   lv_slider_set_value(milkSlider, selectedMilkMl, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(milkSlider, COLOR_BORDER, LV_PART_MAIN);
   lv_obj_set_style_bg_color(milkSlider, COLOR_ORANGE, LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(milkSlider, COLOR_ORANGE, LV_PART_KNOB);
   lv_obj_add_event_cb(milkSlider, milkSliderEvent, LV_EVENT_VALUE_CHANGED, nullptr);
-  createLabel(formMilkCard, "10 ML", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 12, 54);
-  createLabel(formMilkCard, "120 ML", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -12, 54);
-  formMilkMatkiButton = createButton(formMilkCard, "MATKI", 16, 80, 196, 34, COLOR_GREEN);
+  createLabel(formMilkCard, "10 ML", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 8, 54);
+  createLabel(formMilkCard, "120 ML", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -8, 54);
+  // Rzad przyciskow w obszarze wewn. karty (428 px). Szer. 196, odstep 20, marginesy 8:
+  // MATKI x=8..204, MODYFIKOWANE x=224..420 — z zapasem ~8 px do brzegu (na cien przyciskow).
+  formMilkMatkiButton = createButton(formMilkCard, "MATKI", 8, 80, 196, 34, COLOR_GREEN);
   lv_obj_add_event_cb(formMilkMatkiButton, milkMatkiEvent, LV_EVENT_CLICKED, nullptr);
-  formMilkModifiedButton = createButton(formMilkCard, "MODYFIKOWANE", 240, 80, 196, 34, COLOR_ORANGE);
+  formMilkModifiedButton = createButton(formMilkCard, "MODYFIKOWANE", 224, 80, 196, 34, COLOR_ORANGE);
   lv_obj_add_event_cb(formMilkModifiedButton, milkModifiedEvent, LV_EVENT_CLICKED, nullptr);
 
   formStatusLabel = createLabel(formScreen, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 25, 384);
