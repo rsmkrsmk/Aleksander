@@ -319,6 +319,8 @@ void updateScreenDimming();
 void connectWiFi();
 void retryWiFiConnection();
 bool syncTimeFromNTP();
+void beginNtp();
+bool waitForNtp(uint32_t timeoutMs);
 bool initialiseStorage();
 void loadLatestEntries();
 void recomputeFeedingRhythm();
@@ -326,6 +328,10 @@ String nextFeedingClock();
 String formatGapShort(int minutes);
 void initWatchdog();
 void feedWatchdog();
+void drawBabyFace(lv_obj_t *box);
+void showBootScreen();
+void bootStep(uint8_t idx, uint8_t state);
+void bootPumpLvgl();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
 bool isMilkType(const String &entryType);
 String milkTypeLabel(const String &entryType);
@@ -814,16 +820,34 @@ void retryWiFiConnection() {
   }
 }
 
-bool syncTimeFromNTP() {
-  if (WiFi.status() != WL_CONNECTED) return false;
-
+// Uruchamia klienta SNTP (nieblokujaco). SNTP dziala w tle i sam dokona
+// synchronizacji, gdy tylko serwer odpowie — nie musimy na to czekac w petli.
+bool ntpConfigured = false;
+void beginNtp() {
+  if (WiFi.status() != WL_CONNECTED) return;
   configTzTime(TIMEZONE_RULE, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+  ntpConfigured = true;
+}
+
+// Czeka na wazny czas maksymalnie timeoutMs (krotko przy starcie). Zwraca true,
+// gdy czas jest juz poprawny. Nieudane oczekiwanie nie jest bledem — SNTP
+// dokonczy synchronizacje w tle, a loop() wykryje wazny czas pozniej.
+bool waitForNtp(uint32_t timeoutMs) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  if (!ntpConfigured) beginNtp();
   struct tm timeInfo;
-  for (uint8_t attempt = 0; attempt < 20; ++attempt) {
-    if (getLocalTime(&timeInfo, 250)) return true;
-    delay(250);
-  }
+  const uint32_t start = millis();
+  do {
+    if (getLocalTime(&timeInfo, 100) && timeInfo.tm_year + 1900 >= 2025) return true;
+    delay(100);
+  } while (millis() - start < timeoutMs);
   return false;
+}
+
+// Zgodnosc wsteczna: pelna proba (uzywana poza startem). Krotsza niz dawne 10 s.
+bool syncTimeFromNTP() {
+  beginNtp();
+  return waitForNtp(3000);
 }
 
 bool currentLocalTime(struct tm &timeInfo) {
@@ -1499,6 +1523,7 @@ void handleApiStatus() {
   payload += "\"lastFeedingAgeMin\":" + String(lastFeedingTime ? static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60) : -1) + ",";
   payload += "\"avgFeedingGapMin\":" + String(avgFeedingGapMin) + ",";
   payload += "\"nextFeedingIso\":\"" + jsonEscape(nextFeedingEta ? webDateTime(nextFeedingEta) : String()) + "\",";
+  payload += "\"longestFeedingGapMin\":" + String(longestFeedingGapMin) + ",";
   payload += "\"sleepInProgress\":" + String(sleepInProgress ? "true" : "false") + ",";
   payload += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   payload += "\"storage\":" + String(storageReady ? "true" : "false") + ",";
@@ -1533,7 +1558,15 @@ void handleApiStatus() {
   payload += "\"totalPsram\":" + String(ESP.getPsramSize() / 1024) + ",";
   payload += "\"maxAlloc\":" + String(ESP.getMaxAllocHeap() / 1024) + ",";
   payload += "\"uptimeSec\":" + String(millis() / 1000) + ",";
-  payload += "\"cpuLoad\":" + String(cpuLoadPct) + "}";
+  payload += "\"cpuLoad\":" + String(cpuLoadPct) + ",";
+  // Diagnostyka (te same dane co ekran DIAGNOSTYKA na urzadzeniu).
+  payload += "\"minFreeHeap\":" + String((minFreeHeapEver == 0xFFFFFFFFUL ? 0 : minFreeHeapEver) / 1024) + ",";
+  payload += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
+  payload += "\"httpRequests\":" + String(httpRequestCount) + ",";
+  payload += "\"bootCount\":" + String(bootCount) + ",";
+  payload += "\"watchdogResets\":" + String(watchdogResetCount) + ",";
+  payload += "\"watchdogReady\":" + String(watchdogReady ? "true" : "false") + ",";
+  payload += "\"resetReason\":\"" + jsonEscape(resetReasonText(lastResetReason)) + "\"}";
   sendJson(200, payload);
 }
 
@@ -3884,13 +3917,27 @@ void updateScreensaverContent() {
     setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
     if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
     // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
-    // WAZNE: liczba karmien pochodzi z tego samego zrodla co kalendarz/WWW
-    // (dayStats -> feedingCount), aby na calym urzadzeniu byl JEDEN licznik.
+    // Odswiezamy je NA BIEZACO — przeliczamy rytm co ~30 s (nie tylko przy zapisie),
+    // aby "srednia" i "najdluzsza przerwa" uwzglednialy uplyw czasu od ostatniego
+    // karmienia. Liczba karmien z dayStats (jeden wspolny licznik z kalendarzem/WWW).
+    static uint32_t ssStatsLastRecalc = 0;
+    if (ssStatsLastRecalc == 0 || millis() - ssStatsLastRecalc >= 30000) {
+      recomputeFeedingRhythm();
+      ssStatsLastRecalc = millis();
+    }
     DaySummary ssToday;
     dayStats(dayOffsetFromToday(0), ssToday);
+    // Biezaca (otwarta) przerwa od ostatniego karmienia — pokazujemy najwieksza
+    // z dotychczasowych i tej trwajacej, aby wartosc rosla w czasie na oczach.
+    int shownLongest = longestFeedingGapMin;
+    int shownAvg = avgFeedingGapMin;
+    if (lastFeedingTime) {
+      const int openGap = static_cast<int>(difftime(time(nullptr), lastFeedingTime) / 60);
+      if (openGap > shownLongest) shownLongest = openGap;
+    }
     setLabelTextIfChanged(ssStatValue[0], ssRenderedStat[0], String(ssToday.feedingCount));
-    setLabelTextIfChanged(ssStatValue[1], ssRenderedStat[1], formatGapShort(longestFeedingGapMin));
-    setLabelTextIfChanged(ssStatValue[2], ssRenderedStat[2], formatGapShort(avgFeedingGapMin));
+    setLabelTextIfChanged(ssStatValue[1], ssRenderedStat[1], formatGapShort(shownLongest));
+    setLabelTextIfChanged(ssStatValue[2], ssRenderedStat[2], formatGapShort(shownAvg));
   } else {
     setLabelTextIfChanged(ssClockLabel, ssRenderedClock, "--:--");
     setLabelTextIfChanged(ssDateLabel, ssRenderedDate, "");
@@ -3967,7 +4014,8 @@ void enterScreensaver() {
     weatherFetchPending = true;
   }
   if (!ssClockTimer) {
-    ssClockTimer = lv_timer_create([](lv_timer_t *) { updateScreensaverContent(); }, 10000, nullptr);
+    // 5 s: zegar, licznik "temu" i statystyki odswiezaja sie plynnie na wygaszaczu.
+    ssClockTimer = lv_timer_create([](lv_timer_t *) { updateScreensaverContent(); }, 5000, nullptr);
   }
 }
 
@@ -4217,28 +4265,71 @@ void bootPumpLvgl() {
   lv_timer_handler();
 }
 
+// Rysuje uroczą buzię niemowlaka z prymitywow LVGL wewnatrz podanego kontenera
+// (~104x104). Glowka, kosmyk wlosow, oczy, rumiane policzki, usmiech.
+void drawBabyFace(lv_obj_t *box) {
+  if (!box) return;
+  auto circle = [&](int cx, int cy, int r, lv_color_t c) {
+    lv_obj_t *o = lv_obj_create(box);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, r * 2, r * 2);
+    lv_obj_set_pos(o, cx - r, cy - r);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(o, c, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
+  };
+  const lv_color_t skin   = lv_color_hex(0xF6C9A8);
+  const lv_color_t skinSh = lv_color_hex(0xE8B291);
+  const lv_color_t cheek  = lv_color_hex(0xF3A9A0);
+  const lv_color_t hair   = lv_color_hex(0x6B4A2B);
+  const lv_color_t eye    = lv_color_hex(0x3B2A1E);
+  const lv_color_t white  = lv_color_white();
+
+  // Twarz (delikatny cien u dolu + wlasciwa buzia).
+  circle(52, 56, 34, skinSh);
+  circle(52, 53, 33, skin);
+  // Uszy.
+  circle(20, 55, 7, skin);
+  circle(84, 55, 7, skin);
+  // Kosmyk wlosow (mała czuprynka u gory).
+  circle(52, 24, 11, hair);
+  circle(44, 27, 7, hair);
+  circle(60, 27, 7, hair);
+  lv_obj_t *curl = circle(52, 20, 4, hair); (void)curl;
+  // Oczy (bialko + zrenica) + brwi jako male kreski (kropki).
+  circle(40, 50, 6, white);  circle(40, 51, 3, eye);
+  circle(64, 50, 6, white);  circle(64, 51, 3, eye);
+  // Rumiane policzki.
+  circle(33, 63, 5, cheek);
+  circle(71, 63, 5, cheek);
+  // Nosek.
+  circle(52, 60, 3, skinSh);
+  // Usmiech: luk z trzech kropek.
+  circle(45, 70, 2, eye);
+  circle(52, 73, 2, eye);
+  circle(59, 70, 2, eye);
+}
+
 void showBootScreen() {
   bootScreen = lv_obj_create(nullptr);
   lv_obj_set_style_bg_color(bootScreen, lv_color_hex(0x27492E), 0); // ciepla zielen lesna
   lv_obj_set_style_bg_opa(bootScreen, LV_OPA_COVER, 0);
   lv_obj_clear_flag(bootScreen, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Logo: okragla "odznaka" z inicjalem A.
+  // Logo: okragla "odznaka" z rysowanym bobasem (prymitywy LVGL, wzgledem boxa).
   lv_obj_t *badge = lv_obj_create(bootScreen);
   lv_obj_remove_style_all(badge);
-  lv_obj_set_size(badge, 96, 96);
-  lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, 54);
+  lv_obj_set_size(badge, 104, 104);
+  lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, 50);
   lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(badge, lv_color_hex(0xE6F1E0), 0);
+  lv_obj_set_style_bg_color(badge, lv_color_hex(0xEAF4E4), 0);
   lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(badge, lv_color_hex(0x7FB88A), 0);
   lv_obj_set_style_border_width(badge, 3, 0);
+  lv_obj_set_style_pad_all(badge, 0, 0);
   lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_t *initial = lv_label_create(badge);
-  lv_label_set_text(initial, "A");
-  lv_obj_set_style_text_color(initial, lv_color_hex(0x27492E), 0);
-  lv_obj_set_style_text_font(initial, &lv_font_montserrat_48, 0);
-  lv_obj_center(initial);
+  drawBabyFace(badge);
 
   lv_obj_t *title = lv_label_create(bootScreen);
   lv_label_set_text(title, "LESNY DZIENNIK");
@@ -4416,11 +4507,13 @@ void setup() {
   connectWiFi();
   bootStep(0, WiFi.status() == WL_CONNECTED ? 1 : 2);
 
-  // Krok 2: Zegar NTP.
+  // Krok 2: Zegar NTP — start nieblokujacy; na wazny czas czekamy nizej
+  // (bootscreen przechodzi dalej dopiero gdy czas jest gotowy lub minie limit).
   bootStep(1, 0);
-  timeIsValid = syncTimeFromNTP();
+  beginNtp();
+  timeIsValid = waitForNtp(2500); // krotka pierwsza proba; reszta dokonczy sie w tle
   lastNtpSyncMs = millis();
-  bootStep(1, timeIsValid ? 1 : 2);
+  bootStep(1, timeIsValid ? 1 : 0); // gdy jeszcze brak — zostaw "w toku", dokonczymy po init
 
   // Krok 3: Pamiec danych (LittleFS).
   bootStep(2, 0);
@@ -4465,9 +4558,35 @@ void setup() {
   counterAlarmTimer = lv_timer_create(counterAlarmTickCb, 500, nullptr);
   lastUiWifiConnected = WiFi.status() == WL_CONNECTED;
 
-  // Krotka chwila na pokazanie "Gotowe!" przed wejsciem do aplikacji.
+  // --- Czekamy az wszystko bedzie gotowe zanim wejdziemy do aplikacji ---
+  // Gdy jest Wi-Fi, ale zegar jeszcze niepewny — dajemy NTP czas na synchronizacje
+  // (do BOOT_TIME_WAIT_MS). Bez Wi-Fi nie ma na co czekac. Watchdog nieaktywny —
+  // ta petla jest bezpieczna, a bootPumpLvgl utrzymuje animacje/odswiezanie ekranu.
+  if (WiFi.status() == WL_CONNECTED && !timeIsValid) {
+    if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Synchronizacja zegara...");
+    constexpr uint32_t BOOT_TIME_WAIT_MS = 12000;
+    const uint32_t waitStart = millis();
+    while (!timeIsValid && millis() - waitStart < BOOT_TIME_WAIT_MS) {
+      struct tm probe;
+      if (getLocalTime(&probe, 100) && probe.tm_year + 1900 >= 2025) {
+        timeIsValid = true;
+        break;
+      }
+      bootPumpLvgl();
+      delay(150);
+    }
+    lastNtpSyncMs = millis();
+  }
+  bootStep(1, timeIsValid ? 1 : 2); // ostateczny status kroku zegara
+
+  // "Gotowe!" tylko gdy krytyczne elementy sa OK (pamiec + czas). Inaczej informacja.
+  if (bootStatusLabel) {
+    if (storageReady && timeIsValid) lv_label_set_text(bootStatusLabel, "Gotowe!");
+    else if (!timeIsValid) lv_label_set_text(bootStatusLabel, "Brak czasu — start mimo to");
+    else lv_label_set_text(bootStatusLabel, "Start...");
+  }
   bootPumpLvgl();
-  delay(600);
+  delay(700);
 
   createHomeScreen();
   // Zwolnij ekran startowy (nie jest juz potrzebny) — home jest juz zaladowany.
