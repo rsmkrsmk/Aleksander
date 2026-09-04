@@ -4343,7 +4343,7 @@ void showBootScreen() {
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 162);
 
   lv_obj_t *name = lv_label_create(bootScreen);
-  lv_label_set_text(name, "ALEKSANDRA");
+  lv_label_set_text(name, "ALEKSANDER");
   lv_obj_set_style_text_color(name, lv_color_hex(0xBFE0C4), 0);
   lv_obj_set_style_text_font(name, &lv_font_montserrat_36, 0);
   lv_obj_align(name, LV_ALIGN_TOP_MID, 0, 182);
