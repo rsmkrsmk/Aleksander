@@ -166,6 +166,7 @@ lv_obj_t *milkCard = nullptr;
 lv_obj_t *feedFormButton = nullptr;
 lv_obj_t *otherHomeButton = nullptr;   // "INNE" -> ekran z pielucha i odciagiem
 lv_obj_t *weightHomeButton = nullptr;  // "WAGA" -> ekran wpisu wagi
+lv_obj_t *sleepHomeButton = nullptr;   // "SEN" -> ekran snu (wake windows, bilans)
 lv_obj_t *calendarButton = nullptr;
 lv_obj_t *chartButton = nullptr;
 
@@ -278,6 +279,7 @@ lv_obj_t *pumpingScreen = nullptr;
 lv_obj_t *diaperScreen = nullptr;
 lv_obj_t *otherScreen = nullptr;   // ekran INNE: pielucha + odciag pokarmu
 lv_obj_t *weightScreen = nullptr;  // ekran WAGA: wybor wagi w gramach
+lv_obj_t *sleepScreen = nullptr;   // ekran SEN: wake windows, predykcja drzemki, bilans
 lv_obj_t *diagnosticsScreen = nullptr; // ekran DIAGNOSTYKA (stan urzadzenia)
 lv_obj_t *homeLedWifi = nullptr;
 lv_obj_t *homeLedMemory = nullptr;
@@ -413,6 +415,9 @@ void createOtherScreen();
 void otherOpenEvent(lv_event_t *event);
 void backToOtherEvent(lv_event_t *event);
 void sleepToggleEvent(lv_event_t *event);
+void createSleepScreen();
+void sleepOpenEvent(lv_event_t *event);
+String formatDurationShort(long minutes);
 void createDiagnosticsScreen();
 void diagnosticsOpenEvent(lv_event_t *event);
 const char *resetReasonText(int reason);
@@ -504,7 +509,8 @@ void prepareScreen(lv_obj_t *screen) {
 
 void createReusableScreenRoots() {
   lv_obj_t **screens[] = {&homeScreen, &formScreen, &calendarScreen, &dayDetailScreen, &chartScreen,
-                          &pumpingScreen, &diaperScreen, &otherScreen, &weightScreen, &diagnosticsScreen};
+                          &pumpingScreen, &diaperScreen, &otherScreen, &weightScreen, &sleepScreen,
+                          &diagnosticsScreen};
   for (lv_obj_t **screen : screens) {
     *screen = lv_obj_create(nullptr);
     prepareScreen(*screen);
@@ -2897,6 +2903,7 @@ void backToOtherEvent(lv_event_t *event) {
 void sleepToggleEvent(lv_event_t *event) {
   if (!timeIsValid || !storageReady) return;
   appendEntry(sleepInProgress ? "SEN_STOP" : "SEN_START", time(nullptr), 0);
+  loadLatestEntries(); // odswiez globale snu przed przerysowaniem ekranu
   deleteModeActive = false;
   createHomeScreen();
 }
@@ -2926,6 +2933,113 @@ void createOtherScreen() {
               COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 356);
 
   loadReusableScreen(otherScreen);
+}
+
+// ------------------------------- Ekran SEN (Napper) -----------------------------
+// Format "Xh Ymin" / "Ymin" dla czasu trwania (min).
+String formatDurationShort(long minutes) {
+  if (minutes < 0) return String("-");
+  const long h = minutes / 60, m = minutes % 60;
+  if (h == 0) return String(m) + " min";
+  return String(h) + "h " + m + " min";
+}
+
+void sleepOpenEvent(lv_event_t *event) {
+  createSleepScreen();
+}
+
+// Przelacznik ZASNIJ/OBUDZ na ekranie SEN — po zapisie odswieza ekran SEN (nie home).
+void sleepScreenToggleEvent(lv_event_t *event) {
+  if (!timeIsValid || !storageReady) return;
+  appendEntry(sleepInProgress ? "SEN_STOP" : "SEN_START", time(nullptr), 0);
+  loadLatestEntries(); // odswiez globale snu (sleepInProgress/sleepStartedTime/lastWakeTime)
+  createSleepScreen();
+}
+
+void createSleepScreen() {
+  resetReusableScreen(sleepScreen);
+
+  createLabel(sleepScreen, "SEN", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *backButton = createButton(sleepScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
+  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+
+  const long ageDays = calculateAgeDays();
+  const WakeWindow ww = wakeWindowMinutes(ageDays);
+  const time_t nowT = time(nullptr);
+
+  // --- Karta STANU (spi / czuwa + okno drzemki) ---
+  lv_obj_t *stateCard = createCard(sleepScreen, 14, 88, 452, 120);
+  lv_color_t stateColor = COLOR_MUTED;
+  String bigText, subText;
+  if (sleepInProgress && sleepStartedTime) {
+    const long sinceMin = static_cast<long>(difftime(nowT, sleepStartedTime) / 60);
+    stateColor = lv_color_hex(0x6E5FA6);
+    // formatDateTime => "DD.MM.YYYY␠␠HH:MM": godzina od indeksu 12 (substring(12,17)).
+    bigText = "Spi od " + formatDateTime(sleepStartedTime).substring(12, 17);
+    subText = "Czas snu: " + formatDurationShort(sinceMin);
+  } else if (lastWakeTime > 0) {
+    const long wakeMin = static_cast<long>(difftime(nowT, lastWakeTime) / 60);
+    const time_t napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
+    const time_t napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
+    bigText = "Czuwa od " + formatDateTime(lastWakeTime).substring(12, 17) +
+              "  (" + formatDurationShort(wakeMin) + ")";
+    if (nowT < napStart) { stateColor = COLOR_GREEN; subText = "Za wczesnie. Okno drzemki ~" + formatDateTime(napStart).substring(12, 17) + "-" + formatDateTime(napEnd).substring(12, 17); }
+    else if (nowT <= napEnd) { stateColor = COLOR_YELLOW; subText = "OKNO DRZEMKI TERAZ (do ~" + formatDateTime(napEnd).substring(12, 17) + ")"; }
+    else { stateColor = COLOR_RED; subText = "Przekroczone okno (ryzyko przemeczenia)"; }
+  } else {
+    bigText = "Brak danych snu";
+    subText = "Dotknij ZASNIJ, aby rozpoczac sledzenie.";
+  }
+  lv_obj_t *bigLabel = createLabel(stateCard, bigText.c_str(), COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 6);
+  lv_obj_set_width(bigLabel, 416);
+  lv_obj_set_style_text_align(bigLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_font(bigLabel, &lv_font_montserrat_16, 0);
+  // Pasek stanu okna czuwania (kolorowy). Szer. 416 wysrodkowana w obszarze 428.
+  lv_obj_t *stateBar = lv_obj_create(stateCard);
+  lv_obj_remove_style_all(stateBar);
+  lv_obj_set_pos(stateBar, 6, 38);
+  lv_obj_set_size(stateBar, 416, 30);
+  lv_obj_set_style_radius(stateBar, 15, 0);
+  lv_obj_set_style_bg_color(stateBar, stateColor, 0);
+  lv_obj_set_style_bg_opa(stateBar, LV_OPA_COVER, 0);
+  lv_obj_t *subLabel = createLabel(stateBar, subText.c_str(), lv_color_white(), LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_width(subLabel, 404);
+  lv_obj_set_style_text_align(subLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_font(subLabel, &lv_font_montserrat_12, 0);
+  // Okno czuwania wg wieku (informacyjnie).
+  createLabel(stateCard,
+              (String("Okno czuwania wg wieku: ") + formatDurationShort(ww.minMin) + " - " + formatDurationShort(ww.maxMin)).c_str(),
+              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 76);
+
+  // --- Duzy przycisk ZASNIJ / OBUDZ ---
+  lv_obj_t *toggleBtn = createButton(sleepScreen,
+                                     sleepInProgress ? "OBUDZ" : "ZASNIJ",
+                                     14, 220, 452, 66,
+                                     sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
+  lv_obj_add_event_cb(toggleBtn, sleepScreenToggleEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *toggleLbl = lv_obj_get_child(toggleBtn, 0);
+  if (toggleLbl) lv_obj_set_style_text_font(toggleLbl, &lv_font_montserrat_16, 0);
+
+  // --- Karta BILANSU DNIA (drzemki + sen dzien/noc vs cel) ---
+  DaySummary today; dayStats(dayOffsetFromToday(0), today);
+  int needNight = 0, needDay = 0; sleepNeedMinutes(ageDays, needNight, needDay);
+  const int napTgt = napTargetCount(ageDays);
+  // Wysokosc 140 (wnetrze 116): 4 linie montserrat_14 od y=26 mieszcza sie z zapasem.
+  lv_obj_t *balCard = createCard(sleepScreen, 14, 298, 452, 140);
+  lv_obj_set_style_bg_color(balCard, lv_color_mix(COLOR_CARD, lv_color_hex(0x6E5FA6), 12), 0);
+  createLabel(balCard, "BILANS DNIA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
+  String balText;
+  balText  = "Drzemki: " + String(today.napCount) + " (cel ~" + String(napTgt) + ")\n";
+  balText += "Sen dzien: " + formatDurationShort(today.sleepDayMin) + " / cel " + formatDurationShort(needDay) + "\n";
+  balText += "Sen noc: " + formatDurationShort(today.sleepNightMin) + " / cel " + formatDurationShort(needNight) + "\n";
+  balText += "Razem: " + formatDurationShort(today.sleepDayMin + today.sleepNightMin);
+  // Szerokosc 416 przy offsecie x=6 => prawy brzeg 422 < 428 (obszar wewn. karty).
+  lv_obj_t *balLabel = createLabel(balCard, balText.c_str(), COLOR_TEXT, LV_ALIGN_TOP_LEFT, 6, 26);
+  lv_obj_set_width(balLabel, 416);
+  lv_obj_set_style_text_align(balLabel, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_style_text_font(balLabel, &lv_font_montserrat_14, 0);
+
+  loadReusableScreen(sleepScreen);
 }
 
 // ---------------------------- Ekran DIAGNOSTYKA ----------------------------
@@ -3216,14 +3330,22 @@ void createHomeScreen() {
   feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 268, 452, 48, COLOR_ORANGE);
   lv_obj_add_event_cb(feedFormButton, feedingButtonEvent, LV_EVENT_CLICKED, nullptr);
 
-  otherHomeButton = createButton(homeScreen, "INNE", 14, 324, 220, 40, COLOR_BLUE);
+  // Dolna nawigacja: 3 kolumny x 2 rzedy (6 slotow). Szerokosc kolumny 145 px,
+  // odstep 8: x = 14, 167, 320. SEN wyrozniony fioletem; gdy dziecko spi -> zolty.
+  const int navW = 145;
+  const int navX[3] = {14, 167, 320};
+  // Rzad 1 (y=324): SEN, INNE, WAGA
+  sleepHomeButton = createButton(homeScreen, sleepInProgress ? "SEN*" : "SEN",
+                                 navX[0], 324, navW, 40,
+                                 sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
+  lv_obj_add_event_cb(sleepHomeButton, sleepOpenEvent, LV_EVENT_CLICKED, nullptr);
+  otherHomeButton = createButton(homeScreen, "INNE", navX[1], 324, navW, 40, COLOR_BLUE);
   lv_obj_add_event_cb(otherHomeButton, otherOpenEvent, LV_EVENT_CLICKED, nullptr);
-  weightHomeButton = createButton(homeScreen, "WAGA", 246, 324, 220, 40, COLOR_BLUE);
+  weightHomeButton = createButton(homeScreen, "WAGA", navX[2], 324, navW, 40, COLOR_BLUE);
   lv_obj_add_event_cb(weightHomeButton, weightOpenEvent, LV_EVENT_CLICKED, nullptr);
-
-  calendarButton = createButton(homeScreen, "KALENDARZ", 14, 372, 220, 40, COLOR_BLUE);
+  // Rzad 2 (y=372): KALENDARZ, PODSUMOWANIE (2 kolumny szersze dla czytelnosci etykiet)
+  calendarButton = createButton(homeScreen, "KALENDARZ", navX[0], 372, 220, 40, COLOR_BLUE);
   lv_obj_add_event_cb(calendarButton, calendarButtonEvent, LV_EVENT_CLICKED, nullptr);
-
   chartButton = createButton(homeScreen, "PODSUMOWANIE", 246, 372, 220, 40, COLOR_GREEN);
   lv_obj_add_event_cb(chartButton, chartButtonEvent, LV_EVENT_CLICKED, nullptr);
 
