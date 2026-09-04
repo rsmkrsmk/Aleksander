@@ -79,6 +79,7 @@ constexpr uint32_t SCREEN_DIM_TIMEOUT_MS = 60UL * 1000UL;
 
 // ------------------------------ Stan aplikacji ---------------------------------
 bool storageReady = false;
+bool dataFileHuge = false;          // true gdy plik danych przekroczyl prog rotacji (ostrzezenie)
 bool timeIsValid = false;
 bool extraMilkEnabled = false;
 bool extraMilkModified = false;
@@ -122,6 +123,23 @@ uint32_t weatherLastTryMs = 0;
 uint32_t weatherNextTryMs = 0;
 TaskHandle_t weatherTaskHandle = nullptr;
 SemaphoreHandle_t weatherMutex = nullptr;
+
+// Bezpieczny odczyt weatherState (zapisywanego z weatherTask na rdzeniu 0).
+// Kopia calej struktury pod mutexem; przy braku mutexa/timeoutcie zwraca ostatnia
+// widoczna wartosc (spojnosc pojedynczych intow wystarcza jako fallback).
+WeatherState snapshotWeather() {
+  WeatherState copy;
+  if (weatherMutex && xSemaphoreTake(weatherMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    copy = weatherState;
+    xSemaphoreGive(weatherMutex);
+  } else {
+    copy = weatherState;
+  }
+  return copy;
+}
+
+// Skrot: samo pole valid (te same reguly dostepu co snapshotWeather).
+bool weatherValidNow() { return snapshotWeather().valid; }
 
 bool screensaverActive = false;
 lv_obj_t *ssClockLabel = nullptr;
@@ -202,12 +220,17 @@ WebServer webServer(80);
 bool nightModeActive = false;
 uint32_t lastNtpSyncMs = 0;
 long lastBackupDayStamp = 0;        // yyyymmdd ostatniej kopii zapasowej
-String pendingTelegramText;         // max 1 wiadomosc w kolejce
+String pendingTelegramText;         // max 1 wiadomosc w kolejce (chroniona telegramMutex)
 uint32_t telegramNextAttemptMs = 0;
 // Automatyczny backup przez Telegram: B_IDLE (wolny), B_WANTED (czeka), B_SENDING.
 enum BackupState { B_IDLE, B_WANTED, B_SENDING };
-BackupState backupState = B_IDLE;
-String backupFileName;
+BackupState backupState = B_IDLE;   // chroniony telegramMutex
+String backupFileName;              // chroniony telegramMutex
+// Wysylka Telegrama (TLS) jest blokujaca — wynosimy ja do osobnego zadania FreeRTOS
+// na rdzeniu 0, aby nie zamrazac loop()/LVGL/dotyku. Kolejka i stan backupu sa
+// wspoldzielone miedzy rdzeniami, wiec dostep chronimy mutexem.
+TaskHandle_t telegramTaskHandle = nullptr;
+SemaphoreHandle_t telegramMutex = nullptr;
 bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
@@ -333,6 +356,8 @@ void showBootScreen();
 void bootStep(uint8_t idx, uint8_t state);
 void bootPumpLvgl();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
+bool copyLittleFsFile(const char *srcPath, const char *dstPath);
+void archiveDataFileIfHuge();
 bool isMilkType(const String &entryType);
 String milkTypeLabel(const String &entryType);
 String entriesForDay(time_t day, bool compact);
@@ -407,11 +432,13 @@ void handleWebNotFound();
 
 bool appendBackupIfDue();
 String buildBackupFileName();
-bool sendBackupViaTelegram();
+bool sendBackupViaTelegram(const String &fileName);
 void resyncNtpIfDue();
 void queueTelegram(const String &text);
 String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight, time_t when);
 void pumpTelegramQueue();
+void telegramTask(void *parameter);
+void wakeTelegramTask();
 void queueTelegramStartup();
 void initOptionalServices();
 void updateNightMode();
@@ -885,6 +912,8 @@ bool initialiseStorage() {
     file.println("data,godzina,typ,ml,piers_lewa_min,piers_prawa_min");
     file.close();
   } else {
+    // Sygnal, gdy istniejacy plik jest juz duzy (widoczne w diagnostyce od startu).
+    dataFileHuge = file.size() >= DATA_FILE_ROTATE_BYTES;
     file.close();
   }
   return true;
@@ -978,10 +1007,21 @@ void loadLatestEntries() {
   lastWeightG = 0;
   sleepInProgress = false;
   sleepStartedTime = 0;
+  // Statystyki rytmu dnia liczymy w TYM SAMYM przebiegu pliku (dawniej osobny skan
+  // przez recomputeFeedingRhythm). Jeden odczyt pliku zamiast dwoch.
+  avgFeedingGapMin = 0;
+  longestFeedingGapMin = 0;
+  todayFeedingCount = 0;
+  nextFeedingEta = 0;
   if (!storageReady) return;
 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!file) return;
+
+  const String today = dateIso(dayOffsetFromToday(0));
+  time_t prevFeedingToday = 0;
+  long sumGapMin = 0;
+  int gapCount = 0;
 
   file.readStringUntil('\n'); // pominięcie nagłówka
   while (file.available()) {
@@ -994,6 +1034,20 @@ void loadLatestEntries() {
     if (entry.type == "KARMIENIE") {
       lastFeeding = formatEntryForUi(line);
       lastFeedingTime = stamp;
+      // Rytm dnia: tylko wpisy KARMIENIE z dzisiejsza data (plik jest append-only
+      // => kolejnosc chronologiczna, wiec przerwy liczymy w locie).
+      if (entry.date == today) {
+        ++todayFeedingCount;
+        if (prevFeedingToday > 0) {
+          const long gap = static_cast<long>(difftime(stamp, prevFeedingToday) / 60);
+          if (gap > 0) {
+            sumGapMin += gap;
+            ++gapCount;
+            if (gap > longestFeedingGapMin) longestFeedingGapMin = static_cast<int>(gap);
+          }
+        }
+        prevFeedingToday = stamp;
+      }
     }
     if (isMilkType(entry.type)) {
       lastMilk = formatEntryForUi(line);
@@ -1011,7 +1065,10 @@ void loadLatestEntries() {
     }
   }
   file.close();
-  recomputeFeedingRhythm(); // odswiez sugestie nastepnego karmienia
+
+  // Podsumowanie rytmu — identyczne jak w recomputeFeedingRhythm, ale bez 2. skanu.
+  if (gapCount >= 1) avgFeedingGapMin = static_cast<int>(sumGapMin / gapCount);
+  if (lastFeedingTime) nextFeedingEta = lastFeedingTime + static_cast<time_t>(COUNTER_BLINK_MIN) * 60;
 }
 
 // Statystyki karmien DZIS (tylko typ KARMIENIE): liczba, najdluzsza i srednia
@@ -1154,6 +1211,35 @@ bool deleteEntryByIndex(int entryIndex, String &removedDescription) {
   return true;
 }
 
+// Miekka rotacja: gdy plik danych przekroczy prog, tworzymy jednorazowo kopie
+// archiwalna ze znacznikiem daty i podnosimy flage ostrzegawcza. DANYCH NIE
+// USUWAMY — na tej platformie jest ~11 MB miejsca, wiec chodzi wylacznie o sygnal,
+// ze historia urosla i skany CSV staja sie kosztowne (uzytkownik moze wyeksportowac
+// i zaimportowac skrocony plik). Kopia sluzy tez jako dodatkowy backup.
+void archiveDataFileIfHuge() {
+  if (!storageReady || dataFileHuge) return;
+  File probe = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!probe) return;
+  const size_t sizeBytes = probe.size();
+  probe.close();
+  if (sizeBytes < DATA_FILE_ROTATE_BYTES) return;
+
+  // Nazwa archiwum ze znacznikiem daty (bez usuwania oryginalu).
+  char archivePath[40];
+  struct tm nowInfo;
+  if (currentLocalTime(nowInfo)) {
+    strftime(archivePath, sizeof(archivePath), "/karmienia_arch_%Y-%m-%d.csv", &nowInfo);
+  } else {
+    snprintf(archivePath, sizeof(archivePath), "/karmienia_arch.csv");
+  }
+  const bool copied = copyLittleFsFile(DATA_FILE_PATH, archivePath);
+  dataFileHuge = true; // ostrzezenie widoczne w diagnostyce; nie powtarzamy w tej sesji
+  Serial.printf("Dane: plik osiagnal %u KB (prog %u KB). %s\n",
+                static_cast<unsigned>(sizeBytes / 1024),
+                static_cast<unsigned>(DATA_FILE_ROTATE_BYTES / 1024),
+                copied ? "Utworzono kopie archiwalna." : "Nie udalo sie utworzyc kopii archiwalnej.");
+}
+
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int piersRight) {
   if (!storageReady) return false;
 
@@ -1168,14 +1254,26 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_APPEND);
   if (!file) return false;
 
-  bool saved;
+  // Budujemy caly wiersz, a potem sprawdzamy, czy zapisano DOKLADNIE tyle bajtow
+  // (zapis czesciowy przy zapelnionej pamieci NIE moze uchodzic za sukces).
+  char row[96];
+  int rowLen;
   if (piersLeft >= 0 || piersRight >= 0) {
     // Nowy format z minutami piersi (wartość -1 oznacza: użyj zera).
-    saved = file.printf("%s,%s,%s,%d,%d,%d\n", datePart, timePart, entryType, ml,
-                        max(piersLeft, 0), max(piersRight, 0)) > 0;
+    rowLen = snprintf(row, sizeof(row), "%s,%s,%s,%d,%d,%d\n", datePart, timePart, entryType, ml,
+                      max(piersLeft, 0), max(piersRight, 0));
   } else {
     // Wywołania bez minut (mleko, starsze ścieżki) zostawiają 4 kolumny.
-    saved = file.printf("%s,%s,%s,%d\n", datePart, timePart, entryType, ml) > 0;
+    rowLen = snprintf(row, sizeof(row), "%s,%s,%s,%d\n", datePart, timePart, entryType, ml);
+  }
+  bool saved = false;
+  if (rowLen > 0 && rowLen < static_cast<int>(sizeof(row))) {
+    const size_t written = file.write(reinterpret_cast<const uint8_t *>(row), static_cast<size_t>(rowLen));
+    saved = (written == static_cast<size_t>(rowLen));
+    if (!saved) Serial.printf("Zapis: niepelny wiersz (%u z %d B) — pamiec pelna?\n",
+                              static_cast<unsigned>(written), rowLen);
+  } else {
+    Serial.println("Zapis: wiersz przekroczyl bufor — pominieto.");
   }
   file.flush();
   file.close();
@@ -1194,6 +1292,7 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
   if (saved) {
     invalidateDayStats();
     appendBackupIfDue();
+    archiveDataFileIfHuge(); // miekka rotacja: kopia + ostrzezenie przy duzym pliku
     queueTelegram(telegramTextFor(String(entryType), ml, piersLeft, piersRight, when));
   }
   return saved;
@@ -1244,14 +1343,21 @@ String calendarDayTitle(time_t value, uint8_t index) {
 String entriesForDay(time_t day, bool compact) {
   if (!storageReady) return "Pamiec niedostepna";
 
-  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
-  if (!file) return "Nie mozna otworzyc historii";
-
   // Podsumowanie pochodzi z cache statystyk (jeden przebieg pliku dla wszystkich widoków).
   DaySummary s;
   dayStats(day, s);
 
-  int shown = 0;
+  // Tryb compact (kalendarz) zwraca samo podsumowanie z cache — NIE skanujemy pliku.
+  // (Wczesniej plik byl otwierany i skanowany, a wynik i tak odrzucany przez early return.)
+  if (compact) {
+    const String summaryOnly = formatDaySummaryLine(s) + "\n" + formatDayExtraLine(s);
+    if (s.feedingCount == 0 && s.milkCount == 0) return summaryOnly + "\nBrak wpisow";
+    return summaryOnly;
+  }
+
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) return "Nie mozna otworzyc historii";
+
   String details;
   const String targetDate = dateIso(day);
 
@@ -1262,24 +1368,20 @@ String entriesForDay(time_t day, bool compact) {
     if (!line.startsWith(targetDate + ",")) continue;
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) continue;
-    if (!compact || shown < 2) {
-      String rowText;
-      if (isMilkType(entry.type)) {
-        rowText = milkTypeLabel(entry.type) + "  " + String(entry.ml) + " ml";
-      } else if (entry.type == "KARMIENIE" && (entry.piersLeft > 0 || entry.piersRight > 0)) {
-        rowText = "KARMIENIE  L" + String(entry.piersLeft) + "/P" + String(entry.piersRight);
-      } else {
-        rowText = entry.type;
-      }
-      details += entry.time + "  " + rowText + "\n";
-      ++shown;
+    String rowText;
+    if (isMilkType(entry.type)) {
+      rowText = milkTypeLabel(entry.type) + "  " + String(entry.ml) + " ml";
+    } else if (entry.type == "KARMIENIE" && (entry.piersLeft > 0 || entry.piersRight > 0)) {
+      rowText = "KARMIENIE  L" + String(entry.piersLeft) + "/P" + String(entry.piersRight);
+    } else {
+      rowText = entry.type;
     }
+    details += entry.time + "  " + rowText + "\n";
   }
   file.close();
 
   const String summary = formatDaySummaryLine(s) + "\n" + formatDayExtraLine(s);
   if (s.feedingCount == 0 && s.milkCount == 0) return summary + "\nBrak wpisow";
-  if (compact) return summary;
   return summary + "\n" + details;
 }
 
@@ -1532,6 +1634,7 @@ void handleApiStatus() {
   payload += "\"sleepInProgress\":" + String(sleepInProgress ? "true" : "false") + ",";
   payload += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   payload += "\"storage\":" + String(storageReady ? "true" : "false") + ",";
+  payload += "\"dataFileHuge\":" + String(dataFileHuge ? "true" : "false") + ",";
   payload += "\"timeValid\":" + String(timeIsValid ? "true" : "false") + ",";
   payload += "\"minMl\":" + String(ML_MIN) + ",";
   payload += "\"maxMl\":" + String(ML_MAX) + ",";
@@ -1596,7 +1699,11 @@ void handleApiEntries() {
     return;
   }
   const String targetDate = dateIso(day);
-  String payload = "{\"date\":\"" + targetDate + "\",\"entries\":[";
+  String payload;
+  // Rezerwacja z gory: typowy dzien ma kilkanascie wpisow po ~140 B JSON. 4 KB
+  // pokrywa to z zapasem i eliminuje serie realloc-ow fragmentujacych heap wewn.
+  payload.reserve(4096);
+  payload = "{\"date\":\"" + targetDate + "\",\"entries\":[";
   bool firstEntry = true;
   int dataIndex = 0;
   file.readStringUntil('\n');
@@ -1816,13 +1923,24 @@ void handleApiSendBackup() {
     sendJson(400, "{\"message\":\"Brak pliku backupu.\"}");
     return;
   }
+  // Check-and-set stanu backupu pod mutexem (czyta go telegramTask na rdzeniu 0),
+  // spojnie z appendBackupIfDue. Bez tego byl wyscig na backupState/backupFileName.
+  bool alreadyBusy = false;
+  if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   if (backupState != B_IDLE) {
+    alreadyBusy = true;
+  } else {
+    backupFileName = buildBackupFileName();
+    backupState = B_WANTED;
+    if (telegramNextAttemptMs == 0) telegramNextAttemptMs = millis();
+  }
+  if (telegramMutex) xSemaphoreGive(telegramMutex);
+
+  if (alreadyBusy) {
     sendJson(200, "{\"message\":\"Wysylka backupu juz trwa.\"}");
     return;
   }
-  backupFileName = buildBackupFileName();
-  backupState = B_WANTED;
-  if (telegramNextAttemptMs == 0) telegramNextAttemptMs = millis();
+  wakeTelegramTask(); // nie czekaj do 5 s na timeout taska
   sendJson(200, "{\"message\":\"Zaplanowano wysylke backupu na Telegram.\"}");
 }
 
@@ -1846,8 +1964,13 @@ void handleApiEvent() {
     return;
   }
 
+  // Domyslnie biezacy czas; gdy klient poda "when", MUSI byc poprawny (inaczej 400,
+  // zeby nie zapisac cicho zdarzenia z bledna/zastapiona data).
   time_t when = time(nullptr);
-  if (webServer.hasArg("when")) parseWebDateTime(webServer.arg("when"), when);
+  if (webServer.hasArg("when") && !parseWebDateTime(webServer.arg("when"), when)) {
+    sendJson(400, "{\"message\":\"Nieprawidlowy czas zdarzenia.\"}");
+    return;
+  }
 
   // Waga: wartosc w gramach (osobny zakres, poza ML_MAX).
   if (type == "WAGA") {
@@ -2616,7 +2739,8 @@ void createDiagnosticsScreen() {
   s += "Ostatnie zadanie HTTP: " + (lastHttpMillis ? (String(httpAgo) + " s temu") : String("-")) + "\n";
   s += "Czas (NTP): " + String(timeIsValid ? "OK" : "brak") + "\n";
   s += "Pamiec danych: " + String(storageReady ? "OK" : "BLAD") + "\n";
-  s += "Pogoda: " + String(weatherState.valid ? "OK" : "brak danych") + "\n";
+  if (dataFileHuge) s += "Uwaga: plik historii duzy (rozwaz eksport)\n";
+  s += "Pogoda: " + String(weatherValidNow() ? "OK" : "brak danych") + "\n";
   s += "---\n";
   s += "RAM wewn. wolny: " + String(freeInt) + " KB\n";
   s += "RAM wewn. min: " + String(minInt) + " KB\n";
@@ -3387,10 +3511,18 @@ bool appendBackupIfDue() {
   lastBackupDayStamp = stamp;
   Serial.println("Backup: utworzono kopie dzienna.");
   // Automatyczna wysylka backupu na Telegram, o ile nie czeka juz w kolejce.
+  // Stan backupu czyta telegramTask (inny rdzen) — zapis pod mutexem.
+  bool scheduled = false;
+  if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   if (backupState == B_IDLE) {
     backupFileName = buildBackupFileName();
     backupState = B_WANTED;
+    scheduled = true;
+  }
+  if (telegramMutex) xSemaphoreGive(telegramMutex);
+  if (scheduled) {
     Serial.println("Backup: zaplanowano wysylke na Telegram.");
+    wakeTelegramTask();
   }
   return true;
 }
@@ -3480,12 +3612,16 @@ String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight
   return type + " " + hhmm;
 }
 
-// Kolejka 1-elementowa: nowszy wpis zastępuje starszy, wysyłka nie blokuje UI.
+// Kolejka 1-elementowa: nowszy wpis zastępuje starszy, wysyłka nie blokuje UI
+// (realizuje ja telegramTask). Zapis pod mutexem, bo czyta go inny rdzen.
 void queueTelegram(const String &text) {
   if (text.length() == 0) return;
   if (strlen(TELEGRAM_BOT_TOKEN) == 0 || strlen(TELEGRAM_CHAT_ID) == 0) return;
+  if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   pendingTelegramText = text;
   if (telegramNextAttemptMs == 0) telegramNextAttemptMs = millis();
+  if (telegramMutex) xSemaphoreGive(telegramMutex);
+  wakeTelegramTask();
 }
 
 // Nazwa pliku backupu: karmienia_YYYY-MM-DD.csv
@@ -3499,7 +3635,9 @@ String buildBackupFileName() {
 
 // Wysyla /karmienia_backup.csv jako dokument przez sendDocument.
 // Multipart skladany w locie; tresc pliku streamowana z LittleFS (bez alokacji duzych buforow).
-bool sendBackupViaTelegram() {
+// fileName przekazywany przez wartosc (snapshot zrobiony pod mutexem w wolajacym),
+// aby NIE czytac globalnego backupFileName z innego rdzenia bez synchronizacji.
+bool sendBackupViaTelegram(const String &fileName) {
   if (strlen(TELEGRAM_BOT_TOKEN) == 0 || strlen(TELEGRAM_CHAT_ID) == 0) {
     Serial.println("Telegram: backup pominieto — brak tokenu lub chat_id.");
     return false;
@@ -3531,7 +3669,7 @@ bool sendBackupViaTelegram() {
   String head = String("--") + boundary + "\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n" +
                 TELEGRAM_CHAT_ID + "\r\n";
   head += String("--") + boundary + "\r\nContent-Disposition: form-data; name=\"document\"; filename=\"" +
-          backupFileName + "\"\r\nContent-Type: text/csv\r\n\r\n";
+          fileName + "\"\r\nContent-Type: text/csv\r\n\r\n";
   const String tail = String("\r\n--") + boundary + "--\r\n";
   const size_t bodyLen = head.length() + fileSize + tail.length();
 
@@ -3572,13 +3710,19 @@ bool sendBackupViaTelegram() {
   return false;
 }
 
+// Jedna proba obslugi kolejki Telegrama. Wywolywana WYLACZNIE z telegramTask
+// (rdzen 0) — blokujace operacje TLS nie dotykaja loop()/LVGL/dotyku. Dostep do
+// wspoldzielonego stanu (pendingTelegramText/backupState/backupFileName) jest
+// pod telegramMutex; sama wysylka TLS biegnie bez trzymania mutexa.
 void pumpTelegramQueue() {
 #if !FEATURE_HTTPCLIENT
+  if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   if (backupState != B_IDLE) backupState = B_IDLE;
   if (pendingTelegramText.length() > 0) {
     Serial.println("Telegram: HTTPClient niedostepny w tym rdzeniu — powiadomienie pominiete.");
     pendingTelegramText = "";
   }
+  if (telegramMutex) xSemaphoreGive(telegramMutex);
   return;
 #else
   if (static_cast<int32_t>(millis() - telegramNextAttemptMs) < 0) return;
@@ -3587,24 +3731,38 @@ void pumpTelegramQueue() {
     return;
   }
 
-  // Priorytet: backup (dokument) przed zwykla wiadomoscia.
+  // --- Migawka stanu pod mutexem: decydujemy, co wyslac, bez trzymania go w TLS ---
+  bool doBackup = false;
+  String textToSend;
+  String backupNameSnapshot; // kopia nazwy pliku pod mutexem (nie czytamy globalu w TLS)
+  if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   if (backupState == B_WANTED || backupState == B_SENDING) {
     backupState = B_SENDING;
-    const bool ok = sendBackupViaTelegram();
+    doBackup = true;
+    backupNameSnapshot = backupFileName;
+  } else if (pendingTelegramText.length() > 0) {
+    textToSend = pendingTelegramText; // kopia lokalna do wyslania
+  }
+  if (telegramMutex) xSemaphoreGive(telegramMutex);
+
+  // Priorytet: backup (dokument) przed zwykla wiadomoscia.
+  if (doBackup) {
+    const bool ok = sendBackupViaTelegram(backupNameSnapshot);
+    if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
     if (ok) {
-      backupState = B_IDLE;
+      // Tylko jesli w miedzyczasie nie zaplanowano nowego backupu.
+      if (backupState == B_SENDING) backupState = B_IDLE;
       telegramNextAttemptMs = millis() + 10000;
-      return;
+    } else {
+      backupState = B_WANTED; // ponawiamy za 30 s
+      telegramNextAttemptMs = millis() + 30000;
     }
-    // Nieudane — zostajemy w WANTED i ponawiamy za 30 s.
-    backupState = B_WANTED;
-    telegramNextAttemptMs = millis() + 30000;
+    if (telegramMutex) xSemaphoreGive(telegramMutex);
     return;
   }
 
-  if (pendingTelegramText.length() == 0) return;
+  if (textToSend.length() == 0) return;
 
-  feedWatchdog(); // operacja TLS potrafi trwac kilka s — nakarm WDT przed i po
   WiFiClientSecure client;
   client.setInsecure(); // autoryzacją jest sam token bota
   client.setTimeout(8000);
@@ -3613,27 +3771,28 @@ void pumpTelegramQueue() {
   if (!http.begin(client, "api.telegram.org", 443, url)) {
     Serial.println("Telegram: http.begin() nieudany.");
     telegramNextAttemptMs = millis() + 30000;
-    feedWatchdog();
     return;
   }
   http.setTimeout(8000);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   const String body = "chat_id=" + String(TELEGRAM_CHAT_ID) +
-                      "&text=" + telegramUrlEncode(pendingTelegramText);
+                      "&text=" + telegramUrlEncode(textToSend);
   const int code = http.POST(body);
   http.end();
-  feedWatchdog();
+
+  if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   if (code == 200) {
-    pendingTelegramText = ""; // sukces — usuwamy z kolejki
+    // Usuwamy z kolejki tylko jesli w miedzyczasie nie doszla NOWSZA wiadomosc.
+    if (pendingTelegramText == textToSend) pendingTelegramText = "";
     telegramFailCount = 0;
     Serial.println("Telegram: wiadomosc wyslana.");
   } else {
     // Niepowodzenie — ponawiamy za 30 s, ale po TELEGRAM_MAX_FAILS z rzedu
-    // porzucamy wpis, zeby nie blokowac petli w nieskonczonosc.
+    // porzucamy wpis, zeby nie blokowac kolejki w nieskonczonosc.
     ++telegramFailCount;
     if (telegramFailCount >= TELEGRAM_MAX_FAILS) {
       Serial.printf("Telegram: %u nieudanych prob — porzucam wpis.\n", (unsigned)telegramFailCount);
-      pendingTelegramText = "";
+      if (pendingTelegramText == textToSend) pendingTelegramText = "";
       telegramFailCount = 0;
       telegramNextAttemptMs = millis() + 60000;
     } else {
@@ -3642,19 +3801,39 @@ void pumpTelegramQueue() {
       telegramNextAttemptMs = millis() + 30000;
     }
   }
+  if (telegramMutex) xSemaphoreGive(telegramMutex);
 #endif
+}
+
+// Zadanie FreeRTOS obslugujace wysylke Telegrama poza loop(). Budzi sie na
+// notyfikacje (nowy wpis w kolejce) lub co 5 s (obsluga retry/backupu), po czym
+// wykonuje jedna probe wysylki. Blokujacy TLS zyje tu, nie w watku UI.
+void telegramTask(void *parameter) {
+  (void)parameter;
+  for (;;) {
+    // Timeout 5 s: nawet bez notyfikacji obsluzymy zaplanowane ponowienia/backup.
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
+    pumpTelegramQueue();
+  }
+}
+
+// Budzi zadanie Telegrama (np. po dodaniu wpisu do kolejki). Bezpieczne gdy task
+// jeszcze nie istnieje — wtedy obsluzy sie przy najblizszym cyklu (timeout).
+void wakeTelegramTask() {
+  if (telegramTaskHandle) xTaskNotifyGive(telegramTaskHandle);
 }
 
 // Wiadomosc startowa z pelnym statusem urzadzenia (kolejka, wysylka nieblokujaca).
 void queueTelegramStartup() {
   if (strlen(TELEGRAM_BOT_TOKEN) == 0 || strlen(TELEGRAM_CHAT_ID) == 0) return;
+  const WeatherState w = snapshotWeather();
   String msg = String("Leśny Dziennik uruchomiony\n") +
                String("Czas: ") + (timeIsValid ? String(formatDateTime(time(nullptr))) : "brak NTP") + "\n" +
                String("IP: ") + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "brak Wi-Fi") + "\n" +
                String("RAM: ") + String(ESP.getFreeHeap() / 1024) + " KB / " + String(heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024) + " KB\n" +
                String("PSRAM: ") + String(ESP.getFreePsram() / 1024) + " KB / " + String(ESP.getPsramSize() / 1024) + " KB\n" +
                String("Pamiec: ") + (storageReady ? "gotowa" : "BLAD") + "\n" +
-               String("Pogoda: ") + (weatherState.valid ? String(weatherState.tempNow) + " C" : "brak danych");
+               String("Pogoda: ") + (w.valid ? String(w.tempNow) + " C" : "brak danych");
   queueTelegram(msg);
   Serial.println("Telegram: wiadomosc startowa w kolejce.");
 }
@@ -3884,13 +4063,7 @@ void drawWeatherIcon(lv_obj_t *box, int wmoCode) {
 void updateScreensaverContent() {
   if (!screensaverActive || !ssClockLabel) return;
 
-  WeatherState currentWeather = {};
-  if (weatherMutex && xSemaphoreTake(weatherMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    currentWeather = weatherState;
-    xSemaphoreGive(weatherMutex);
-  } else {
-    currentWeather = weatherState;
-  }
+  const WeatherState currentWeather = snapshotWeather();
 
   struct tm nowInfo;
   if (currentLocalTime(nowInfo)) {
@@ -4015,7 +4188,7 @@ void enterScreensaver() {
   screensaverActive = true;
   applyScreensaverVisibility();
   updateScreensaverContent();
-  if (!weatherState.valid || millis() - weatherLastTryMs > WEATHER_STALE_MS) {
+  if (!weatherValidNow() || millis() - weatherLastTryMs > WEATHER_STALE_MS) {
     weatherFetchPending = true;
   }
   if (!ssClockTimer) {
@@ -4072,12 +4245,16 @@ bool jsonArrayNumberAt(const String &body, const char *key, int index, int searc
 }
 
 bool saveWeatherCache() {
-  if (!storageReady || !weatherState.valid) return false;
+  if (!storageReady) return false;
+  // Snapshot pod mutexem: zapisujemy spojna kopie (weatherState modyfikuje rdzen 0),
+  // a plikowe I/O robimy bez trzymania mutexa.
+  const WeatherState snap = snapshotWeather();
+  if (!snap.valid) return false;
   File file = LittleFS.open(WEATHER_CACHE_FILE, FILE_WRITE);
   if (!file) return false;
   const uint32_t magic = 0x57454131UL; // "WEA1"
   const bool saved = file.write(reinterpret_cast<const uint8_t *>(&magic), sizeof(magic)) == sizeof(magic) &&
-                     file.write(reinterpret_cast<const uint8_t *>(&weatherState), sizeof(weatherState)) == sizeof(weatherState);
+                     file.write(reinterpret_cast<const uint8_t *>(&snap), sizeof(snap)) == sizeof(snap);
   file.close();
   return saved;
 }
@@ -4537,6 +4714,10 @@ void setup() {
   if (!weatherMutex) {
     Serial.println("Pogoda: mutex nieutworzony — tryb bezpieczny bez wspoldzielenia.");
   }
+  telegramMutex = xSemaphoreCreateMutex();
+  if (!telegramMutex) {
+    Serial.println("Telegram: mutex nieutworzony — tryb bezpieczny bez wspoldzielenia.");
+  }
   if (loadWeatherCache()) {
     weatherLastTryMs = millis();
     Serial.println("Pogoda: pokazuje ostatnie zapisane dane do czasu odswiezenia.");
@@ -4556,6 +4737,12 @@ void setup() {
                               &weatherTaskHandle, 0) != pdPASS) {
     Serial.println("Pogoda: nie mozna uruchomic zadania FreeRTOS.");
     weatherTaskHandle = nullptr;
+  }
+  // Zadanie wysylki Telegrama (TLS) na rdzeniu 0 — wieksza stertowa ramka na TLS.
+  if (xTaskCreatePinnedToCore(telegramTask, "telegram", 8192, nullptr, 1,
+                              &telegramTaskHandle, 0) != pdPASS) {
+    Serial.println("Telegram: nie mozna uruchomic zadania FreeRTOS — wysylka wylaczona.");
+    telegramTaskHandle = nullptr;
   }
   appendBackupIfDue();
   updateNightMode();
@@ -4658,7 +4845,7 @@ void loop() {
   const uint32_t loopStart = micros(); // poczatek "pracy" iteracji (do pomiaru CPU load)
   feedWatchdog(); // reset watchdoga + telemetria min. heap w kazdej iteracji
   updateNightMode();
-  pumpTelegramQueue();
+  // Wysylka Telegrama biegnie w telegramTask (rdzen 0) — nie blokuje juz tej petli.
   resyncNtpIfDue();
 
   // Powrot na ekran glowny po 30 s bezczynnosci na dowolnym ekranie.
