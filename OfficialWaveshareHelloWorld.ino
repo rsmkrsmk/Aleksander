@@ -649,10 +649,15 @@ bool initialiseNativeRgbPanel() {
   // do niewidocznego bufora, esp_lcd przelacza je bez kopiowania i bez tearingu.
   config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
-  // 30 linii × 480 = 14400 pikseli; 230400 / 14400 = 16 (calkowite).
-  // DMA uzywa 2 buforow bounce: 2 × 30 × 480 × 2 = 57.6 KB.
-  config.bounce_buffer_size_px = SCREEN_WIDTH * 30;
+  // 80 linii × 480 = 38400 pikseli; 230400 / 38400 = 6 (calkowite).
+  // DMA uzywa 2 buforow bounce w RAM wewnetrznym: 2 × 80 × 480 × 2 = 150 KB.
+  // Wiekszy bufor = DMA rzadziej "glodzi" skaner RGB przy chwilowym obciazeniu
+  // magistrali PSRAM (LittleFS/Wi-Fi) — to usuwa poziome linie z lewej krawedzi.
+  config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
   config.sram_trans_align = 8;
+  // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
+  // Nie zwiekszamy: glowna bronia przeciw artefaktom jest wiekszy bounce buffer,
+  // a zbyt duzy burst wydluza pojedyncze zajecie magistrali PSRAM.
   config.dma_burst_size = 64;
   config.hsync_gpio_num = 46;
   config.vsync_gpio_num = 3;
@@ -4650,6 +4655,7 @@ void loop() {
   }
   ArduinoOTA.handle();
 #endif
+  const uint32_t loopStart = micros(); // poczatek "pracy" iteracji (do pomiaru CPU load)
   feedWatchdog(); // reset watchdoga + telemetria min. heap w kazdej iteracji
   updateNightMode();
   pumpTelegramQueue();
@@ -4702,7 +4708,18 @@ void loop() {
     if (hadClient) { ++httpRequestCount; lastHttpMillis = millis(); }
   }
 
-  const uint32_t lvglNowMs = millis();
+  uint32_t lvglNowMs = millis();
+  lv_tick_inc(lvglNowMs - lastLvglTickMs);
+  lastLvglTickMs = lvglNowMs;
+  lv_timer_handler();
+  // Drugie, szybkie probkowanie dotyku w tej samej iteracji: krotka przerwa
+  // + ponowny handler daje ~2x czestszy odczyt GT911 bez pelnego odrysu,
+  // co wyraznie poprawia responsywnosc na krotkie tapniecia. Tick liczymy
+  // z realnego czasu (bez sztucznego +8), zeby nie rozjechal sie zegar LVGL.
+  const uint32_t busyBeforeDelayUs = micros() - loopStart; // czas pracy przed przerwa
+  delay(8);
+  const uint32_t afterDelayStartUs = micros();
+  lvglNowMs = millis();
   lv_tick_inc(lvglNowMs - lastLvglTickMs);
   lastLvglTickMs = lvglNowMs;
   lv_timer_handler();
@@ -4722,12 +4739,12 @@ void loop() {
     retryWiFiConnection();
   }
 
-  const uint32_t loopStart = micros();
+  // CPU load: sumujemy realny czas PRACY iteracji (z wykluczeniem delay(8)),
+  // odniesiony do rzeczywistego okna czasu. Im wiecej czasu pracy, tym wyzsze
+  // obciazenie. Mierzymy w oknie 5 s.
+  const uint32_t busyAfterDelayUs = micros() - afterDelayStartUs;
+  cpuBusyUs += busyBeforeDelayUs + busyAfterDelayUs;
 
-  delay(5);
-
-  // CPU load: im wiecej czasu poza delay(5), tym wyzsze obciazenie.
-  // Mierzymy czasy w oknie 5 s.
   const uint32_t now = millis();
   if (now - cpuCalcLastMs >= 5000) {
     const uint64_t elapsedUs = cpuCalcLastMs == 0 ? 5000000ULL : (static_cast<uint64_t>(now - cpuCalcLastMs) * 1000);
@@ -4736,5 +4753,4 @@ void loop() {
     cpuBusyUs = 0;
     cpuCalcLastMs = now;
   }
-  cpuBusyUs += micros() - loopStart;
 }
