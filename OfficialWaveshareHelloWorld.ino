@@ -188,6 +188,9 @@ struct DaySummary {
   int pumpingMl;
   bool vitaminD;
   int weightG;   // ostatnia zapisana waga danego dnia (g); 0 = brak
+  int sleepDayMin;   // minuty snu dziennego (drzemki) przypisane do tego dnia
+  int sleepNightMin; // minuty snu nocnego przypisane do tego dnia
+  int napCount;      // liczba drzemek dziennych rozpoczetych tego dnia
 };
 
 // Grupa pogody dla ikony/opisu wygaszacza (kody wttr.in mapowane na WMO).
@@ -228,6 +231,8 @@ int todayFeedingCount = 0;          // liczba karmien DZIS (tylko typ KARMIENIE)
 time_t nextFeedingEta = 0;          // przewidywany czas nastepnego karmienia = ostatnie + 4h
 bool sleepInProgress = false;       // true gdy ostatnie zdarzenie snu to SEN_START (dziecko spi)
 time_t sleepStartedTime = 0;        // czas rozpoczecia biezacego snu (0 = nie spi)
+time_t lastWakeTime = 0;            // czas ostatniego przebudzenia (SEN_STOP) — start okna czuwania
+bool sleepTelegramEnabled = false;  // powiadomienia Telegram o oknie snu (ustawienie trwale)
 bool deleteModeActive = false;         // tryb wyboru wpisu do usuniecia
 int pendingDeleteIndex = -1;            // indeks oczekujacy na potwierdzenie (-1 = brak)
 
@@ -336,6 +341,14 @@ bool waitForNtp(uint32_t timeoutMs);
 bool initialiseStorage();
 void loadLatestEntries();
 void recomputeFeedingRhythm();
+// --- Sen (Napper): wake windows, predykcja drzemki, ustawienia ---
+struct WakeWindow { int minMin; int maxMin; };
+WakeWindow wakeWindowMinutes(long ageDays);
+void sleepNeedMinutes(long ageDays, int &nightOut, int &dayOut);
+int napTargetCount(long ageDays);
+int interpTable(long x, const int *xs, const int *ys, int n);
+void loadSettings();
+bool saveSettings();
 String nextFeedingClock();
 String formatGapShort(int minutes);
 void initWatchdog();
@@ -352,6 +365,8 @@ String milkTypeLabel(const String &entryType);
 String entriesForDay(time_t day, bool compact);
 void populateDayEntries(lv_obj_t *container, time_t day);
 void invalidateDayStats();
+void accrueNapCount(time_t start, const String iso[]);
+void accrueSleepInterval(time_t start, time_t stop, const String iso[]);
 void dayStats(time_t day, DaySummary &out);
 String formatDaySummaryLine(const DaySummary &s);
 String formatDayExtraLine(const DaySummary &s);
@@ -1074,6 +1089,7 @@ void loadLatestEntries() {
   lastWeightG = 0;
   sleepInProgress = false;
   sleepStartedTime = 0;
+  lastWakeTime = 0;
   // Statystyki rytmu dnia liczymy w TYM SAMYM przebiegu pliku (dawniej osobny skan
   // przez recomputeFeedingRhythm). Jeden odczyt pliku zamiast dwoch.
   avgFeedingGapMin = 0;
@@ -1089,6 +1105,7 @@ void loadLatestEntries() {
   time_t prevFeedingToday = 0;
   long sumGapMin = 0;
   int gapCount = 0;
+  bool sawSleepStart = false; // czy w pliku byl SEN_START przed danym SEN_STOP
 
   file.readStringUntil('\n'); // pominięcie nagłówka
   while (file.available()) {
@@ -1126,9 +1143,13 @@ void loadLatestEntries() {
     if (entry.type == "SEN_START") {
       sleepInProgress = true;
       sleepStartedTime = stamp;
+      sawSleepStart = true;
     } else if (entry.type == "SEN_STOP") {
       sleepInProgress = false;
       sleepStartedTime = 0;
+      // lastWakeTime tylko dla SPAROWANEGO STOP (spojnie z bilansem w refreshDayStats):
+      // osierocony STOP (np. po rotacji pliku) nie kotwiczy okna czuwania.
+      if (sawSleepStart) { lastWakeTime = stamp; sawSleepStart = false; }
     }
   }
   file.close();
@@ -1182,6 +1203,52 @@ void recomputeFeedingRhythm() {
   file.close();
 
   if (gapCount >= 1) avgFeedingGapMin = static_cast<int>(sumMin / gapCount);
+}
+
+// ------------------------------- Sen (Napper) -----------------------------------
+// Interpolacja liniowa po tabeli progow (xs rosnace). Ponizej 1. progu -> ys[0],
+// powyzej ostatniego -> ys[n-1]. Zwraca wartosc calkowita (minuty/sztuki).
+int interpTable(long x, const int *xs, const int *ys, int n) {
+  if (n <= 0) return 0;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  for (int i = 1; i < n; ++i) {
+    if (x <= xs[i]) {
+      const long x0 = xs[i - 1], x1 = xs[i];
+      const long y0 = ys[i - 1], y1 = ys[i];
+      if (x1 == x0) return static_cast<int>(y0);
+      return static_cast<int>(y0 + (y1 - y0) * (x - x0) / (x1 - x0));
+    }
+  }
+  return ys[n - 1];
+}
+
+// Okno czuwania (min-max, w minutach) dla wieku w dniach. Wiek < 0 => brak czasu -> zwroc newborn.
+WakeWindow wakeWindowMinutes(long ageDays) {
+  if (ageDays < 0) ageDays = 0;
+  WakeWindow w;
+  w.minMin = interpTable(ageDays, WAKE_WIN_AGE_DAYS, WAKE_WIN_MIN_MINUTES, WAKE_WIN_COUNT);
+  w.maxMin = interpTable(ageDays, WAKE_WIN_AGE_DAYS, WAKE_WIN_MAX_MINUTES, WAKE_WIN_COUNT);
+  if (w.maxMin < w.minMin) w.maxMin = w.minMin;
+  return w;
+}
+
+// Zapotrzebowanie na sen (minuty noc/dzien) dla wieku w dniach.
+void sleepNeedMinutes(long ageDays, int &nightOut, int &dayOut) {
+  if (ageDays < 0) ageDays = 0;
+  nightOut = interpTable(ageDays, SLEEP_NEED_AGE_DAYS, SLEEP_NEED_NIGHT_MIN, SLEEP_NEED_COUNT);
+  dayOut = interpTable(ageDays, SLEEP_NEED_AGE_DAYS, SLEEP_NEED_DAY_MIN, SLEEP_NEED_COUNT);
+}
+
+// Orientacyjna liczba drzemek dziennych wg wieku.
+int napTargetCount(long ageDays) {
+  if (ageDays < 0) ageDays = 0;
+  return interpTable(ageDays, NAP_TARGET_AGE_DAYS, NAP_TARGET_NAPS, NAP_TARGET_COUNT);
+}
+
+// Czy dana godzina nalezy do "nocy" snu (NIGHT_START..24 lub 0..NIGHT_END).
+static bool sleepHourIsNight(int hour) {
+  return hour >= SLEEP_NIGHT_START_HOUR || hour < SLEEP_NIGHT_END_HOUR;
 }
 
 // Krotki format przerwy "Xh Ymin" / "Ymin".
@@ -1471,6 +1538,52 @@ int statsIndexForDay(time_t day);
 // oraz statsIndexForDay() są zadeklarowane wyżej, przed funkcjami dostępowymi.
 void invalidateDayStats() { statsValid = false; }
 
+// Dolicza liczbe drzemek: SEN_START rozpoczety w porze DZIENNEJ liczymy jako drzemke
+// tego dnia (sen nocny nie jest drzemka). Przypisanie do dnia wg daty startu.
+void accrueNapCount(time_t start, const String iso[]) {
+  if (start <= 0) return;
+  struct tm t;
+  localtime_r(&start, &t);
+  if (sleepHourIsNight(t.tm_hour)) return; // sen nocny — nie drzemka
+  const String startDate = dateIso(beginningOfDay(start));
+  for (uint8_t i = 0; i < STATS_DAY_COUNT; ++i) {
+    if (startDate == iso[i]) { ++statsData[i].napCount; return; }
+  }
+}
+
+// Rozdziela sen [start,stop] na minuty nocne/dzienne i przypisuje do wlasciwych dni
+// w oknie statystyk. Iterujemy krokami do najblizszej granicy godzinowej noc/dzien,
+// aby dokladnie policzyc podzial nawet dla snu przez polnoc/wielogodzinnego.
+void accrueSleepInterval(time_t start, time_t stop, const String iso[]) {
+  if (stop <= start) return;
+  time_t cur = start;
+  int guard = 0;
+  while (cur < stop && guard++ < 4000) { // guard: bezpiecznik (max ~ kilka dni w krokach)
+    struct tm t;
+    localtime_r(&cur, &t);
+    const bool night = sleepHourIsNight(t.tm_hour);
+    // Wyznacz koniec biezacego jednorodnego segmentu (do zmiany noc<->dzien lub do stop).
+    // Nastepna granica: najblizsza pelna godzina rowna NIGHT_START lub NIGHT_END.
+    struct tm nb = t; nb.tm_sec = 0; nb.tm_min = 0;
+    // krok do najblizszej pelnej godziny
+    time_t nextHour = cur + (3600 - (t.tm_min * 60 + t.tm_sec));
+    if (t.tm_min == 0 && t.tm_sec == 0) nextHour = cur + 3600;
+    time_t segEnd = nextHour < stop ? nextHour : stop;
+    const long segMin = static_cast<long>(difftime(segEnd, cur) / 60);
+    if (segMin > 0) {
+      const String segDate = dateIso(beginningOfDay(cur));
+      for (uint8_t i = 0; i < STATS_DAY_COUNT; ++i) {
+        if (segDate == iso[i]) {
+          if (night) statsData[i].sleepNightMin += static_cast<int>(segMin);
+          else statsData[i].sleepDayMin += static_cast<int>(segMin);
+          break;
+        }
+      }
+    }
+    cur = segEnd;
+  }
+}
+
 void refreshDayStats() {
   statsAnchorDay = dayOffsetFromToday(0);
   String iso[STATS_DAY_COUNT];
@@ -1490,17 +1603,34 @@ void refreshDayStats() {
     s.pumpingMl = 0;
     s.vitaminD = false;
     s.weightG = 0;
+    s.sleepDayMin = 0;
+    s.sleepNightMin = 0;
+    s.napCount = 0;
   }
   if (storageReady) {
     File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
     if (file) {
       file.readStringUntil('\n');
+      time_t openSleepStart = 0; // otwarty SEN_START (plik jest chronologiczny)
       while (file.available()) {
         String line = file.readStringUntil('\n');
         line.trim();
         if (line.length() == 0) continue;
         CsvEntry entry;
         if (!parseCsvLine(line, entry)) continue;
+        // Sen paruje SEN_START->SEN_STOP i moze wykraczac poza okno dni — obslugujemy osobno.
+        if (entry.type == "SEN_START") {
+          openSleepStart = csvDateTimeToEpoch(entry.date, entry.time);
+          accrueNapCount(openSleepStart, iso);
+          continue;
+        } else if (entry.type == "SEN_STOP") {
+          if (openSleepStart > 0) {
+            const time_t stop = csvDateTimeToEpoch(entry.date, entry.time);
+            accrueSleepInterval(openSleepStart, stop, iso);
+            openSleepStart = 0;
+          }
+          continue;
+        }
         for (uint8_t i = 0; i < STATS_DAY_COUNT; ++i) {
           if (entry.date != iso[i]) continue;
           DaySummary &s = statsData[i];
@@ -1527,6 +1657,8 @@ void refreshDayStats() {
           break;
         }
       }
+      // Sen trwajacy do teraz (brak SEN_STOP): dolicz do biezacej chwili.
+      if (openSleepStart > 0) accrueSleepInterval(openSleepStart, time(nullptr), iso);
       file.close();
     }
   }
@@ -1556,6 +1688,9 @@ void dayStats(time_t day, DaySummary &out) {
   out.pumpingMl = 0;
   out.vitaminD = false;
   out.weightG = 0;
+  out.sleepDayMin = 0;
+  out.sleepNightMin = 0;
+  out.napCount = 0;
   const int index = statsIndexForDay(day);
   if (index < 0) return;
   out = statsData[index];
@@ -1686,7 +1821,7 @@ void handleApiStatus() {
   // Realny rozmiar to ~1.8-2.2 KB (5 dni kalendarza + status + sysinfo). Rezerwacja
   // 2560 B pokrywa go z zapasem bez wczesniejszego blokowania 6.5 KB przy kazdym
   // pollingu co 10 s. Jedna rezerwacja = brak serii realloc-ow fragmentujacych RAM.
-  payload.reserve(2560);
+  payload.reserve(3072);
   payload = "{";
   payload += "\"now\":\"" + jsonEscape(timeIsValid ? formatDateTime(now) : "Brak potwierdzonego czasu") + "\",";
   payload += "\"nowIso\":\"" + jsonEscape(webDateTime(now)) + "\",";
@@ -1702,6 +1837,41 @@ void handleApiStatus() {
   payload += "\"nextFeedingIso\":\"" + jsonEscape(nextFeedingEta ? webDateTime(nextFeedingEta) : String()) + "\",";
   payload += "\"longestFeedingGapMin\":" + String(longestFeedingGapMin) + ",";
   payload += "\"sleepInProgress\":" + String(sleepInProgress ? "true" : "false") + ",";
+  // --- Sen (Napper): stan biezacy, okno czuwania, predykcja, bilans dnia ---
+  {
+    const long ageDays = calculateAgeDays();
+    const WakeWindow ww = wakeWindowMinutes(ageDays);
+    int needNight = 0, needDay = 0; sleepNeedMinutes(ageDays, needNight, needDay);
+    DaySummary today; dayStats(dayOffsetFromToday(0), today);
+    // Predykcja: okno czuwania liczone od ostatniego przebudzenia (SEN_STOP).
+    time_t napStart = 0, napEnd = 0; String sleepState = "brak";
+    if (sleepInProgress) {
+      sleepState = "spi";
+    } else if (lastWakeTime > 0) {
+      napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
+      napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
+      const time_t nowT = time(nullptr);
+      if (nowT < napStart) sleepState = "czuwa";       // za wczesnie na drzemke
+      else if (nowT <= napEnd) sleepState = "okno";    // optymalne okno drzemki
+      else sleepState = "przekroczone";                // ryzyko przemeczenia
+    }
+    const long sleepSinceMin = sleepInProgress && sleepStartedTime ? static_cast<long>(difftime(time(nullptr), sleepStartedTime) / 60) : -1;
+    const long wakeSinceMin = (!sleepInProgress && lastWakeTime) ? static_cast<long>(difftime(time(nullptr), lastWakeTime) / 60) : -1;
+    payload += "\"sleepState\":\"" + sleepState + "\",";
+    payload += "\"sleepSinceMin\":" + String(sleepSinceMin) + ",";
+    payload += "\"wakeSinceMin\":" + String(wakeSinceMin) + ",";
+    payload += "\"wakeWindowMinMin\":" + String(ww.minMin) + ",";
+    payload += "\"wakeWindowMaxMin\":" + String(ww.maxMin) + ",";
+    payload += "\"nextNapStartIso\":\"" + jsonEscape(napStart ? webDateTime(napStart) : String()) + "\",";
+    payload += "\"nextNapEndIso\":\"" + jsonEscape(napEnd ? webDateTime(napEnd) : String()) + "\",";
+    payload += "\"sleepDayMin\":" + String(today.sleepDayMin) + ",";
+    payload += "\"sleepNightMin\":" + String(today.sleepNightMin) + ",";
+    payload += "\"sleepNeedDayMin\":" + String(needDay) + ",";
+    payload += "\"sleepNeedNightMin\":" + String(needNight) + ",";
+    payload += "\"napCount\":" + String(today.napCount) + ",";
+    payload += "\"napTarget\":" + String(napTargetCount(ageDays)) + ",";
+    payload += "\"sleepTelegram\":" + String(sleepTelegramEnabled ? "true" : "false") + ",";
+  }
   payload += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   payload += "\"storage\":" + String(storageReady ? "true" : "false") + ",";
   payload += "\"dataFileHuge\":" + String(dataFileHuge ? "true" : "false") + ",";
@@ -4352,6 +4522,34 @@ bool loadWeatherCache() {
   return true;
 }
 
+// ------------------------------- Ustawienia trwale ------------------------------
+// Prosty plik "klucz=wartosc" na LittleFS. Na razie jeden klucz: sleepTelegram.
+// Latwo rozszerzalny o kolejne ustawienia w przyszlosci.
+bool saveSettings() {
+  if (!storageReady) return false;
+  File file = LittleFS.open(SETTINGS_FILE, FILE_WRITE);
+  if (!file) return false;
+  file.printf("sleepTelegram=%d\n", sleepTelegramEnabled ? 1 : 0);
+  file.close();
+  return true;
+}
+
+void loadSettings() {
+  if (!storageReady) return;
+  File file = LittleFS.open(SETTINGS_FILE, FILE_READ);
+  if (!file) return; // brak pliku = wartosci domyslne
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    const int eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const String key = line.substring(0, eq);
+    const String val = line.substring(eq + 1);
+    if (key == "sleepTelegram") sleepTelegramEnabled = (val.toInt() != 0);
+  }
+  file.close();
+}
+
 // ----------------------------- Pogoda Open-Meteo (HTTP, port 80) -----------------
 // Darmowe, bez klucza API, dane ECMWF, temp odczuwalna.
 void fetchWeatherNow() {
@@ -4792,6 +4990,7 @@ void setup() {
                   static_cast<unsigned>(LittleFS.totalBytes() / 1024));
   }
   bootStep(2, storageReady ? 1 : 2);
+  loadSettings(); // trwale ustawienia (m.in. powiadomienia snu) — przed uzyciem
   loadLatestEntries();
 
   // Krok 4: Pogoda (z cache lub do pobrania w tle).
