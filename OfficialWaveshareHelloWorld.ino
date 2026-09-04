@@ -815,8 +815,20 @@ void resyncRgbPanelIfDue() {
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
   static int16_t lastX = 0;
   static int16_t lastY = 0;
+  // Po wyjsciu z wygaszacza tlumimy WSZYSTKIE odczyty az do puszczenia palca, aby
+  // to samo dotkniecie (odczytywane teraz kilka razy na iteracje) nie "przecieklo"
+  // jako klikniecie w widok pod spodem. Zdejmujemy blokade na release albo po
+  // uplywie SUPPRESS_MAX_MS (bezpiecznik: gdyby kontroler nigdy nie zglosil braku
+  // dotyku, ekran nie moze zostac na stale zablokowany).
+  static bool suppressUntilRelease = false;
+  static uint32_t suppressStartMs = 0;
+  constexpr uint32_t SUPPRESS_MAX_MS = 2000;
+  if (suppressUntilRelease && millis() - suppressStartMs > SUPPRESS_MAX_MS) {
+    suppressUntilRelease = false;
+  }
 
   if (!touchReady) {
+    suppressUntilRelease = false;
     data->state = LV_INDEV_STATE_RELEASED;
     data->point.x = lastX;
     data->point.y = lastY;
@@ -830,6 +842,15 @@ void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
     // Dotyk w trybie wygaszacza tylko przywraca standardowy widok (bez klikania pod spodem).
     if (screensaverActive && homeScreen && lv_screen_active() == homeScreen) {
       exitScreensaver();
+      suppressUntilRelease = true; // nie przetwarzaj tego dotkniecia jako kliku
+      suppressStartMs = millis();
+      data->state = LV_INDEV_STATE_RELEASED;
+      data->point.x = lastX;
+      data->point.y = lastY;
+      return;
+    }
+    // Trwajace dotkniecie po wyjsciu z wygaszacza: raportuj RELEASED do puszczenia.
+    if (suppressUntilRelease) {
       data->state = LV_INDEV_STATE_RELEASED;
       data->point.x = lastX;
       data->point.y = lastY;
@@ -840,6 +861,7 @@ void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
     lastY = constrain(gt911Y[0], 0, static_cast<int16_t>(SCREEN_HEIGHT - 1));
     data->state = LV_INDEV_STATE_PRESSED;
   } else {
+    suppressUntilRelease = false; // palec puszczony — kolejne dotkniecia dzialaja normalnie
     data->state = LV_INDEV_STATE_RELEASED;
   }
 
@@ -4639,6 +4661,12 @@ void setup() {
                 (unsigned)bootCount, lastResetReason, (unsigned)watchdogResetCount);
 
   Wire.begin(I2C_SDA, I2C_SCL);
+  // Fast Mode I2C (400 kHz) dla CALEJ magistrali. Domyslne 100 kHz sprawia, ze kazdy
+  // odczyt punktu dotyku (GT911.getPoint) trwa ~4x dluzej — podniesienie zegara skraca
+  // pojedyncze odpytanie i wyraznie poprawia responsywnosc dotyku. Uwaga: zegar jest
+  // wspolny — dotyczy tez ekspandera XCA9554 (0x20) uzywanego przy starcie panelu ST7701;
+  // oba uklady obsluguja Fast Mode. Init panelu wykonuje sie raz przy starcie.
+  Wire.setClock(400000);
   Wire.setTimeOut(100);
 
   // Inwentaryzacja partycji i wolnego miejsca na starcie.
@@ -4725,6 +4753,11 @@ void setup() {
   Serial.println("INIT: input LVGL utworzony");
   lv_indev_set_type(touchDriver, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(touchDriver, touchRead);
+  // Tryb EVENT: LVGL NIE tworzy wlasnego timera odczytu dotyku — odpytujemy go
+  // wylacznie recznie przez lv_indev_read() w loop() (geste probkowanie miedzy
+  // renderami). Bez tego (domyslny MODE_TIMER) lv_timer_handler czytalby dotyk
+  // po swojemu, a nasze reczne odczyty dokladalyby sie, mieszajac stan press/click.
+  lv_indev_set_mode(touchDriver, LV_INDEV_MODE_EVENT);
 
   createReusableScreenRoots();
   Serial.println("INIT: korzenie ekranow utworzone");
@@ -4947,18 +4980,28 @@ void loop() {
   uint32_t lvglNowMs = millis();
   lv_tick_inc(lvglNowMs - lastLvglTickMs);
   lastLvglTickMs = lvglNowMs;
-  lv_timer_handler();
-  // Drugie, szybkie probkowanie dotyku w tej samej iteracji: krotka przerwa
-  // + ponowny handler daje ~2x czestszy odczyt GT911 bez pelnego odrysu,
-  // co wyraznie poprawia responsywnosc na krotkie tapniecia. Tick liczymy
-  // z realnego czasu (bez sztucznego +8), zeby nie rozjechal sie zegar LVGL.
-  const uint32_t busyBeforeDelayUs = micros() - loopStart; // czas pracy przed przerwa
-  delay(8);
+  lv_timer_handler(); // pelny cykl: render + odczyt dotyku
+
+  // --- Szybkie, geste probkowanie SAMEGO dotyku (T1+T2) ---------------------------
+  // Pelny render (powyzej) jest ciezki i rzadki, przez co krotkie tapniecia bywaly
+  // gubione. Tu, zamiast jednego sztywnego delay(8), robimy kilka KROTKICH odczytow
+  // wylacznie urzadzenia wejsciowego: lv_indev_read() wola touchRead + przetwarza
+  // zdarzenie (press/click) BEZ pelnego odrysu ekranu. Dzieki temu GT911 jest
+  // odpytywany znacznie czesciej niz render => reakcja na dotyk jest natychmiastowa.
+  // Sumaryczna przerwa (~8 ms) zblizona do poprzedniej, ale rozbita na 4 probki.
+  const uint32_t busyBeforeDelayUs = micros() - loopStart; // czas pracy przed przerwami
+  uint32_t samplingWorkUs = 0; // czas PRACY w petli probkowania (bez delay-ow)
+  for (uint8_t s = 0; s < 4; ++s) {
+    delay(2);
+    const uint32_t workStart = micros();
+    // Tick z realnego czasu (bez sztucznego +), zeby nie rozjechal sie zegar LVGL.
+    lvglNowMs = millis();
+    lv_tick_inc(lvglNowMs - lastLvglTickMs);
+    lastLvglTickMs = lvglNowMs;
+    if (touchDriver) lv_indev_read(touchDriver); // sam dotyk, bez pelnego renderu
+    samplingWorkUs += micros() - workStart;
+  }
   const uint32_t afterDelayStartUs = micros();
-  lvglNowMs = millis();
-  lv_tick_inc(lvglNowMs - lastLvglTickMs);
-  lastLvglTickMs = lvglNowMs;
-  lv_timer_handler();
 
   // Nie ma okresowego odrysowywania ekranu. Dane widoku zmieniają się tylko po zapisie,
   // wejściu na ekran albo rzeczywistej zmianie stanu Wi-Fi.
@@ -4975,11 +5018,11 @@ void loop() {
     retryWiFiConnection();
   }
 
-  // CPU load: sumujemy realny czas PRACY iteracji (z wykluczeniem delay(8)),
-  // odniesiony do rzeczywistego okna czasu. Im wiecej czasu pracy, tym wyzsze
-  // obciazenie. Mierzymy w oknie 5 s.
+  // CPU load: sumujemy realny czas PRACY iteracji (z wykluczeniem samych delay-ow
+  // w petli probkowania), odniesiony do rzeczywistego okna czasu. Im wiecej czasu
+  // pracy, tym wyzsze obciazenie. Mierzymy w oknie 5 s.
   const uint32_t busyAfterDelayUs = micros() - afterDelayStartUs;
-  cpuBusyUs += busyBeforeDelayUs + busyAfterDelayUs;
+  cpuBusyUs += busyBeforeDelayUs + samplingWorkUs + busyAfterDelayUs;
 
   const uint32_t now = millis();
   if (now - cpuCalcLastMs >= 5000) {
