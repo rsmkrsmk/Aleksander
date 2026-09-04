@@ -123,23 +123,10 @@ uint32_t weatherLastTryMs = 0;
 uint32_t weatherNextTryMs = 0;
 TaskHandle_t weatherTaskHandle = nullptr;
 SemaphoreHandle_t weatherMutex = nullptr;
-
-// Bezpieczny odczyt weatherState (zapisywanego z weatherTask na rdzeniu 0).
-// Kopia calej struktury pod mutexem; przy braku mutexa/timeoutcie zwraca ostatnia
-// widoczna wartosc (spojnosc pojedynczych intow wystarcza jako fallback).
-WeatherState snapshotWeather() {
-  WeatherState copy;
-  if (weatherMutex && xSemaphoreTake(weatherMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    copy = weatherState;
-    xSemaphoreGive(weatherMutex);
-  } else {
-    copy = weatherState;
-  }
-  return copy;
-}
-
-// Skrot: samo pole valid (te same reguly dostepu co snapshotWeather).
-bool weatherValidNow() { return snapshotWeather().valid; }
+// UWAGA: definicje snapshotWeather()/weatherValidNow() celowo NIE tutaj, lecz
+// ponizej struct CsvEntry. Arduino wstawia generowane prototypy tuz nad PIERWSZA
+// funkcja pliku — gdyby pierwsza funkcja byla powyzej definicji typow (CsvEntry,
+// WeatherKind), prototypy trafilyby nad te typy i kompilacja by sie wywalila.
 
 bool screensaverActive = false;
 lv_obj_t *ssClockLabel = nullptr;
@@ -333,6 +320,8 @@ lv_color_t COLOR_TONAL_GREEN = lv_color_hex(0xE6F1E0);
 // ----------------------------- Deklaracje funkcji --------------------------------
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data);
 void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMap);
+void resyncRgbPanelIfDue();
+void requestRgbResync();
 void initialiseDisplayPanel();
 void initialiseBacklight();
 void setScreenDimmed(bool dimmed);
@@ -455,6 +444,8 @@ bool saveWeatherCache();
 String jsonEscape(const String &value);
 String webDateTime(time_t value);
 bool parseWebDateTime(const String &value, time_t &result);
+WeatherState snapshotWeather(); // WeatherState zdefiniowany wyzej (linia ~104)
+bool weatherValidNow();
 
 // ------------------------------- Struktura wpisu CSV -----------------------------
 // Musi być zdefiniowana przed pierwszą funkcją pliku: Arduino wstawia generowane
@@ -467,6 +458,25 @@ struct CsvEntry {
   int piersLeft;
   int piersRight;
 };
+
+// Bezpieczny odczyt weatherState (zapisywanego z weatherTask na rdzeniu 0).
+// Umieszczone TU (za definicjami typow), bo to pierwsza funkcja pliku — patrz uwaga
+// o generowanych prototypach Arduino przy deklaracji weatherMutex.
+// Kopia calej struktury pod mutexem; przy braku mutexa/timeoutcie zwraca ostatnia
+// widoczna wartosc (spojnosc pojedynczych intow wystarcza jako fallback).
+WeatherState snapshotWeather() {
+  WeatherState copy;
+  if (weatherMutex && xSemaphoreTake(weatherMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    copy = weatherState;
+    xSemaphoreGive(weatherMutex);
+  } else {
+    copy = weatherState;
+  }
+  return copy;
+}
+
+// Skrot: samo pole valid (te same reguly dostepu co snapshotWeather).
+bool weatherValidNow() { return snapshotWeather().valid; }
 
 // -------------------------------- Pomocnicze UI ----------------------------------
 void prepareScreen(lv_obj_t *screen) {
@@ -677,9 +687,12 @@ bool initialiseNativeRgbPanel() {
   config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
   // 80 linii × 480 = 38400 pikseli; 230400 / 38400 = 6 (calkowite).
-  // DMA uzywa 2 buforow bounce w RAM wewnetrznym: 2 × 80 × 480 × 2 = 150 KB.
-  // Wiekszy bufor = DMA rzadziej "glodzi" skaner RGB przy chwilowym obciazeniu
-  // magistrali PSRAM (LittleFS/Wi-Fi) — to usuwa poziome linie z lewej krawedzi.
+  // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × 80 × 480 × 2 = 150 KB.
+  // Zostawiamy 80 linii (a nie wiecej): bounce zajmuje deficytowy RAM wewnetrzny
+  // wspoldzielony z Wi-Fi/TLS/LVGL/stosami zadan, a glownym zabezpieczeniem przed
+  // DRYFEM obrazu jest teraz cykliczny restart DMA panelu (resyncRgbPanelIfDue) —
+  // wiec nie ryzykujemy braku RAM. Liczba linii musi dzielic 230400 bez reszty
+  // (dozwolone m.in. 48/60/80/96/120 linii).
   config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
@@ -749,6 +762,10 @@ bool initialiseNativeRgbPanel() {
   }
   Serial.printf("LCD: esp_lcd PSRAM framebuffer + bounce DMA OK (%p), VSYNC aktywny.\n",
                 rgbFrameBuffer0);
+  // Diagnostyka RAM: bounce buffery zajmuja deficytowy RAM wewnetrzny. Log pozwala
+  // sprawdzic zapas po inicjalizacji panelu (istotne po zmianie bounce_buffer_size_px).
+  Serial.printf("LCD: wolny RAM wewnetrzny po init panelu: %u KB.\n",
+                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
   return true;
 }
 
@@ -765,6 +782,34 @@ void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMa
     }
   }
   lv_display_flush_ready(display);
+}
+
+// --- Profilaktyka dryfu obrazu (panel RGB) ---------------------------------------
+// Panel RGB moze stracic synchronizacje DMA przy chwilowym niedoborze pasma
+// (PSRAM/Flash wspoldzielone z Wi-Fi/LittleFS): kontroler LCD zaczyna czytac piksele
+// z przesunietego adresu i caly obraz przesuwa sie pionowo "jak na rolce".
+// esp_lcd_rgb_panel_restart() (tylko ESP32-S3) NIE restartuje natychmiast — ustawia
+// flage, a wlasciwy restart DMA nastepuje przy NASTEPNYM VSYNC, wiec jest bezpieczny
+// (bez migotania/blokowania). Wolamy go cyklicznie jako profilaktyke — to programowy
+// odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC, ktorego nie ustawimy w Arduino IDE.
+// Natychmiast zglasza restart DMA panelu (tania operacja — ustawia tylko flage,
+// wlasciwy restart nastapi przy najblizszym VSYNC). Wolane punktowo po operacjach
+// szczególnie obciazajacych magistrale (np. zapis do LittleFS/Flash).
+void requestRgbResync() {
+  if (!rgbPanel) return;
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  esp_lcd_rgb_panel_restart(rgbPanel);
+#else
+#warning "RGB resync (naprawa dryfu obrazu) wylaczony: to nie jest target ESP32-S3."
+#endif
+}
+
+// Cykliczna profilaktyka: zglasza restart co RGB_RESYNC_INTERVAL_MS.
+void resyncRgbPanelIfDue() {
+  static uint32_t lastRestartMs = 0;
+  if (millis() - lastRestartMs < RGB_RESYNC_INTERVAL_MS) return;
+  lastRestartMs = millis();
+  requestRgbResync();
 }
 
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
@@ -1277,6 +1322,9 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
   }
   file.flush();
   file.close();
+  // Zapis do LittleFS chwilowo obciaza magistrale Flash/PSRAM — zglaszamy restart
+  // DMA panelu (przy najblizszym VSYNC), by zapobiec ewentualnemu dryfowi obrazu.
+  requestRgbResync();
 
   if (saved) {
     const String displayEntry = String(datePart).substring(8, 10) + "." + String(datePart).substring(5, 7) + "." + String(datePart).substring(0, 4) +
@@ -4844,6 +4892,7 @@ void loop() {
 #endif
   const uint32_t loopStart = micros(); // poczatek "pracy" iteracji (do pomiaru CPU load)
   feedWatchdog(); // reset watchdoga + telemetria min. heap w kazdej iteracji
+  resyncRgbPanelIfDue(); // profilaktyka dryfu obrazu (restart DMA panelu przy VSYNC)
   updateNightMode();
   // Wysylka Telegrama biegnie w telegramTask (rdzen 0) — nie blokuje juz tej petli.
   resyncNtpIfDue();

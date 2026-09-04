@@ -37,6 +37,13 @@ constexpr char BACKUP_FILE_PATH[] = "/karmienia_backup.csv";
 // historia urosla i skany CSV staja sie kosztowne. 256 KB = wiele tysiecy wpisow.
 constexpr size_t DATA_FILE_ROTATE_BYTES = 256UL * 1024UL;
 
+// ------------------------------ Wyswietlacz RGB --------------------------------
+// Profilaktyka dryfu obrazu: co tyle ms wywolujemy esp_lcd_rgb_panel_restart()
+// (restart DMA wykonuje sie przy najblizszym VSYNC, bez migotania). Krotszy
+// interwal = szybszy powrot po ewentualnym przesunieciu obrazu, kosztem
+// czestszego (niewidocznego) resetu DMA. 2 s to bezpieczny kompromis.
+constexpr uint32_t RGB_RESYNC_INTERVAL_MS = 2000UL;
+
 // ------------------------------ Motyw nocny ------------------------------------
 // W tych godzinach urządzenie i panel WWW przechodzą na ciemną paletę
 // oraz łagodniejsze podświetlenie.
