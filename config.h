@@ -32,6 +32,10 @@ constexpr uint16_t FEEDING_ALARM_WINDOW_MINUTES = 30;
 // microSD ani żadnego przewodu. Plik tworzy się automatycznie przy pierwszym starcie.
 constexpr char DATA_FILE_PATH[] = "/karmienia.csv";
 constexpr char BACKUP_FILE_PATH[] = "/karmienia_backup.csv";
+// Prog, po ktorym plik danych jest jednorazowo archiwizowany (kopia ze znacznikiem
+// daty) z ostrzezeniem w logu/diagnostyce. Dane NIE sa usuwane — to sygnal, ze
+// historia urosla i skany CSV staja sie kosztowne. 256 KB = wiele tysiecy wpisow.
+constexpr size_t DATA_FILE_ROTATE_BYTES = 256UL * 1024UL;
 
 // ------------------------------ Motyw nocny ------------------------------------
 // W tych godzinach urządzenie i panel WWW przechodzą na ciemną paletę
