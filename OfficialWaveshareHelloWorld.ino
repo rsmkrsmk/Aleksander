@@ -4530,14 +4530,11 @@ void updateScreensaverContent() {
     String feedingText;
     lv_color_t feedingColor = COLOR_MUTED;
     if (lastFeedingTime) {
-      const long elapsedMin = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
+      // ZAWSZE pokazujemy, ile czasu temu bylo ostatnie karmienie (+ ~godzina nastepnego).
+      // Zblizajaca sie/miniona pora sygnalizowana jest kolorem tekstu (feedingAgeColor).
       const String nextClk = nextFeedingClock();
       const String suffix = nextClk.length() ? (" (nast. ~" + nextClk + ")") : String();
-      if (elapsedMin >= 0 && elapsedMin < COUNTER_BLINK_MIN) {
-        feedingText = "Ostatnie: " + formatAgoText(lastFeedingTime) + suffix;
-      } else {
-        feedingText = "Czas na karmienie!" + suffix;
-      }
+      feedingText = "Ostatnie: " + formatAgoText(lastFeedingTime) + suffix;
       feedingColor = feedingAgeColor(lastFeedingTime);
     } else {
       feedingText = "Brak wpisu karmienia";
