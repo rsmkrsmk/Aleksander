@@ -68,7 +68,7 @@ const char WEB_APP_HTML[] PROGMEM = R"WEBPANEL(
     <button class="milk" data-action="weight">WAGA</button>
     <button class="milk" data-action="calendar">KALENDARZ</button>
     <button data-action="chart">PODSUMOWANIE</button>
-    <button class="wide milk" data-action="chart5">WYKRESY</button>
+    <button class="milk" data-action="chart5">WYKRESY</button>
   </nav>
   <p class="status" id="status">Sprawdzanie stanu urządzenia…</p>
   <p class="sysinfo" id="sysinfo"></p>
