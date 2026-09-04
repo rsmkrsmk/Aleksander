@@ -32,6 +32,8 @@
 #include <esp_partition.h>
 #include <esp_lcd_panel_rgb.h>
 #include <esp_lcd_panel_ops.h>
+#include <esp_task_wdt.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <vector>
@@ -228,6 +230,23 @@ static uint64_t cpuTotalUs = 0;
 static uint32_t cpuCalcLastMs = 0;
 static int cpuLoadPct = 0;
 
+// ------------------------------ Diagnostyka / watchdog ------------------------------
+// Watchdog zadaniowy pilnuje petli loop(): jesli cos zablokuje ja na dluzej niz
+// WATCHDOG_TIMEOUT_S, ESP32 wykonuje kontrolowany restart (zamiast wisiec).
+constexpr uint32_t WATCHDOG_TIMEOUT_S = 30;
+bool watchdogReady = false;
+// Liczniki przetrwaja miekki restart (RTC slow memory nie jest zerowane przy reboot).
+RTC_NOINIT_ATTR uint32_t bootCount;          // ile razy urzadzenie sie uruchomilo
+RTC_NOINIT_ATTR uint32_t watchdogResetCount; // ile razy zresetowal watchdog (TG*WDT)
+RTC_NOINIT_ATTR uint32_t rtcMagic;           // znacznik poprawnej inicjalizacji RTC
+constexpr uint32_t RTC_MAGIC_VALUE = 0xA1EC5AADUL;
+int lastResetReason = 0;                     // esp_reset_reason() z tego uruchomienia
+uint32_t minFreeHeapEver = 0xFFFFFFFFUL;     // najnizszy zaobserwowany wolny heap wewn.
+uint32_t httpRequestCount = 0;               // ile zadan HTTP obsluzono (licznik ogolny)
+uint32_t lastHttpMillis = 0;                 // millis() ostatniego obsluzonego zadania HTTP
+uint32_t telegramFailCount = 0;              // nieudane proby Telegrama z rzedu (limit ponawiania)
+constexpr uint32_t TELEGRAM_MAX_FAILS = 5;   // po tylu bledach z rzedu odpuszczamy wpis
+
 // Zapamiętane teksty ograniczają odrysowywanie ekranu RGB tylko do faktycznie zmienionych danych.
 String renderedClock;
 String renderedAge;
@@ -244,6 +263,7 @@ lv_obj_t *pumpingScreen = nullptr;
 lv_obj_t *diaperScreen = nullptr;
 lv_obj_t *otherScreen = nullptr;   // ekran INNE: pielucha + odciag pokarmu
 lv_obj_t *weightScreen = nullptr;  // ekran WAGA: wybor wagi w gramach
+lv_obj_t *diagnosticsScreen = nullptr; // ekran DIAGNOSTYKA (stan urzadzenia)
 lv_obj_t *homeLedWifi = nullptr;
 lv_obj_t *homeLedMemory = nullptr;
 lv_obj_t *homeLedTime = nullptr;
@@ -304,6 +324,8 @@ void loadLatestEntries();
 void recomputeFeedingRhythm();
 String nextFeedingClock();
 String formatGapShort(int minutes);
+void initWatchdog();
+void feedWatchdog();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
 bool isMilkType(const String &entryType);
 String milkTypeLabel(const String &entryType);
@@ -356,6 +378,9 @@ void createOtherScreen();
 void otherOpenEvent(lv_event_t *event);
 void backToOtherEvent(lv_event_t *event);
 void sleepToggleEvent(lv_event_t *event);
+void createDiagnosticsScreen();
+void diagnosticsOpenEvent(lv_event_t *event);
+const char *resetReasonText(int reason);
 void createWeightScreen();
 void weightOpenEvent(lv_event_t *event);
 void weightSaveEvent(lv_event_t *event);
@@ -421,7 +446,7 @@ void prepareScreen(lv_obj_t *screen) {
 
 void createReusableScreenRoots() {
   lv_obj_t **screens[] = {&homeScreen, &formScreen, &calendarScreen, &dayDetailScreen, &chartScreen,
-                          &pumpingScreen, &diaperScreen, &otherScreen, &weightScreen};
+                          &pumpingScreen, &diaperScreen, &otherScreen, &weightScreen, &diagnosticsScreen};
   for (lv_obj_t **screen : screens) {
     *screen = lv_obj_create(nullptr);
     prepareScreen(*screen);
@@ -2482,22 +2507,96 @@ void createOtherScreen() {
   lv_obj_t *backButton = createButton(otherScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
   lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
 
-  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 96, 452, 74, COLOR_BLUE);
+  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 90, 452, 58, COLOR_BLUE);
   lv_obj_add_event_cb(diaperBtn, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 180, 452, 74, COLOR_ORANGE);
+  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 156, 452, 58, COLOR_ORANGE);
   lv_obj_add_event_cb(pumpingBtn, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
   // Przycisk snu zmienia tekst/kolor zaleznie od tego, czy dziecko aktualnie spi.
   lv_obj_t *sleepBtn = createButton(otherScreen,
                                     sleepInProgress ? "OBUDZIL SIE" : "ZASNAL",
-                                    14, 264, 452, 74,
+                                    14, 222, 452, 58,
                                     sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
   lv_obj_add_event_cb(sleepBtn, sleepToggleEvent, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *diagBtn = createButton(otherScreen, "DIAGNOSTYKA", 14, 288, 452, 58, COLOR_MUTED);
+  lv_obj_add_event_cb(diagBtn, diagnosticsOpenEvent, LV_EVENT_CLICKED, nullptr);
   createLabel(otherScreen,
               sleepInProgress ? "Dziecko spi — dotknij OBUDZIL SIE po przebudzeniu."
-                              : "Pielucha, odciaganie, sen.",
-              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 350);
+                              : "Pielucha, odciaganie, sen, diagnostyka.",
+              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 356);
 
   loadReusableScreen(otherScreen);
+}
+
+// ---------------------------- Ekran DIAGNOSTYKA ----------------------------
+void diagnosticsOpenEvent(lv_event_t *event) {
+  createDiagnosticsScreen();
+}
+
+// Czytelny opis powodu ostatniego resetu.
+const char *resetReasonText(int reason) {
+  switch (reason) {
+    case ESP_RST_POWERON:  return "wlaczenie zasilania";
+    case ESP_RST_SW:       return "restart programowy";
+    case ESP_RST_PANIC:    return "panic (blad)";
+    case ESP_RST_INT_WDT:  return "watchdog (przerwania)";
+    case ESP_RST_TASK_WDT: return "watchdog (zadanie)";
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "spadek napiecia";
+    case ESP_RST_DEEPSLEEP:return "wybudzenie ze snu";
+    case ESP_RST_EXT:      return "reset zewnetrzny";
+    default:               return "nieznany";
+  }
+}
+
+void createDiagnosticsScreen() {
+  resetReusableScreen(diagnosticsScreen);
+
+  createLabel(diagnosticsScreen, "DIAGNOSTYKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *backButton = createButton(diagnosticsScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
+  lv_obj_add_event_cb(backButton, otherOpenEvent, LV_EVENT_CLICKED, nullptr);
+
+  // Karta ze statusami (przewijalna, gdyby tekst byl dlugi).
+  lv_obj_t *card = createCard(diagnosticsScreen, 14, 90, 452, 344);
+  lv_obj_add_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(card, LV_DIR_VER);
+
+  const bool wifiOk = WiFi.status() == WL_CONNECTED;
+  const uint32_t up = millis() / 1000;
+  const uint32_t upD = up / 86400, upH = (up % 86400) / 3600, upM = (up % 3600) / 60;
+  const uint32_t freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024;
+  const uint32_t minInt = (minFreeHeapEver == 0xFFFFFFFFUL) ? 0 : minFreeHeapEver / 1024;
+  const uint32_t httpAgo = lastHttpMillis ? (millis() - lastHttpMillis) / 1000 : 0;
+
+  String s;
+  s  = String("Wi-Fi: ") + (wifiOk ? "polaczono" : "ROZLACZONO") + "\n";
+  if (wifiOk) {
+    s += "IP: " + WiFi.localIP().toString() + "\n";
+    s += "Sygnal: " + String(WiFi.RSSI()) + " dBm\n";
+  }
+  s += "Serwer HTTP: " + String(webServerStarted ? "aktywny" : "zatrzymany") + "\n";
+  s += "Obsluzonych zadan HTTP: " + String(httpRequestCount) + "\n";
+  s += "Ostatnie zadanie HTTP: " + (lastHttpMillis ? (String(httpAgo) + " s temu") : String("-")) + "\n";
+  s += "Czas (NTP): " + String(timeIsValid ? "OK" : "brak") + "\n";
+  s += "Pamiec danych: " + String(storageReady ? "OK" : "BLAD") + "\n";
+  s += "Pogoda: " + String(weatherState.valid ? "OK" : "brak danych") + "\n";
+  s += "---\n";
+  s += "RAM wewn. wolny: " + String(freeInt) + " KB\n";
+  s += "RAM wewn. min: " + String(minInt) + " KB\n";
+  s += "PSRAM wolny: " + String(ESP.getFreePsram() / 1024) + " KB\n";
+  s += "CPU: " + String(cpuLoadPct) + " %\n";
+  s += "Praca: " + String(upD) + "d " + String(upH) + "h " + String(upM) + "min\n";
+  s += "---\n";
+  s += "Watchdog: " + String(watchdogReady ? "aktywny" : "wylaczony") + "\n";
+  s += "Uruchomien urzadzenia: " + String(bootCount) + "\n";
+  s += "Restartow watchdoga: " + String(watchdogResetCount) + "\n";
+  s += "Ostatni reset: " + String(resetReasonText(lastResetReason));
+
+  lv_obj_t *info = createLabel(card, s.c_str(), COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 2);
+  lv_obj_set_width(info, 416);
+  lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
+  lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
+
+  loadReusableScreen(diagnosticsScreen);
 }
 
 // Ekran WAGA: wybor wagi dziecka w gramach i zapis wpisu typu WAGA.
@@ -3298,6 +3397,9 @@ void updateNightMode() {
   else if (active == chartScreen) createFeedingChartScreen();
   else if (active == pumpingScreen) createPumpingScreen();
   else if (active == diaperScreen) createDiaperScreen();
+  else if (active == otherScreen) createOtherScreen();
+  else if (active == weightScreen) createWeightScreen();
+  else if (active == diagnosticsScreen) createDiagnosticsScreen();
 }
 
 // ------------------------------- Telegram ---------------------------------------
@@ -3371,6 +3473,7 @@ bool sendBackupViaTelegram() {
   }
   const size_t fileSize = file.size();
 
+  feedWatchdog(); // wysylka dokumentu przez TLS trwa dluzej — chronimy watchdog
   WiFiClientSecure client;
   client.setInsecure();
   client.setHandshakeTimeout(8000);
@@ -3421,6 +3524,7 @@ bool sendBackupViaTelegram() {
   while (client.available()) client.read();
   client.stop();
   file.close();
+  feedWatchdog();
 
   if (code == 200) {
     Serial.println("Telegram: backup wyslany.");
@@ -3462,6 +3566,7 @@ void pumpTelegramQueue() {
 
   if (pendingTelegramText.length() == 0) return;
 
+  feedWatchdog(); // operacja TLS potrafi trwac kilka s — nakarm WDT przed i po
   WiFiClientSecure client;
   client.setInsecure(); // autoryzacją jest sam token bota
   client.setTimeout(8000);
@@ -3470,6 +3575,7 @@ void pumpTelegramQueue() {
   if (!http.begin(client, "api.telegram.org", 443, url)) {
     Serial.println("Telegram: http.begin() nieudany.");
     telegramNextAttemptMs = millis() + 30000;
+    feedWatchdog();
     return;
   }
   http.setTimeout(8000);
@@ -3478,13 +3584,25 @@ void pumpTelegramQueue() {
                       "&text=" + telegramUrlEncode(pendingTelegramText);
   const int code = http.POST(body);
   http.end();
+  feedWatchdog();
   if (code == 200) {
     pendingTelegramText = ""; // sukces — usuwamy z kolejki
+    telegramFailCount = 0;
     Serial.println("Telegram: wiadomosc wyslana.");
   } else {
-    // Niepowodzenie — zostawiamy w kolejce, ponawiamy za 30 s.
-    Serial.printf("Telegram: wysylka nieudana (kod %d). Ponowka za 30 s.\n", code);
-    telegramNextAttemptMs = millis() + 30000;
+    // Niepowodzenie — ponawiamy za 30 s, ale po TELEGRAM_MAX_FAILS z rzedu
+    // porzucamy wpis, zeby nie blokowac petli w nieskonczonosc.
+    ++telegramFailCount;
+    if (telegramFailCount >= TELEGRAM_MAX_FAILS) {
+      Serial.printf("Telegram: %u nieudanych prob — porzucam wpis.\n", (unsigned)telegramFailCount);
+      pendingTelegramText = "";
+      telegramFailCount = 0;
+      telegramNextAttemptMs = millis() + 60000;
+    } else {
+      Serial.printf("Telegram: wysylka nieudana (kod %d). Ponowka za 30 s (%u/%u).\n",
+                    code, (unsigned)telegramFailCount, (unsigned)TELEGRAM_MAX_FAILS);
+      telegramNextAttemptMs = millis() + 30000;
+    }
   }
 #endif
 }
@@ -3766,7 +3884,11 @@ void updateScreensaverContent() {
     setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
     if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
     // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
-    setLabelTextIfChanged(ssStatValue[0], ssRenderedStat[0], String(todayFeedingCount));
+    // WAZNE: liczba karmien pochodzi z tego samego zrodla co kalendarz/WWW
+    // (dayStats -> feedingCount), aby na calym urzadzeniu byl JEDEN licznik.
+    DaySummary ssToday;
+    dayStats(dayOffsetFromToday(0), ssToday);
+    setLabelTextIfChanged(ssStatValue[0], ssRenderedStat[0], String(ssToday.feedingCount));
     setLabelTextIfChanged(ssStatValue[1], ssRenderedStat[1], formatGapShort(longestFeedingGapMin));
     setLabelTextIfChanged(ssStatValue[2], ssRenderedStat[2], formatGapShort(avgFeedingGapMin));
   } else {
@@ -4077,10 +4199,123 @@ void requestWeatherFetch() {
   }
 }
 
+// ------------------------------- Ekran startowy (boot) --------------------------
+// Prosty, ladny ekran powitalny z lista krokow inicjalizacji. Pokazywany od razu
+// po uruchomieniu LVGL, aktualizowany przy kazdym etapie startu.
+constexpr uint8_t BOOT_STEP_COUNT = 5;
+lv_obj_t *bootScreen = nullptr;
+lv_obj_t *bootStepLabel[BOOT_STEP_COUNT] = {nullptr};
+lv_obj_t *bootStatusLabel = nullptr;
+const char *BOOT_STEP_NAMES[BOOT_STEP_COUNT] = {
+    "Wi-Fi", "Zegar (NTP)", "Pamiec danych", "Pogoda", "Serwer WWW"};
+
+// Wymusza jedno odswiezenie LVGL, aby zmiany byly widoczne mimo blokujacych krokow.
+void bootPumpLvgl() {
+  const uint32_t nowMs = millis();
+  lv_tick_inc(nowMs - lastLvglTickMs);
+  lastLvglTickMs = nowMs;
+  lv_timer_handler();
+}
+
+void showBootScreen() {
+  bootScreen = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(bootScreen, lv_color_hex(0x27492E), 0); // ciepla zielen lesna
+  lv_obj_set_style_bg_opa(bootScreen, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(bootScreen, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Logo: okragla "odznaka" z inicjalem A.
+  lv_obj_t *badge = lv_obj_create(bootScreen);
+  lv_obj_remove_style_all(badge);
+  lv_obj_set_size(badge, 96, 96);
+  lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, 54);
+  lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(badge, lv_color_hex(0xE6F1E0), 0);
+  lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(badge, lv_color_hex(0x7FB88A), 0);
+  lv_obj_set_style_border_width(badge, 3, 0);
+  lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *initial = lv_label_create(badge);
+  lv_label_set_text(initial, "A");
+  lv_obj_set_style_text_color(initial, lv_color_hex(0x27492E), 0);
+  lv_obj_set_style_text_font(initial, &lv_font_montserrat_48, 0);
+  lv_obj_center(initial);
+
+  lv_obj_t *title = lv_label_create(bootScreen);
+  lv_label_set_text(title, "LESNY DZIENNIK");
+  lv_obj_set_style_text_color(title, lv_color_white(), 0);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 162);
+
+  lv_obj_t *name = lv_label_create(bootScreen);
+  lv_label_set_text(name, "ALEKSANDRA");
+  lv_obj_set_style_text_color(name, lv_color_hex(0xBFE0C4), 0);
+  lv_obj_set_style_text_font(name, &lv_font_montserrat_36, 0);
+  lv_obj_align(name, LV_ALIGN_TOP_MID, 0, 182);
+
+  // Karta z lista krokow.
+  lv_obj_t *card = lv_obj_create(bootScreen);
+  lv_obj_remove_style_all(card);
+  lv_obj_set_size(card, 360, 190);
+  lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 250);
+  lv_obj_set_style_radius(card, 18, 0);
+  lv_obj_set_style_bg_color(card, lv_color_hex(0x2F5638), 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(card, 14, 0);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  for (uint8_t i = 0; i < BOOT_STEP_COUNT; ++i) {
+    bootStepLabel[i] = lv_label_create(card);
+    lv_label_set_text_fmt(bootStepLabel[i], "%s  %s", ".", BOOT_STEP_NAMES[i]);
+    lv_obj_set_style_text_color(bootStepLabel[i], lv_color_hex(0x9DB3A0), 0);
+    lv_obj_set_style_text_font(bootStepLabel[i], &lv_font_montserrat_16, 0);
+    lv_obj_align(bootStepLabel[i], LV_ALIGN_TOP_LEFT, 4, 4 + i * 32);
+  }
+
+  bootStatusLabel = lv_label_create(bootScreen);
+  lv_label_set_text(bootStatusLabel, "Uruchamianie...");
+  lv_obj_set_style_text_color(bootStatusLabel, lv_color_hex(0xBFE0C4), 0);
+  lv_obj_set_style_text_font(bootStatusLabel, &lv_font_montserrat_14, 0);
+  lv_obj_align(bootStatusLabel, LV_ALIGN_BOTTOM_MID, 0, -14);
+
+  lv_screen_load(bootScreen);
+  bootPumpLvgl();
+}
+
+// state: 0 = w toku (żółty ">"), 1 = OK (zielony "OK"), 2 = pominiete/blad (szary "-").
+void bootStep(uint8_t idx, uint8_t state) {
+  if (idx >= BOOT_STEP_COUNT || !bootStepLabel[idx]) return;
+  const char *mark = state == 1 ? "OK" : (state == 2 ? "--" : ">>");
+  lv_color_t col = state == 1 ? lv_color_hex(0x9FE6AC)
+                              : (state == 2 ? lv_color_hex(0x7C8C80) : lv_color_hex(0xE8D468));
+  lv_label_set_text_fmt(bootStepLabel[idx], "%s  %s", mark, BOOT_STEP_NAMES[idx]);
+  lv_obj_set_style_text_color(bootStepLabel[idx], col, 0);
+  if (bootStatusLabel && state != 0) {
+    // Po ostatnim kroku pokaz "Gotowe".
+    if (idx == BOOT_STEP_COUNT - 1) lv_label_set_text(bootStatusLabel, "Gotowe!");
+  }
+  bootPumpLvgl();
+}
+
 // --------------------------------- Uruchomienie ---------------------------------
 void setup() {
   Serial.begin(115200);
   delay(200);
+
+  // --- Diagnostyka: powod resetu + liczniki w pamieci RTC (przetrwaja restart) ---
+  lastResetReason = static_cast<int>(esp_reset_reason());
+  if (rtcMagic != RTC_MAGIC_VALUE) {
+    // Pierwsze uruchomienie po utracie zasilania — inicjalizacja licznikow.
+    rtcMagic = RTC_MAGIC_VALUE;
+    bootCount = 0;
+    watchdogResetCount = 0;
+  }
+  ++bootCount;
+  if (lastResetReason == ESP_RST_TASK_WDT || lastResetReason == ESP_RST_INT_WDT ||
+      lastResetReason == ESP_RST_WDT) {
+    ++watchdogResetCount;
+    Serial.println("DIAG: poprzedni restart spowodowany przez WATCHDOG.");
+  }
+  Serial.printf("DIAG: boot #%u, powod resetu=%d, restartow WDT=%u\n",
+                (unsigned)bootCount, lastResetReason, (unsigned)watchdogResetCount);
 
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setTimeOut(100);
@@ -4172,16 +4407,34 @@ void setup() {
 
   createReusableScreenRoots();
   Serial.println("INIT: korzenie ekranow utworzone");
+
+  // Ekran startowy z logo i lista krokow — pokazywany podczas inicjalizacji.
+  showBootScreen();
+
+  // Krok 1: Wi-Fi (blokujace do ~15 s).
+  bootStep(0, 0);
   connectWiFi();
+  bootStep(0, WiFi.status() == WL_CONNECTED ? 1 : 2);
+
+  // Krok 2: Zegar NTP.
+  bootStep(1, 0);
   timeIsValid = syncTimeFromNTP();
   lastNtpSyncMs = millis();
+  bootStep(1, timeIsValid ? 1 : 2);
+
+  // Krok 3: Pamiec danych (LittleFS).
+  bootStep(2, 0);
   storageReady = initialiseStorage();
   if (storageReady) {
     Serial.printf("LittleFS: uzywane %u KB z %u KB.\n",
                   static_cast<unsigned>(LittleFS.usedBytes() / 1024),
                   static_cast<unsigned>(LittleFS.totalBytes() / 1024));
   }
+  bootStep(2, storageReady ? 1 : 2);
   loadLatestEntries();
+
+  // Krok 4: Pogoda (z cache lub do pobrania w tle).
+  bootStep(3, 0);
   weatherMutex = xSemaphoreCreateMutex();
   if (!weatherMutex) {
     Serial.println("Pogoda: mutex nieutworzony — tryb bezpieczny bez wspoldzielenia.");
@@ -4189,12 +4442,18 @@ void setup() {
   if (loadWeatherCache()) {
     weatherLastTryMs = millis();
     Serial.println("Pogoda: pokazuje ostatnie zapisane dane do czasu odswiezenia.");
+    bootStep(3, 1);
   } else {
     weatherFetchPending = true;
+    bootStep(3, 2); // brak cache — pobierze sie w tle po starcie
   }
   weatherNextTryMs = millis() + WEATHER_START_DELAY_MS;
+
+  // Krok 5: Serwer WWW + uslugi (mDNS/OTA/Telegram).
+  bootStep(4, 0);
   startWebServer();
   initOptionalServices();
+  bootStep(4, webServerStarted ? 1 : 2);
   if (xTaskCreatePinnedToCore(weatherTask, "weather", 4096, nullptr, 1,
                               &weatherTaskHandle, 0) != pdPASS) {
     Serial.println("Pogoda: nie mozna uruchomic zadania FreeRTOS.");
@@ -4205,9 +4464,61 @@ void setup() {
   lv_timer_create(agingTickCb, 30000, nullptr);
   counterAlarmTimer = lv_timer_create(counterAlarmTickCb, 500, nullptr);
   lastUiWifiConnected = WiFi.status() == WL_CONNECTED;
+
+  // Krotka chwila na pokazanie "Gotowe!" przed wejsciem do aplikacji.
+  bootPumpLvgl();
+  delay(600);
+
   createHomeScreen();
+  // Zwolnij ekran startowy (nie jest juz potrzebny) — home jest juz zaladowany.
+  if (bootScreen) {
+    lv_obj_del(bootScreen);
+    bootScreen = nullptr;
+    for (uint8_t i = 0; i < BOOT_STEP_COUNT; ++i) bootStepLabel[i] = nullptr;
+    bootStatusLabel = nullptr;
+  }
   // Start w trybie zegara: czekamy na pierwsze dotkniecie ekranu.
   enterScreensaver();
+
+  // --- Watchdog zadaniowy: pilnuje petli loop() (restart przy zawieszeniu) ---
+  // Uruchamiany na koncu setup(), gdy blokujace kroki startowe (WiFi/NTP) sa juz za nami.
+  initWatchdog();
+}
+
+// Inicjalizacja Task WDT. Rdzen ESP-IDF 5.x (Arduino-ESP32 3.x) uzywa API ze
+// struktura konfiguracyjna; starsze rdzenie — sygnatury (timeout_s, panic).
+void initWatchdog() {
+#if ESP_IDF_VERSION_MAJOR >= 5
+  // W Arduino-ESP32 3.x WDT bywa juz zainicjalizowany przez rdzen — probujemy
+  // najpierw rekonfiguracji, a gdy nieaktywny, pelnej inicjalizacji.
+  esp_task_wdt_config_t wdtConfig = {};
+  wdtConfig.timeout_ms = WATCHDOG_TIMEOUT_S * 1000;
+  wdtConfig.idle_core_mask = 0;     // nie pilnujemy zadan IDLE
+  wdtConfig.trigger_panic = true;   // przekroczenie -> panic -> restart
+  esp_err_t err = esp_task_wdt_reconfigure(&wdtConfig);
+  if (err == ESP_ERR_INVALID_STATE) {
+    err = esp_task_wdt_init(&wdtConfig);
+  }
+  watchdogReady = (err == ESP_OK);
+#else
+  // Starszy rdzen: init przyjmuje (timeout_s, panic).
+  watchdogReady = (esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true) == ESP_OK);
+#endif
+  if (watchdogReady) {
+    esp_task_wdt_add(nullptr); // pilnuj biezacego zadania (loopTask)
+    esp_task_wdt_reset();
+    Serial.printf("DIAG: watchdog aktywny (timeout %us).\n", (unsigned)WATCHDOG_TIMEOUT_S);
+  } else {
+    Serial.println("DIAG: nie udalo sie uruchomic watchdoga.");
+  }
+}
+
+// Karmienie watchdoga + aktualizacja lekkiej telemetrii. Wolane co iteracje loop()
+// oraz recznie przed/po dlugich operacjach sieciowych (Telegram/pogoda).
+void feedWatchdog() {
+  if (watchdogReady) esp_task_wdt_reset();
+  const uint32_t freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (freeInt < minFreeHeapEver) minFreeHeapEver = freeInt;
 }
 
 void loop() {
@@ -4220,6 +4531,7 @@ void loop() {
   }
   ArduinoOTA.handle();
 #endif
+  feedWatchdog(); // reset watchdoga + telemetria min. heap w kazdej iteracji
   updateNightMode();
   pumpTelegramQueue();
   resyncNtpIfDue();
@@ -4265,7 +4577,11 @@ void loop() {
     Serial.println("HTTP: serwer zatrzymany — brak Wi-Fi.");
   }
   if (WiFi.status() == WL_CONNECTED && !webServerStarted) startWebServer();
-  if (webServerStarted) webServer.handleClient();
+  if (webServerStarted) {
+    const bool hadClient = webServer.client() && webServer.client().connected();
+    webServer.handleClient();
+    if (hadClient) { ++httpRequestCount; lastHttpMillis = millis(); }
+  }
 
   const uint32_t lvglNowMs = millis();
   lv_tick_inc(lvglNowMs - lastLvglTickMs);
