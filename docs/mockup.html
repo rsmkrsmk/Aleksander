@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Makieta — Leśny Dziennik (z ikonami)</title>
+<!--
+  MAKIETA WIZUALNA (podglad kierunku) — NIE jest to produkcyjny panel.
+  Statyczny plik z przykladowymi danymi, do obejrzenia w przegladarce na komputerze.
+  Pokazuje odswiezony wyglad: ikony SVG na przyciskach/kartach, dopracowane karty,
+  mikro-animacje. Paleta i uklad zgodne z web_panel.h. Nic w firmware nie zmienione.
+-->
+<style>
+:root{
+  --paper:#F6F8F1;--surface:#FFFFFF;--tonal:#E6F1E0;--ink:#243528;--muted:#4E6252;
+  --moss:#356D43;--berry:#3E5E9B;--acorn:#A85432;--line:#CBDFC4;--danger:#B84C4C;
+  --gold:#C7961E;
+  --shadow:0 8px 24px rgba(37,61,40,.12);--shadow-soft:0 2px 7px rgba(37,61,40,.10);
+}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 100% 0,#e8f2e2 0,transparent 33%),linear-gradient(145deg,#fbfcf8,var(--paper));
+  color:var(--ink);font-family:Roboto,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.35}
+body.night{--paper:#161B18;--surface:#26302A;--tonal:#24322A;--ink:#E8EFE4;--muted:#9DB3A0;--moss:#7FB88A;--berry:#7C9BD1;--acorn:#D98B5F;--line:#3A473E;background:#141a17}
+.app{width:min(100%,680px);margin:auto;padding:16px 14px 40px}
+
+/* NAGLOWEK */
+.hero{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:17px 18px;margin:0 0 14px;
+  background:linear-gradient(135deg,#eff7e9,#e3f0dc);border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow-soft)}
+body.night .hero{background:none}
+.hero-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hero .leaf{width:30px;height:30px;color:var(--moss);flex-shrink:0}
+.hero h1{font-size:1.06rem;line-height:1.15;margin:0;font-weight:850;letter-spacing:.025em}
+.hero p{margin:2px 0 0;color:var(--muted);font-weight:750;font-size:.82rem}
+.ip{display:inline-block;margin-top:8px;padding:5px 10px;border-radius:999px;background:var(--surface);color:var(--moss);font-size:.76rem;font-weight:800;box-shadow:var(--shadow-soft)}
+
+/* KARTA DASHBOARD "NA DZIS" */
+.dash{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 14px}
+.dash .tile{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:14px 10px;text-align:center;box-shadow:var(--shadow-soft);position:relative;overflow:hidden}
+.dash .tile .ic{width:26px;height:26px;margin:0 auto 6px;display:block}
+.dash .tile .k{font-size:.62rem;font-weight:850;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.dash .tile .v{font-size:1.05rem;font-weight:900;margin-top:3px}
+.dash .feed .ic{color:var(--acorn)} .dash .feed .v{color:var(--acorn)}
+.dash .sleep .ic{color:#6E5FA6} .dash .sleep .v{color:#6E5FA6}
+.dash .milk .ic{color:var(--berry)} .dash .milk .v{color:var(--berry)}
+
+/* KARTY OGOLNE */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow-soft);padding:16px;margin:12px 0}
+.card-head{display:flex;align-items:center;gap:9px;margin:0 0 10px}
+.card-head .ic{width:20px;height:20px;flex-shrink:0}
+.card-head h2{font-size:.74rem;letter-spacing:.09em;margin:0;color:var(--ink);font-weight:850;text-transform:uppercase}
+.age{border:0;background:linear-gradient(135deg,var(--tonal),#dcebd3);text-align:center;font-weight:800;color:var(--moss);border-radius:22px;padding:14px;font-size:1.02rem}
+.development{background:linear-gradient(135deg,#f5faef,#e7f2e0);border-color:#c6dcbd}
+.development .ic{color:var(--moss)}
+.development p.body{margin:0;color:var(--ink);font-size:.9rem;line-height:1.42}
+.development .note{margin-top:8px;color:var(--muted);font-size:.72rem;font-weight:650}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.info .latest{margin:0;font-size:.92rem;font-weight:600;white-space:pre-line}
+.info.feeding .ic{color:var(--acorn)} .info.milk .ic{color:var(--berry)}
+
+.since{border-radius:18px;background:linear-gradient(135deg,var(--tonal),#dcebd3);text-align:center;font-weight:900;letter-spacing:.02em;color:var(--moss);
+  padding:14px;margin:12px 0;font-size:.98rem;display:flex;align-items:center;justify-content:center;gap:8px}
+.since .ic{width:20px;height:20px}
+
+/* PRZYCISKI Z IKONAMI */
+.actions{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0 8px}
+.actions .wide{grid-column:1/-1}
+button.act{appearance:none;border:0;border-radius:18px;min-height:60px;padding:12px 14px;background:var(--moss);color:#fff;font:inherit;font-size:.9rem;font-weight:850;
+  letter-spacing:.01em;cursor:pointer;box-shadow:0 5px 12px rgba(50,92,48,.23);transition:transform .14s ease,filter .14s ease,box-shadow .14s ease;
+  display:flex;align-items:center;justify-content:center;gap:10px}
+button.act .ic{width:22px;height:22px;flex-shrink:0}
+button.act:hover{filter:brightness(1.05)}
+button.act:active{transform:translateY(2px) scale(.985);box-shadow:0 2px 5px rgba(50,92,48,.22)}
+button.feed{background:var(--acorn)} button.sleep{background:#6E5FA6} button.milk{background:var(--berry)} button.other{background:var(--muted)}
+button.summary{background:var(--moss)} button.cal{background:var(--berry)}
+
+.section-title{font-size:.72rem;font-weight:850;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin:18px 4px 6px}
+
+/* PASEK STANU SNU (podglad) */
+.sleepbar{border-radius:16px;padding:12px 14px;color:#fff;font-weight:850;font-size:.86rem;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow-soft)}
+.sleepbar.ok{background:linear-gradient(135deg,#3f9d55,#2f8446)}
+.sleepbar .ic{width:22px;height:22px}
+
+.toggle{display:flex;align-items:center;gap:8px;justify-content:flex-end;color:var(--muted);font-size:.8rem;font-weight:700;margin:10px 4px}
+.toggle button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font-weight:800;cursor:pointer}
+.note-mock{text-align:center;color:var(--muted);font-size:.72rem;margin:20px 0 0}
+</style>
+</head>
+<body>
+<main class="app">
+  <div class="toggle"><span>Podgląd motywu:</span><button onclick="document.body.classList.toggle('night')">DZIEŃ / NOC</button></div>
+
+  <header class="hero">
+    <div class="hero-line">
+      <svg class="leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg>
+      <div><h1>LEŚNY DZIENNIK ALEKSANDRA</h1><p>Wt 09.09 · 14:32</p></div>
+    </div>
+    <span class="ip">karmienie.local</span>
+  </header>
+
+  <!-- DASHBOARD NA DZIS: kluczowe liczby jako kafle z ikonami -->
+  <div class="dash">
+    <div class="tile feed">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-4 0-7-3-7-7 0-3 2-6 7-11 5 5 7 8 7 11 0 4-3 7-7 7Z"/></svg>
+      <div class="k">Ostatnie karm.</div><div class="v">2 h 05 min</div>
+    </div>
+    <div class="tile sleep">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      <div class="k">Drzemka ~</div><div class="v">15:10</div>
+    </div>
+    <div class="tile milk">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8"/><path d="M9 2v3l-2 4v11a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9l-2-4V2"/><path d="M7 13h10"/></svg>
+      <div class="k">Butelka dziś</div><div class="v">210 ml</div>
+    </div>
+  </div>
+
+  <section class="card age">Aleksander ma 32 dni</section>
+
+  <section class="card development">
+    <div class="card-head">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <h2>Wskazówka dnia</h2>
+    </div>
+    <p class="body">W tym tygodniu maluch coraz dłużej skupia wzrok na twarzach — pokazuj mu spokojnie swoją mimikę z odległości 20–30 cm.</p>
+    <p class="note">Wskazówka jest orientacyjna — każde dziecko rozwija się we własnym tempie.</p>
+  </section>
+
+  <section class="two">
+    <article class="card info feeding">
+      <div class="card-head">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-4 0-7-3-7-7 0-3 2-6 7-11 5 5 7 8 7 11 0 4-3 7-7 7Z"/></svg>
+        <h2>Karmienie</h2>
+      </div>
+      <p class="latest">12:27
+Pierś L10 / P8 min</p>
+    </article>
+    <article class="card info milk">
+      <div class="card-head">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8"/><path d="M9 2v3l-2 4v11a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9l-2-4V2"/><path d="M7 13h10"/></svg>
+        <h2>Butelka</h2>
+      </div>
+      <p class="latest">11:40
+Mleko matki · 90 ml</p>
+    </article>
+  </section>
+
+  <section class="since">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    OSTATNIE KARMIENIE: 2 godz. 5 min temu
+  </section>
+
+  <div class="sleepbar ok">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+    Za wcześnie na drzemkę — okno ok. 15:10–15:40
+  </div>
+
+  <div class="section-title">Działania</div>
+  <nav class="actions">
+    <button class="act feed wide">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-4 0-7-3-7-7 0-3 2-6 7-11 5 5 7 8 7 11 0 4-3 7-7 7Z"/></svg>
+      KARMIENIE
+    </button>
+    <button class="act sleep">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      SEN
+    </button>
+    <button class="act other">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="12" r="1.6"/></svg>
+      INNE
+    </button>
+    <button class="act milk">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-7 4 14 2-7h4"/></svg>
+      WAGA
+    </button>
+    <button class="act cal">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
+      KALENDARZ
+    </button>
+    <button class="act summary">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      PODSUMOWANIE
+    </button>
+    <button class="act cal">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 5-6"/></svg>
+      WYKRESY
+    </button>
+    <button class="act other">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.2"/></svg>
+      DIAGNOSTYKA
+    </button>
+  </nav>
+
+  <p class="note-mock">Makieta poglądowa (przykładowe dane). Nie jest to działający panel — służy do oceny kierunku wizualnego.</p>
+</main>
+</body>
+</html>
