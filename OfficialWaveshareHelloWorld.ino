@@ -272,7 +272,6 @@ String renderedClock;
 String renderedAge;
 String renderedFeeding;
 String renderedMilk;
-String renderedDevelopment;
 
 lv_obj_t *homeScreen = nullptr;
 lv_obj_t *formScreen = nullptr;
@@ -292,7 +291,6 @@ lv_obj_t *homeClockLabel = nullptr;
 lv_obj_t *homeAgeLabel = nullptr;
 lv_obj_t *homeFeedingLabel = nullptr;
 lv_obj_t *homeMilkLabel = nullptr;
-lv_obj_t *homeDevelopmentLabel = nullptr;
 lv_obj_t *homeCounterLabel = nullptr;
 String renderedCounter;
 bool counterAlarmPhase = false;
@@ -419,7 +417,6 @@ void createPumpingScreen();
 void createOtherScreen();
 void otherOpenEvent(lv_event_t *event);
 void backToOtherEvent(lv_event_t *event);
-void sleepToggleEvent(lv_event_t *event);
 void createSleepScreen();
 void sleepOpenEvent(lv_event_t *event);
 String formatDurationShort(long minutes);
@@ -2964,15 +2961,7 @@ void backToOtherEvent(lv_event_t *event) {
 }
 
 // Ekran INNE: grupuje szybkie akcje PIELUCHA i ODCIAG POKARMU pod jednym miejscem.
-// Sen jednym dotknieciem: przelacza ZASNAL/OBUDZIL SIE wg biezacego stanu.
-void sleepToggleEvent(lv_event_t *event) {
-  if (!timeIsValid || !storageReady) return;
-  appendEntry(sleepInProgress ? "SEN_STOP" : "SEN_START", time(nullptr), 0);
-  loadLatestEntries(); // odswiez globale snu przed przerysowaniem ekranu
-  deleteModeActive = false;
-  createHomeScreen();
-}
-
+// (Sen ma dedykowany przycisk SEN na ekranie glownym i wlasny ekran.)
 void createOtherScreen() {
   resetReusableScreen(otherScreen);
 
@@ -2984,18 +2973,11 @@ void createOtherScreen() {
   lv_obj_add_event_cb(diaperBtn, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 156, 452, 58, COLOR_ORANGE);
   lv_obj_add_event_cb(pumpingBtn, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
-  // Przycisk snu zmienia tekst/kolor zaleznie od tego, czy dziecko aktualnie spi.
-  lv_obj_t *sleepBtn = createButton(otherScreen,
-                                    sleepInProgress ? "OBUDZIL SIE" : "ZASNAL",
-                                    14, 222, 452, 58,
-                                    sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
-  lv_obj_add_event_cb(sleepBtn, sleepToggleEvent, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *diagBtn = createButton(otherScreen, "DIAGNOSTYKA", 14, 288, 452, 58, COLOR_MUTED);
+  // Sen ma wlasny przycisk SEN na ekranie glownym — tutaj juz go nie dublujemy.
+  lv_obj_t *diagBtn = createButton(otherScreen, "DIAGNOSTYKA", 14, 222, 452, 58, COLOR_MUTED);
   lv_obj_add_event_cb(diagBtn, diagnosticsOpenEvent, LV_EVENT_CLICKED, nullptr);
-  createLabel(otherScreen,
-              sleepInProgress ? "Dziecko spi — dotknij OBUDZIL SIE po przebudzeniu."
-                              : "Pielucha, odciaganie, sen, diagnostyka.",
-              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 356);
+  createLabel(otherScreen, "Pielucha, odciaganie, diagnostyka.",
+              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 300);
 
   loadReusableScreen(otherScreen);
 }
@@ -3053,7 +3035,7 @@ void createSleepScreen() {
     else { stateColor = COLOR_RED; subText = "Przekroczone okno (ryzyko przemeczenia)"; }
   } else {
     bigText = "Brak danych snu";
-    subText = "Dotknij ZASNIJ, aby rozpoczac sledzenie.";
+    subText = "Gdy dziecko zasnie — dotknij ZASNAL.";
   }
   lv_obj_t *bigLabel = createLabel(stateCard, bigText.c_str(), COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 6);
   lv_obj_set_width(bigLabel, 416);
@@ -3076,9 +3058,10 @@ void createSleepScreen() {
               (String("Okno czuwania wg wieku: ") + formatDurationShort(ww.minMin) + " - " + formatDurationShort(ww.maxMin)).c_str(),
               COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 76);
 
-  // --- Duzy przycisk ZASNIJ / OBUDZ ---
+  // --- Duzy przycisk (opisuje fakt: co dziecko wlasnie zrobilo) ---
+  // Gdy czuwa -> klik = "ZASNAL"; gdy spi -> klik = "OBUDZIL SIE".
   lv_obj_t *toggleBtn = createButton(sleepScreen,
-                                     sleepInProgress ? "OBUDZ" : "ZASNIJ",
+                                     sleepInProgress ? "OBUDZIL SIE" : "ZASNAL",
                                      14, 220, 452, 66,
                                      sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
   lv_obj_add_event_cb(toggleBtn, sleepScreenToggleEvent, LV_EVENT_CLICKED, nullptr);
@@ -3368,12 +3351,16 @@ void createHomeScreen() {
   lv_obj_set_style_text_align(homeClockLabel, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_align(homeClockLabel, LV_ALIGN_TOP_RIGHT, -14, 14);
 
-  // Gora ekranu: po lewej codzienne tipsy, po prawej wiek Aleksandra.
-  lv_obj_t *tipCard = createCard(homeScreen, 14, 44, 268, 100);
-  homeDevelopmentLabel = createLabel(tipCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 6, 6);
-  lv_obj_set_width(homeDevelopmentLabel, 244);
-  lv_obj_set_style_text_font(homeDevelopmentLabel, &lv_font_montserrat_12, 0);
-  lv_label_set_long_mode(homeDevelopmentLabel, LV_LABEL_LONG_WRAP);
+  // Gora ekranu: po lewej OSTATNIE KARMIENIE (czytelniej, zamiast codziennych tipsow —
+  // wskazowka rozwojowa pozostaje dostepna w panelu WWW), po prawej wiek Aleksandra.
+  feedingCard = createCard(homeScreen, 14, 44, 268, 100);
+  lv_obj_set_style_bg_color(feedingCard, lv_color_mix(COLOR_CARD, COLOR_ORANGE, 16), 0);
+  lv_obj_set_style_shadow_width(feedingCard, 4, 0);
+  createLabel(feedingCard, "OSTATNIE KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
+  homeFeedingLabel = createLabel(feedingCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 30);
+  lv_obj_set_width(homeFeedingLabel, 244);
+  lv_obj_set_style_text_align(homeFeedingLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(homeFeedingLabel, LV_LABEL_LONG_WRAP);
 
   lv_obj_t *ageCard = createCard(homeScreen, 290, 44, 176, 100);
   lv_obj_set_style_bg_color(ageCard, COLOR_TONAL_GREEN, 0);
@@ -3397,16 +3384,11 @@ void createHomeScreen() {
   lv_obj_set_style_text_align(homeCounterLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_font(homeCounterLabel, &lv_font_montserrat_16, 0);
 
-  feedingCard = createCard(homeScreen, 14, 190, 220, 70);
-  lv_obj_set_style_bg_color(feedingCard, lv_color_mix(COLOR_CARD, COLOR_ORANGE, 16), 0);
-  lv_obj_set_style_shadow_width(feedingCard, 4, 0);
-  createLabel(feedingCard, "KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
-  homeFeedingLabel = createLabel(feedingCard, "", COLOR_TEXT, LV_ALIGN_CENTER, 0, 10);
-
-  milkCard = createCard(homeScreen, 246, 190, 220, 70);
+  // Ostatnia butelka na calej szerokosci (KARMIENIE przeniesione na gore ekranu).
+  milkCard = createCard(homeScreen, 14, 190, 452, 70);
   lv_obj_set_style_bg_color(milkCard, lv_color_mix(COLOR_CARD, COLOR_BLUE, 16), 0);
   lv_obj_set_style_shadow_width(milkCard, 4, 0);
-  createLabel(milkCard, "BUTELKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
+  createLabel(milkCard, "OSTATNIA BUTELKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
   homeMilkLabel = createLabel(milkCard, "", COLOR_TEXT, LV_ALIGN_CENTER, 0, 10);
 
   feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 268, 452, 48, COLOR_ORANGE);
@@ -3417,7 +3399,7 @@ void createHomeScreen() {
   const int navW = 145;
   const int navX[3] = {14, 167, 320};
   // Rzad 1 (y=324): SEN, INNE, WAGA
-  sleepHomeButton = createButton(homeScreen, sleepInProgress ? "SEN*" : "SEN",
+  sleepHomeButton = createButton(homeScreen, sleepInProgress ? "SEN (spi)" : "SEN",
                                  navX[0], 324, navW, 40,
                                  sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
   lv_obj_add_event_cb(sleepHomeButton, sleepOpenEvent, LV_EVENT_CLICKED, nullptr);
@@ -3556,7 +3538,6 @@ void createHomeScreen() {
   renderedAge = "";
   renderedFeeding = "";
   renderedMilk = "";
-  renderedDevelopment = "";
   renderedCounter = "";
   updateHomeInformation();
   loadReusableScreen(homeScreen);
@@ -3578,7 +3559,6 @@ void updateHomeInformation() {
   const bool wifiOk = WiFi.status() == WL_CONNECTED;
 
   const String ageText = calculateAgeText();
-  const String developmentText = developmentTipForToday();
 
   // Dioda przy kazdej sekcji statusu: zielona = OK, czerwona = blad.
   if (homeLedWifi) lv_obj_set_style_bg_color(homeLedWifi, wifiOk ? COLOR_GREEN : COLOR_RED, 0);
@@ -3608,7 +3588,6 @@ void updateHomeInformation() {
   setLabelTextIfChanged(homeAgeLabel, renderedAge, ageText);
   setLabelTextIfChanged(homeFeedingLabel, renderedFeeding, compactHomeEntry(lastFeeding, false));
   setLabelTextIfChanged(homeMilkLabel, renderedMilk, compactHomeEntry(lastMilk, true));
-  setLabelTextIfChanged(homeDevelopmentLabel, renderedDevelopment, developmentText);
 }
 
 // Belka licznika wg czasu od ostatniego karmienia:
@@ -4624,7 +4603,7 @@ void updateScreensaverContent() {
 
 void applyScreensaverVisibility() {
   lv_obj_t *controls[] = {feedingCard, milkCard, feedFormButton,
-                          otherHomeButton, weightHomeButton, calendarButton, chartButton,
+                          sleepHomeButton, otherHomeButton, weightHomeButton, calendarButton, chartButton,
                           homeCounterBar};
   for (lv_obj_t *o : controls) {
     if (!o) continue;
