@@ -160,6 +160,7 @@ String ssRenderedMinMax;
 String ssRenderedDress;
 String ssRenderedLastFeeding;
 String ssRenderedSleep;
+String ssRenderedTip;
 String ssRenderedHours[3];
 
 // Dolna czesci home ukrywane w trybie wygaszacza.
@@ -294,6 +295,8 @@ lv_obj_t *homeAgeLabel = nullptr;
 lv_obj_t *homeFeedingLabel = nullptr;
 lv_obj_t *homeMilkLabel = nullptr;
 lv_obj_t *homeCounterLabel = nullptr;
+lv_obj_t *ssTipCard = nullptr;        // wygaszacz: karta codziennej wskazowki (tipsy)
+lv_obj_t *ssTipLabel = nullptr;
 String renderedCounter;
 bool counterAlarmPhase = false;
 int16_t counterRemainMin = -1;   // minuty do nastepnego karmienia; -1 = brak danych
@@ -3353,16 +3356,16 @@ void createHomeScreen() {
   lv_obj_set_style_text_align(homeClockLabel, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_align(homeClockLabel, LV_ALIGN_TOP_RIGHT, -14, 14);
 
-  // Gora ekranu: po lewej OSTATNIE KARMIENIE (czytelniej, zamiast codziennych tipsow —
-  // wskazowka rozwojowa pozostaje dostepna w panelu WWW), po prawej wiek Aleksandra.
-  feedingCard = createCard(homeScreen, 14, 44, 268, 100);
-  lv_obj_set_style_bg_color(feedingCard, lv_color_mix(COLOR_CARD, COLOR_ORANGE, 16), 0);
-  lv_obj_set_style_shadow_width(feedingCard, 4, 0);
-  createLabel(feedingCard, "OSTATNIE KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
-  homeFeedingLabel = createLabel(feedingCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 30);
-  lv_obj_set_width(homeFeedingLabel, 244);
-  lv_obj_set_style_text_align(homeFeedingLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(homeFeedingLabel, LV_LABEL_LONG_WRAP);
+  // Gora ekranu: po lewej LICZNIK od ostatniego karmienia (kolor/miganie wg czasu),
+  // po prawej wiek Aleksandra.
+  homeCounterBar = createCard(homeScreen, 14, 44, 268, 100);
+  lv_obj_set_style_bg_color(homeCounterBar, COLOR_TONAL_GREEN, 0);
+  lv_obj_set_style_shadow_width(homeCounterBar, 4, 0);
+  homeCounterLabel = createLabel(homeCounterBar, "", COLOR_MUTED, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_width(homeCounterLabel, 236);
+  lv_obj_set_style_text_align(homeCounterLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_font(homeCounterLabel, &lv_font_montserrat_16, 0);
+  lv_label_set_long_mode(homeCounterLabel, LV_LABEL_LONG_WRAP);
 
   lv_obj_t *ageCard = createCard(homeScreen, 290, 44, 176, 100);
   lv_obj_set_style_bg_color(ageCard, COLOR_TONAL_GREEN, 0);
@@ -3373,21 +3376,14 @@ void createHomeScreen() {
   lv_obj_set_style_text_align(homeAgeLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(homeAgeLabel, LV_LABEL_LONG_WRAP);
 
-  // Belka licznika: w ostatnich 30 minutach przed terminem miga bialo/czerwono.
-  homeCounterBar = lv_obj_create(homeScreen);
-  lv_obj_remove_style_all(homeCounterBar);
-  lv_obj_set_pos(homeCounterBar, 14, 148);
-  lv_obj_set_size(homeCounterBar, 452, 30);
-  lv_obj_set_style_radius(homeCounterBar, 15, 0);
-  lv_obj_set_style_bg_color(homeCounterBar, COLOR_TONAL_GREEN, 0);
-  lv_obj_set_style_bg_opa(homeCounterBar, LV_OPA_COVER, 0);
-  homeCounterLabel = createLabel(homeCounterBar, "", COLOR_MUTED, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_width(homeCounterLabel, 440);
-  lv_obj_set_style_text_align(homeCounterLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(homeCounterLabel, &lv_font_montserrat_16, 0);
+  // Dwa rowne panele: OSTATNIE KARMIENIE (lewy) i OSTATNIA BUTELKA (prawy).
+  feedingCard = createCard(homeScreen, 14, 190, 220, 70);
+  lv_obj_set_style_bg_color(feedingCard, lv_color_mix(COLOR_CARD, COLOR_ORANGE, 16), 0);
+  lv_obj_set_style_shadow_width(feedingCard, 4, 0);
+  createLabel(feedingCard, "OSTATNIE KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
+  homeFeedingLabel = createLabel(feedingCard, "", COLOR_TEXT, LV_ALIGN_CENTER, 0, 10);
 
-  // Ostatnia butelka na calej szerokosci (KARMIENIE przeniesione na gore ekranu).
-  milkCard = createCard(homeScreen, 14, 190, 452, 70);
+  milkCard = createCard(homeScreen, 246, 190, 220, 70);
   lv_obj_set_style_bg_color(milkCard, lv_color_mix(COLOR_CARD, COLOR_BLUE, 16), 0);
   lv_obj_set_style_shadow_width(milkCard, 4, 0);
   createLabel(milkCard, "OSTATNIA BUTELKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
@@ -3422,9 +3418,19 @@ void createHomeScreen() {
   //   Karta pogody      306..470  (ikona + temp + opis + min/max + 3h + ubior)
 
   // ===================== WYGASZACZ (nowy uklad) =====================
+  //   Karta tipsow      44..144   (100; codzienna wskazowka — tylko na wygaszaczu)
   //   Karta zegara      150..238  (88; zegar + data u gory, linia karmienia nizej)
   //   Karta statystyk   244..292  (48; chudszy pasek 3 liczb)
   //   Karta pogody      298..474  (176; ikona+temp+opis+minmax, godziny, ubior)
+
+  // --- Karta codziennej wskazowki (tipsy) — widoczna wylacznie na wygaszaczu ---
+  // Na ekranie glownym te miejsce zajmuje licznik/ wiek; tu wraca wskazowka dnia.
+  ssTipCard = createCard(homeScreen, 14, 44, 268, 100);
+  ssTipLabel = createLabel(ssTipCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 6, 6);
+  lv_obj_set_width(ssTipLabel, 244);
+  lv_obj_set_style_text_font(ssTipLabel, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_align(ssTipLabel, LV_TEXT_ALIGN_LEFT, 0); // akapit tipsow — do lewej
+  lv_label_set_long_mode(ssTipLabel, LV_LABEL_LONG_WRAP);
 
   // --- Karta zegara ---
   ssClockCard = createCard(homeScreen, 14, 150, 452, 88);
@@ -3541,6 +3547,7 @@ void createHomeScreen() {
   ssRenderedDress = "";
   ssRenderedLastFeeding = "";
   ssRenderedSleep = "";
+  ssRenderedTip = "";
   ssRenderedNextFeed = "";
   for (uint8_t i = 0; i < 3; ++i) ssRenderedHours[i] = "";
   for (uint8_t i = 0; i < 3; ++i) ssRenderedStat[i] = "";
@@ -4504,6 +4511,9 @@ void drawWeatherIcon(lv_obj_t *box, int wmoCode) {
 void updateScreensaverContent() {
   if (!screensaverActive || !ssClockLabel) return;
 
+  // Codzienna wskazowka rozwojowa (tylko na wygaszaczu).
+  setLabelTextIfChanged(ssTipLabel, ssRenderedTip, developmentTipForToday());
+
   const WeatherState currentWeather = snapshotWeather();
 
   struct tm nowInfo;
@@ -4626,7 +4636,7 @@ void applyScreensaverVisibility() {
     if (screensaverActive) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
   }
-  lv_obj_t *widgets[] = {ssClockCard, ssWeatherCard, ssDayBandCard,
+  lv_obj_t *widgets[] = {ssTipCard, ssTipLabel, ssClockCard, ssWeatherCard, ssDayBandCard,
                          ssClockLabel, ssDateLabel, ssIconBox,
                          ssTempLabel, ssDescLabel, ssMinMaxLabel, ssDressLabel,
                          ssLastFeedingLabel, ssSleepLabel,
