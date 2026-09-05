@@ -1,0 +1,4 @@
+# Blokada bezposredniego dostepu do plikow danych przez WWW (obrona w glab —
+# przy poprawnej konfiguracji DocumentRoot=public/ ten katalog i tak jest poza web).
+Require all denied
+Deny from all
