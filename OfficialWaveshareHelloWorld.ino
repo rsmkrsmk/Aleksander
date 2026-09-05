@@ -334,7 +334,6 @@ lv_color_t COLOR_TONAL_GREEN = lv_color_hex(0xE6F1E0);
 // ----------------------------- Deklaracje funkcji --------------------------------
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data);
 void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMap);
-void resyncRgbPanelIfDue();
 void requestRgbResync();
 void initialiseDisplayPanel();
 void initialiseBacklight();
@@ -682,6 +681,25 @@ bool rgbColorTransferDoneCallback(esp_lcd_panel_handle_t panel,
   return highPriorityTaskWoken == pdTRUE;
 }
 
+// Callback VSYNC: przy KAZDEJ klatce (~60x/s) zglaszamy restart DMA panelu. Jest to
+// programowy odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC=y (niedostepnego w Arduino IDE
+// bez menuconfig): kanal GDMA jest resetowany na kazdym VBlank, wiec ewentualny dryf
+// obrazu koryguje sie w ~16 ms zamiast czekac na cykliczny timer. Callback MUSI byc
+// ultra-lekki — esp_lcd_rgb_panel_restart() ustawia tylko flage (realny restart
+// nastepuje przy nastepnym VSYNC), wiec nie robimy tu nic ciezkiego. NIE oznaczamy go
+// IRAM_ATTR: wywolywana funkcja restartu rezyduje we flashu (nie jest IRAM-safe), a
+// przy domyslnym configu (bez CONFIG_LCD_RGB_ISR_IRAM_SAFE) ISR dziala z wlaczonym cache.
+bool rgbVsyncCallback(esp_lcd_panel_handle_t panel,
+                                const esp_lcd_rgb_panel_event_data_t *edata,
+                                void *userCtx) {
+  (void)edata;
+  (void)userCtx;
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  if (panel) esp_lcd_rgb_panel_restart(panel);
+#endif
+  return false;
+}
+
 bool initialiseNativeRgbPanel() {
   // Zachowujemy kolejność inicjalizacji używaną wcześniej przez Arduino_GFX:
   // magistrala ekspandera, reset programowy ST7701, komendy init, potem RGB DMA.
@@ -720,7 +738,7 @@ bool initialiseNativeRgbPanel() {
   // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × 80 × 480 × 2 = 150 KB.
   // Zostawiamy 80 linii (a nie wiecej): bounce zajmuje deficytowy RAM wewnetrzny
   // wspoldzielony z Wi-Fi/TLS/LVGL/stosami zadan, a glownym zabezpieczeniem przed
-  // DRYFEM obrazu jest teraz cykliczny restart DMA panelu (resyncRgbPanelIfDue) —
+  // DRYFEM obrazu jest teraz restart DMA panelu przy kazdym VSYNC (rgbVsyncCallback) —
   // wiec nie ryzykujemy braku RAM. Liczba linii musi dzielic 230400 bez reszty
   // (dozwolone m.in. 48/60/80/96/120 linii).
   config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
@@ -772,6 +790,8 @@ bool initialiseNativeRgbPanel() {
   }
   esp_lcd_rgb_panel_event_callbacks_t callbacks = {};
   callbacks.on_color_trans_done = rgbColorTransferDoneCallback;
+  // Restart DMA przy kazdym VSYNC — glowna profilaktyka dryfu obrazu (patrz rgbVsyncCallback).
+  callbacks.on_vsync = rgbVsyncCallback;
   error = esp_lcd_rgb_panel_register_event_callbacks(
       rgbPanel, &callbacks, rgbColorTransferDoneSemaphore);
   if (error != ESP_OK) {
@@ -818,13 +838,14 @@ void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMa
 // Panel RGB moze stracic synchronizacje DMA przy chwilowym niedoborze pasma
 // (PSRAM/Flash wspoldzielone z Wi-Fi/LittleFS): kontroler LCD zaczyna czytac piksele
 // z przesunietego adresu i caly obraz przesuwa sie pionowo "jak na rolce".
+// GLOWNA profilaktyka to teraz restart DMA przy KAZDYM VSYNC (rgbVsyncCallback) —
+// odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC, ktorego nie ustawimy w Arduino IDE.
+// Dzieki temu ewentualny dryf koryguje sie w ~16 ms (jedna klatka), a nie po sekundach.
 // esp_lcd_rgb_panel_restart() (tylko ESP32-S3) NIE restartuje natychmiast — ustawia
 // flage, a wlasciwy restart DMA nastepuje przy NASTEPNYM VSYNC, wiec jest bezpieczny
-// (bez migotania/blokowania). Wolamy go cyklicznie jako profilaktyke — to programowy
-// odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC, ktorego nie ustawimy w Arduino IDE.
-// Natychmiast zglasza restart DMA panelu (tania operacja — ustawia tylko flage,
-// wlasciwy restart nastapi przy najblizszym VSYNC). Wolane punktowo po operacjach
-// szczególnie obciazajacych magistrale (np. zapis do LittleFS/Flash).
+// (bez migotania/blokowania).
+// requestRgbResync() wolamy dodatkowo punktowo po operacjach szczególnie obciazajacych
+// magistrale (np. zapis do LittleFS/Flash), by zglosic restart bez czekania na VSYNC.
 void requestRgbResync() {
   if (!rgbPanel) return;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -832,14 +853,6 @@ void requestRgbResync() {
 #else
 #warning "RGB resync (naprawa dryfu obrazu) wylaczony: to nie jest target ESP32-S3."
 #endif
-}
-
-// Cykliczna profilaktyka: zglasza restart co RGB_RESYNC_INTERVAL_MS.
-void resyncRgbPanelIfDue() {
-  static uint32_t lastRestartMs = 0;
-  if (millis() - lastRestartMs < RGB_RESYNC_INTERVAL_MS) return;
-  lastRestartMs = millis();
-  requestRgbResync();
 }
 
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
@@ -5348,7 +5361,6 @@ void loop() {
 #endif
   const uint32_t loopStart = micros(); // poczatek "pracy" iteracji (do pomiaru CPU load)
   feedWatchdog(); // reset watchdoga + telemetria min. heap w kazdej iteracji
-  resyncRgbPanelIfDue(); // profilaktyka dryfu obrazu (restart DMA panelu przy VSYNC)
   updateNightMode();
   // Wysylka Telegrama biegnie w telegramTask (rdzen 0) — nie blokuje juz tej petli.
   resyncNtpIfDue();
