@@ -1,0 +1,16 @@
+{
+  "name": "aleksander-web-panel-docker",
+  "version": "0.1.0",
+  "description": "Testowa kopia panelu WWW urzadzenia Aleksander (ESP32) uruchamiana w Dockerze. Odtwarza kontrakt API 1:1 na podstawie pliku CSV.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
