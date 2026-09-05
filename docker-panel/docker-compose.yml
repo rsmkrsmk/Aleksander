@@ -1,0 +1,18 @@
+services:
+  panel:
+    build: .
+    image: aleksander-panel:test
+    container_name: aleksander-panel
+    ports:
+      # Panel dostepny pod http://localhost:8080. Zmien lewa strone jesli port zajety.
+      - "8080:8080"
+    environment:
+      - TZ=Europe/Warsaw
+      - PORT=8080
+      - DATA_FILE=/app/data/karmienia.csv
+      - SETTINGS_FILE=/app/data/ustawienia.cfg
+      - BACKUP_FILE=/app/data/karmienia_backup.csv
+    volumes:
+      # Trwale dane poza kontenerem — edycja/podmiana karmienia.csv bez przebudowy obrazu.
+      - ./data:/app/data
+    restart: unless-stopped

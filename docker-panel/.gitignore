@@ -1,0 +1,5 @@
+node_modules/
+*.log
+# Pliki generowane w czasie dzialania (backup, ustawienia). Zrodlem prawdy jest data/karmienia.csv.
+data/karmienia_backup.csv
+data/ustawienia.cfg
