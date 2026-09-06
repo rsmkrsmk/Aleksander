@@ -1,0 +1,9 @@
+# SILNIK DANYCH — przy zalecanym układzie engine/ leży POZA katalogiem publicznym,
+# więc ten .htaccess to obrona w głąb. Blokujemy bezpośredni dostęp do plików PHP
+# silnika i schematu SQL PRÓCZ api.php (punkt wejścia dla urządzeń łączących się zdalnie).
+<FilesMatch "\.(php|sql)$">
+    Require all denied
+</FilesMatch>
+<Files "api.php">
+    Require all granted
+</Files>

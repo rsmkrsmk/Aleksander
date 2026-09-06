@@ -1,3 +1,0 @@
-# Blokada bezposredniego dostepu do kodu PHP biblioteki przez WWW.
-Require all denied
-Deny from all
