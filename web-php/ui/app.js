@@ -86,7 +86,7 @@ function render(data){
 
   // licznik + pierścień (r=78)
   const ageMin=data.lastFeedingAgeMin;
-  const ring=$('ringProg');const C=2*Math.PI*78;
+  const ring=$('ringProg');const C=2*Math.PI*70;
   ring.setAttribute('stroke-dasharray',C.toFixed(1));
   if(ageMin>=0){
     const frac=Math.min(ageMin/240,1);
@@ -151,24 +151,45 @@ function buildCalCard(day,onClick){
   const months=['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];
   const mIdx=Math.max(0,Math.min(11,(parseInt(p[1],10)||1)-1));
   card.innerHTML=
-    `<div class="dnum"><span class="d">${p[2]||''}</span><span class="m">${months[mIdx]}</span></div>`+
-    `<div class="cbody"><div class="cn">${day.label||''}</div><div class="chips">`+
-      chip('<path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="currentColor"/>',`${day.feedingCount} karm.`)+
-      chip('<path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="currentColor"/>',`${day.milkMl} ml`)+
-      chip('<path d="M4 6h16v5a8 8 0 0 1-16 0V6Z" fill="currentColor"/>',`${(day.diaperWet||0)+(day.diaperDirty||0)} piel.`)+
-      (day.vitaminD?chip('<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/>','Wit.D'):'')+
-    `</div></div>`+
-    `<span class="carr"><svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+    `<div class="cd-top">`+
+      `<div class="dnum"><span class="d">${p[2]||''}</span><span class="m">${months[mIdx]}</span></div>`+
+      `<div class="cbody"><div class="cn">${day.label||''}</div><div class="chips">`+
+        chip('<path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="currentColor"/>',`${day.feedingCount} karm.`)+
+        chip('<path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="currentColor"/>',`${day.milkMl} ml`)+
+        chip('<path d="M4 6h16v5a8 8 0 0 1-16 0V6Z" fill="currentColor"/>',`${(day.diaperWet||0)+(day.diaperDirty||0)} piel.`)+
+        (day.vitaminD?chip('<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/>','Wit.D'):'')+
+      `</div></div>`+
+      `<span class="carr"><svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`+
+    `</div>`;
   card.addEventListener('click',onClick);
   return card;
 }
-/* Podgląd na stronie: dziś + wczoraj. Pełny modal: 5 dni. */
+/* Podgląd na stronie: dziś + wczoraj. Pełny modal: 5 dni (z mini-osią dnia). */
 function renderCalendarPreview(days){
   if(!days)return;
+  const open=(day,from)=>{state.dayFrom=from;openDay(day.date,day.label)};
   const prev=$('calendarList');
-  if(prev){prev.replaceChildren();days.slice(0,2).forEach(day=>prev.append(buildCalCard(day,()=>openDay(day.date,day.label))))}
+  if(prev){prev.replaceChildren();days.slice(0,2).forEach(day=>{const c=buildCalCard(day,()=>open(day,'home'));prev.append(c);addMiniBar(c,day.date)})}
   const full=$('calendarListFull');
-  if(full){full.replaceChildren();days.forEach(day=>full.append(buildCalCard(day,()=>openDay(day.date,day.label))))}
+  if(full){full.replaceChildren();days.forEach(day=>{const c=buildCalCard(day,()=>open(day,'calendar'));full.append(c);addMiniBar(c,day.date)})}
+}
+/* Cache wpisów per data (TTL 30s) — mini-bary i inne widoki nie odpytują przy każdym pollingu. */
+const _entriesCache={};
+async function entriesFor(date){
+  const c=_entriesCache[date];
+  if(c&&(Date.now()-c.t)<30000)return c.es;
+  const d=await request(`/api/entries?date=${encodeURIComponent(date)}`);
+  const es=d.entries||[];_entriesCache[date]={t:Date.now(),es};return es;
+}
+/* Mini oś doby w kafelku dnia — asynchronicznie, nie blokuje renderu. */
+async function addMiniBar(card,date){
+  let es=[];try{es=await entriesFor(date)}catch(e){return}
+  if(!es.length)return;
+  const bar=document.createElement('div');bar.className='cminibar';
+  let sStart=null;
+  es.forEach(e=>{if(e.type==='SEN_START'){sStart=toMin(e.time)}else if(e.type==='SEN_STOP'&&sStart!=null){const m2=toMin(e.time);if(m2!=null){const s=document.createElement('div');s.className='s';s.style.left=(sStart/1440*100)+'%';s.style.width=(Math.max(m2-sStart,5)/1440*100)+'%';bar.append(s)}sStart=null}});
+  es.forEach(e=>{const mins=toMin(e.time);if(mins==null)return;let cls=e.type==='KARMIENIE'?'feed':(e.type||'').startsWith('MLEKO')?'milk':(e.type==='PIELUCHA_MOKRA'||e.type==='PIELUCHA_BRUDNA')?'diaper':null;if(!cls)return;const m=document.createElement('div');m.className='m '+cls;m.style.left=(mins/1440*100)+'%';bar.append(m)});
+  card.append(bar);
 }
 
 /* ---------- Dayband ---------- */
@@ -227,18 +248,92 @@ function buildEntry(en,onDeleted){
   });
   return row;
 }
+const DOW=['niedziela','poniedziałek','wtorek','środa','czwartek','piątek','sobota'];
+function toMin(t){const p=(t||'').split(':');return p.length<2?null:(+p[0])*60+(+p[1])}
+
+/* Graficzny widok dnia: nagłówek + bento podsumowanie + łuk doby + oś czasu 24h + wpisy. */
 async function openDay(date,label){
   state.activeDay=date;state.detailLabel=label;
-  setText('detailTitle',label||dateLabel(date));
+  setText('detailTitle','Dziennik dnia');
   const list=$('detailList');list.replaceChildren();
-  const sk=document.createElement('div');sk.className='skeleton';sk.style.height='60px';list.append(sk);
+  const sk=document.createElement('div');sk.className='skeleton';sk.style.height='120px';list.append(sk);
   show('detailModal');
-  try{
-    const data=await request(`/api/entries?date=${encodeURIComponent(date)}`);
-    list.replaceChildren();
-    if(!data.entries.length){const p=document.createElement('p');p.className='empty';p.textContent='Brak wpisów tego dnia';list.append(p);return}
-    data.entries.forEach(en=>list.append(buildEntry(en,()=>openDay(state.activeDay,state.detailLabel))));
-  }catch(e){setText('detailList',e.message)}
+  let entries=[];
+  try{const data=await request(`/api/entries?date=${encodeURIComponent(date)}`);entries=data.entries||[]}
+  catch(e){setText('detailList',e.message);return}
+  list.replaceChildren();
+
+  // agregacja dnia
+  let feeds=0,milkMl=0,mother=0,modif=0,wet=0,dirty=0,pump=0,vit=false;
+  const sleeps=[];let sStart=null;
+  entries.forEach(e=>{
+    if(e.type==='KARMIENIE')feeds++;
+    else if((e.type||'').startsWith('MLEKO')){milkMl+=e.ml||0;if(e.type==='MLEKO_MATKI')mother+=e.ml||0;else if(e.type==='MLEKO_MODYFIKOWANE')modif+=e.ml||0}
+    else if(e.type==='PIELUCHA_MOKRA')wet++;
+    else if(e.type==='PIELUCHA_BRUDNA')dirty++;
+    else if(e.type==='ODCIAGANIE')pump+=e.ml||0;
+    else if(e.type==='WITAMINA_D')vit=true;
+    else if(e.type==='SEN_START')sStart=toMin(e.time);
+    else if(e.type==='SEN_STOP'&&sStart!=null){const m2=toMin(e.time);if(m2!=null)sleeps.push([sStart,m2]);sStart=null}
+  });
+  // Sen w toku (SEN_START bez STOP): dla dnia dzisiejszego domykamy "do teraz" — spójnie z paskiem na home.
+  if(sStart!=null&&date===isoDaysAgo(0)){const nowM=new Date().getHours()*60+new Date().getMinutes();if(nowM>sStart)sleeps.push([sStart,nowM])}
+  const p=(date||'').split('-');const dObj=new Date(+p[0],(+p[1]||1)-1,+p[2]||1);
+  const dowName=Number.isNaN(dObj.getTime())?'':DOW[dObj.getDay()];
+
+  // nagłówek dnia
+  const hero=document.createElement('div');hero.className='day-hero';
+  hero.innerHTML=`<div class="dd">${label&&label.split(' - ')[0]?label.split(' - ')[0]:dateLabel(date)}</div><div class="dw">${dowName} · ${dateLabel(date)}</div>`;
+  list.append(hero);
+
+  // bento podsumowanie
+  const bento=document.createElement('div');bento.className='day-bento';
+  const cell=(cls,v,k)=>`<div class="db-cell ${cls}"><div class="cv">${v}</div><div class="ck">${k}</div></div>`;
+  bento.innerHTML=
+    cell('feed',feeds,'karmień')+
+    cell('milk',milkMl,'ml mleka')+
+    cell('diaper',(wet+dirty),'pieluchy')+
+    cell('sleep',sleeps.length,'drzemki');
+  list.append(bento);
+
+  // łuk doby (pasma snu + znaczniki)
+  const arc=document.createElement('div');arc.className='day-arc';
+  sleeps.forEach(([a,b])=>{const s=document.createElement('div');s.className='db-sleep';s.style.left=(a/1440*100)+'%';s.style.width=(Math.max(b-a,5)/1440*100)+'%';arc.append(s)});
+  entries.forEach(e=>{const mins=toMin(e.time);if(mins==null)return;let cls=e.type==='KARMIENIE'?'feed':(e.type||'').startsWith('MLEKO')?'milk':(e.type==='PIELUCHA_MOKRA'||e.type==='PIELUCHA_BRUDNA')?'diaper':null;if(!cls)return;const m=document.createElement('div');m.className='db-mark '+cls;m.style.left=(mins/1440*100)+'%';arc.append(m)});
+  list.append(arc);
+
+  // oś czasu 24h (grupowanie po godzinie)
+  const tlTitle=document.createElement('div');tlTitle.className='tl-title';tlTitle.textContent='Oś czasu';list.append(tlTitle);
+  if(!entries.length){const em=document.createElement('p');em.className='empty';em.textContent='Brak wpisów tego dnia';list.append(em);return}
+  const tl=document.createElement('div');tl.className='timeline';
+  const axis=document.createElement('div');axis.className='axis';tl.append(axis);
+  const byHour={};
+  entries.forEach(e=>{if(e.type==='SEN_START'||e.type==='SEN_STOP')return;const mins=toMin(e.time);if(mins==null)return;const hr=Math.floor(mins/60);(byHour[hr]=byHour[hr]||[]).push(e)});
+  let hours=Object.keys(byHour).map(Number);
+  sleeps.forEach(([a])=>{const hr=Math.floor(a/60);if(!hours.includes(hr))hours.push(hr)});
+  hours=[...new Set(hours)].sort((a,b)=>a-b);
+  hours.forEach(hr=>{
+    const row=document.createElement('div');row.className='tl-hour';
+    row.innerHTML=`<span class="hl">${pad(hr)}:00</span>`;
+    sleeps.filter(([a])=>Math.floor(a/60)===hr).forEach(([a,b])=>{
+      const dur=b-a;const sl=document.createElement('div');sl.className='tl-sleep';
+      sl.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen ${pad(Math.floor(a/60))}:${pad(a%60)}–${pad(Math.floor(b/60))}:${pad(b%60)} · ${fmtGap(dur)}`;
+      row.append(sl);
+    });
+    (byHour[hr]||[]).forEach(e=>{
+      const [cls,icon]=entryIcon(e.type);
+      const ml=(e.type==='KARMIENIE'||Number(e.ml)===0)?'':` · ${e.ml} ml`;
+      const chip=document.createElement('span');chip.className='tl-ev';
+      chip.innerHTML=`<span class="ed ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span><span class="et">${e.time}</span>${e.label||e.type}${ml}`;
+      row.append(chip);
+    });
+    tl.append(row);
+  });
+  list.append(tl);
+
+  // pełna lista wpisów (z usuwaniem)
+  const listTitle=document.createElement('div');listTitle.className='tl-title';listTitle.style.marginTop='18px';listTitle.textContent='Wszystkie wpisy';list.append(listTitle);
+  entries.forEach(en=>list.append(buildEntry(en,()=>openDay(state.activeDay,state.detailLabel))));
 }
 
 /* ---------- Podsumowanie (2 dni + starsze) ---------- */
@@ -443,10 +538,11 @@ document.addEventListener('click',async ev=>{
     case 'weight':openWeight();break;
     case 'other':show('otherModal');break;
     case 'calendar':show('calendarModal');break;
+    case 'today-detail':{state.dayFrom='home';const c=(state.data&&state.data.calendar&&state.data.calendar[0]);openDay(c?c.date:isoDaysAgo(0),c?c.label:null);break;}
     case 'chart':show('chartModal');state.summaryExtra=0;renderSummary();break;
     case 'chart5':show('chart5Modal');if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderAnalysis();break;
     case 'home':clearPanels();break;
-    case 'back-calendar':show('calendarModal');break;
+    case 'back-calendar':if(state.dayFrom==='home'){state.dayFrom=null;clearPanels()}else show('calendarModal');break;
     case 'day-feed':if(state.activeDay)openForm(state.activeDay);break;
     case 'cancel-form':{const rd=state.activeDay;closeFormModal();rd?openDay(rd,state.detailLabel):clearPanels();break;}
     case 'minus5':nudge(-5);break;
