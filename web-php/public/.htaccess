@@ -18,3 +18,8 @@ DirectoryIndex index.php index.html
 
 # Nie listuj katalogow.
 Options -Indexes
+
+# paths.php to tylko definicje sciezek — nie ma potrzeby wywolywac go bezposrednio.
+<Files "paths.php">
+    Require all denied
+</Files>

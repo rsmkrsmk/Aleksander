@@ -48,16 +48,25 @@ final class Config
     // ------------------------------- Pliki danych ----------------------------------
     const CSV_HEADER = 'data,godzina,typ,ml,piers_lewa_min,piers_prawa_min';
 
+    // Katalog z danymi: 1) zmienna srodowiskowa, 2) stala PANEL_DATA_DIR z public/paths.php,
+    // 3) domyslnie data/ obok lib/ (dziala lokalnie i przy jednolitym ukladzie katalogow).
+    private static function dataDir(): string
+    {
+        if (defined('PANEL_DATA_DIR')) {
+            return rtrim(PANEL_DATA_DIR, '/');
+        }
+        return __DIR__ . '/../data';
+    }
     public static function dataFile(): string
     {
-        return getenv('DATA_FILE') ?: (__DIR__ . '/../data/karmienia.csv');
+        return getenv('DATA_FILE') ?: (self::dataDir() . '/karmienia.csv');
     }
     public static function backupFile(): string
     {
-        return getenv('BACKUP_FILE') ?: (__DIR__ . '/../data/karmienia_backup.csv');
+        return getenv('BACKUP_FILE') ?: (self::dataDir() . '/karmienia_backup.csv');
     }
     public static function settingsFile(): string
     {
-        return getenv('SETTINGS_FILE') ?: (__DIR__ . '/../data/ustawienia.cfg');
+        return getenv('SETTINGS_FILE') ?: (self::dataDir() . '/ustawienia.cfg');
     }
 }

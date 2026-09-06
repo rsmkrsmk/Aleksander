@@ -5,7 +5,9 @@
 // to swiadomie tylko warstwa panelu do testow, baza pod dalsze prace.
 declare(strict_types=1);
 
-require_once __DIR__ . '/../lib/store.php';
+// Konfiguracja sciezek do lib/ i data/ (edytowalna — patrz public/paths.php).
+require_once __DIR__ . '/paths.php';
+require_once PANEL_LIB_DIR . '/store.php';
 
 // --------------------------- Pomocnicze odpowiedzi ------------------------------
 function sendJson(int $status, array $obj): void
