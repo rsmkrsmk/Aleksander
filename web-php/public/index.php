@@ -43,6 +43,25 @@ if ($uri === '/' || $uri === '/index.php' || $uri === '/index.html') {
     exit;
 }
 
+// ------------------------- Statyczne zasoby frontendu ---------------------------
+// Na Apache obsluguje je .htaccess (RewriteCond -f). Ten blok to zapasowa sciezka
+// (m.in. dla wbudowanego serwera php -S) — serwuje bezpieczna liste rozszerzen.
+if ($method === 'GET' && preg_match('#^/([A-Za-z0-9_\-]+\.(js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map))$#', $uri, $mm)) {
+    $file = __DIR__ . '/' . $mm[1];
+    if (is_file($file)) {
+        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+        $types = [
+            'js' => 'text/javascript; charset=utf-8', 'css' => 'text/css; charset=utf-8',
+            'svg' => 'image/svg+xml', 'png' => 'image/png', 'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp',
+            'ico' => 'image/x-icon', 'woff' => 'font/woff', 'woff2' => 'font/woff2', 'map' => 'application/json',
+        ];
+        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+        readfile($file);
+        exit;
+    }
+}
+
 // ------------------------------- GET /export.csv --------------------------------
 if ($uri === '/export.csv' && $method === 'GET') {
     header('Cache-Control: no-store, max-age=0');
