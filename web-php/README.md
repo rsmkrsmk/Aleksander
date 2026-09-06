@@ -14,9 +14,10 @@ dane z pliku CSV.
 
 ```
 web-php/
-├── public/                 # ← DocumentRoot Apache wskazuje TUTAJ
+├── public/                 # ← katalog publiczny (trafia do public_html)
 │   ├── index.html          # frontend 1:1 z urządzenia
 │   ├── index.php           # front controller (routing + całe API)
+│   ├── paths.php           # KONFIGURACJA ścieżek do lib/ i data/ (edytujesz przy wgraniu)
 │   └── .htaccess           # rewrite na index.php
 ├── lib/
 │   ├── config.php          # stałe odwzorowane z config.h
@@ -52,47 +53,65 @@ dostępne bezpośrednio przez przeglądarkę.
 - **Apache** z `mod_rewrite` (dla przyjaznych ścieżek `/api/*`) oraz `AllowOverride All`
   dla katalogu, żeby `.htaccess` działał.
 
-## Wdrożenie na Apache + PHP
+## Wdrożenie na hosting cPanel przez FTP (webd.pl) — ZALECANE
 
-1. Skopiuj katalog `web-php/` na serwer, np. do `/var/www/aleksander`.
+Cała konfiguracja ścieżek sprowadza się do edycji **jednego pliku** `public/paths.php`.
 
-2. Ustaw **DocumentRoot na podkatalog `public/`** (zalecane — dane i logika zostają
-   poza web). Przykładowy VirtualHost:
+**Docelowy układ na serwerze** (`~` = Twój katalog domowy na hostingu):
 
-   ```apache
-   <VirtualHost *:80>
-       ServerName aleksander.twojadomena.pl
-       DocumentRoot /var/www/aleksander/web-php/public
+```
+~/public_html/     ← zawartość web-php/public/  (index.php, index.html, paths.php, .htaccess)
+~/panel-lib/       ← zawartość web-php/lib/      (config.php, store.php)
+~/panel-data/      ← zawartość web-php/data/     (karmienia.csv)  — musi być zapisywalny
+```
 
-       <Directory /var/www/aleksander/web-php/public>
-           AllowOverride All
-           Require all granted
-       </Directory>
-   </VirtualHost>
-   ```
+`panel-lib` i `panel-data` leżą **obok** `public_html` (poza katalogiem publicznym),
+więc nie są dostępne z internetu.
 
-   Włącz rewrite i przeładuj Apache:
-   ```bash
-   sudo a2enmod rewrite
-   sudo systemctl reload apache2
-   ```
+**Kroki:**
 
-3. Nadaj serwerowi WWW prawo **zapisu do katalogu `data/`** (panel zapisuje wpisy,
-   import robi backup):
-   ```bash
-   sudo chown -R www-data:www-data /var/www/aleksander/web-php/data
-   sudo chmod 775 /var/www/aleksander/web-php/data
-   ```
+1. **Włącz wariant cPanel w `public/paths.php`** — otwórz plik i zamień aktywne
+   definicje na wersję z `panel-lib`/`panel-data`. Wystarczy zakomentować dwie
+   domyślne linie `define(...)` i odkomentować dwie oznaczone „WARIANT cPanel”.
+   (Ścieżki liczą się automatycznie od katalogu domowego — nie wpisujesz loginu.)
 
-4. Otwórz `http://aleksander.twojadomena.pl/` — panel działa.
+2. **Wgraj pliki przez FTP** (FileZilla / WinSCP / menedżer plików cPanel):
+   - zawartość `web-php/public/` → do `public_html/`,
+   - zawartość `web-php/lib/`   → do nowego katalogu `panel-lib/` (obok `public_html`),
+   - zawartość `web-php/data/`  → do nowego katalogu `panel-data/` (obok `public_html`).
 
-### Alternatywa: wrzucenie do podkatalogu istniejącego hostingu
+3. **Prawa zapisu do `panel-data/`.** Na współdzielonym cPanel PHP działa zwykle jako
+   Twój użytkownik, więc katalog jest zapisywalny domyślnie. Jeśli zapis/import nie
+   działa, w menedżerze plików cPanel ustaw uprawnienia katalogu `panel-data/` na
+   `755` (a gdyby nadal nie działało — `775`).
 
-Jeśli nie możesz zmienić DocumentRoot (współdzielony hosting), umieść zawartość
-`public/` w katalogu dostępnym z web, a `lib/` i `data/` **o poziom wyżej** (poza
-`public_html`), i popraw ścieżki w `lib/config.php` (`dataFile()`/`settingsFile()`)
-albo ustaw zmienne środowiskowe `DATA_FILE` / `SETTINGS_FILE`. Obronne `.htaccess`
-w `data/` i `lib/` blokują dostęp, gdyby katalogi trafiły pod web.
+4. Otwórz swoją domenę w przeglądarce — panel działa. `mod_rewrite` i `.htaccess`
+   na webd.pl są włączone, więc ścieżki `/api/*` zadziałają bez dodatkowej konfiguracji.
+
+> **Prostszy (mniej bezpieczny) wariant:** jeśli nie chcesz tworzyć katalogów poza
+> `public_html`, możesz wrzucić `public/`, `lib/` i `data/` razem do `public_html/`
+> (np. `public_html/`, `public_html/lib/`, `public_html/data/`) i **zostawić
+> `paths.php` bez zmian** (wariant domyślny wskazuje `../lib` i `../data`). Wtedy
+> dane chronią tylko obronne pliki `.htaccess` w `lib/` i `data/` — działa, ale
+> trzymanie danych poza `public_html` (kroki 1–3) jest bezpieczniejsze.
+
+## Wdrożenie na własny serwer Apache (VirtualHost)
+
+Ustaw **DocumentRoot na `web-php/public/`**, `AllowOverride All`, `mod_rewrite` wł.:
+
+```apache
+<VirtualHost *:80>
+    ServerName aleksander.twojadomena.pl
+    DocumentRoot /var/www/aleksander/web-php/public
+    <Directory /var/www/aleksander/web-php/public>
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+```
+
+Przy tym układzie `paths.php` zostaje domyślny (lib/ i data/ obok public/). Nadaj
+użytkownikowi Apache prawo zapisu do `web-php/data/`.
 
 ## Uruchomienie lokalne (test, bez Apache)
 
@@ -103,13 +122,19 @@ php -S 127.0.0.1:8080 public/index.php
 
 Panel: **http://127.0.0.1:8080** (`index.php` pełni rolę routera, jak front controller).
 
-## Konfiguracja (opcjonalne zmienne środowiskowe)
+## Konfiguracja ścieżek
 
-| Zmienna         | Domyślnie                | Opis                              |
-|-----------------|--------------------------|-----------------------------------|
-| `DATA_FILE`     | `data/karmienia.csv`     | Plik danych CSV                   |
-| `SETTINGS_FILE` | `data/ustawienia.cfg`    | Ustawienia (`sleepTelegram`)      |
-| `BACKUP_FILE`   | `data/karmienia_backup.csv` | Kopia robiona przed importem   |
+Najprościej — edytujesz **`public/paths.php`** (dwie stałe: `PANEL_LIB_DIR`,
+`PANEL_DATA_DIR`). Plik ma gotowe, opisane warianty: domyślny (wszystko w jednym
+katalogu) i cPanel (lib/data poza `public_html`).
+
+Alternatywnie możesz nadpisać ścieżki zmiennymi środowiskowymi (mają priorytet):
+
+| Zmienna         | Domyślnie                   | Opis                            |
+|-----------------|-----------------------------|---------------------------------|
+| `DATA_FILE`     | `<PANEL_DATA_DIR>/karmienia.csv` | Plik danych CSV            |
+| `SETTINGS_FILE` | `<PANEL_DATA_DIR>/ustawienia.cfg` | Ustawienia (`sleepTelegram`) |
+| `BACKUP_FILE`   | `<PANEL_DATA_DIR>/karmienia_backup.csv` | Kopia przed importem  |
 
 Strefa czasowa jest ustawiana w kodzie na `Europe/Warsaw` (`lib/config.php`), tak jak
 liczy urządzenie — wiek, granice doby i podział snu wychodzą identycznie.
