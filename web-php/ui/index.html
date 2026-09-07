@@ -108,7 +108,8 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .hero{position:relative;border-radius:var(--r1);padding:20px;color:#fff;background:var(--g-hero);box-shadow:var(--sh-3);overflow:hidden;margin-bottom:14px}
 .hero::after{content:"";position:absolute;right:-40px;top:-40px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.10)}
 .hero::before{content:"";position:absolute;left:-30px;bottom:-60px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.07)}
-.hero .inner{position:relative;z-index:1;display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center}
+.hero .inner{position:relative;z-index:1;display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:center}
+.hero .lead{min-width:0}
 @media(max-width:420px){.hero .inner{grid-template-columns:1fr;text-align:center;gap:12px}}
 .ring{position:relative;width:132px;height:132px;justify-self:center}
 .ring svg{width:100%;height:100%;transform:rotate(-90deg)}
@@ -128,11 +129,12 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .hl-ic svg{width:14px;height:14px}
 .hl-ic.feed{background:rgba(255,255,255,.22)} .hl-ic.milk{background:rgba(255,255,255,.22)}
 .hl-k{font-weight:800;opacity:.85;font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;flex:none;width:74px}
-.hl-v{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.96}
-.hl-v b{font-family:var(--fd);font-weight:800}
-@media(max-width:420px){.hl-row{justify-content:center}.hl-k{width:auto}}
+.hl-v{font-weight:700;min-width:0;overflow-wrap:anywhere;opacity:.96}
+.hl-v b{font-family:var(--fd);font-weight:800;white-space:nowrap}
+@media(max-width:420px){.hl-row{justify-content:center;flex-wrap:wrap}.hl-k{width:auto}}
 .hero-metrics{display:flex;gap:10px;flex-wrap:wrap}
-.hero-metrics .hm{min-width:120px}
+.hero-metrics .hm{flex:1 1 0;min-width:0}
+@media(min-width:600px){.hero-metrics{justify-content:flex-start}.hero-metrics .hm{flex:0 1 170px}}
 @media(max-width:420px){.hero-metrics{justify-content:center}}
 /* mini szybkie akcje pod hero */
 .quickmini{display:flex;gap:10px;margin-bottom:14px}
@@ -141,7 +143,8 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .qm .qm-ic{width:26px;height:26px;flex:none;border-radius:8px;display:grid;place-items:center;color:#fff}
 .qm .qm-ic svg{width:15px;height:15px}
 .qm.feed .qm-ic{background:var(--g-feed)} .qm.milk .qm-ic{background:var(--g-milk)}
-.hm{flex:1;max-width:150px;padding:10px 12px;border-radius:var(--r4);background:rgba(255,255,255,.14);backdrop-filter:blur(6px)}
+.hm{padding:10px 12px;border-radius:var(--r4);background:rgba(255,255,255,.14);backdrop-filter:blur(6px)}
+.hm .v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hm .k{font-size:.6rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:.82;display:flex;align-items:center;gap:5px}
 .hm .k .d{width:7px;height:7px;border-radius:50%;background:#fff}
 .hm .k .d.warn{background:var(--sun)} .hm .k .d.danger{background:#ffd0cb;animation:pulse 1.5s infinite}
