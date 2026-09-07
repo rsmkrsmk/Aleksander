@@ -221,6 +221,10 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .cminibar .s{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--sleep) 45%,transparent)}
 .cminibar .m{position:absolute;top:1px;bottom:1px;width:3px;border-radius:2px;transform:translateX(-1.5px)}
 .cminibar .m.feed{background:var(--feed)} .cminibar .m.milk{background:var(--milk)} .cminibar .m.diaper{background:var(--diaper)}
+/* dzien bez wpisow — subtelny, celowy wyglad (nie "0 0 0") */
+.chip.chip-empty{background:transparent;border-style:dashed;color:var(--faint);font-weight:700}
+.cal-day.cal-empty{opacity:.82}
+.cal-day.cal-empty .dnum{background:var(--card-2)}
 
 /* ---------------- Statystyki (kafle) ---------------- */
 .tools{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}

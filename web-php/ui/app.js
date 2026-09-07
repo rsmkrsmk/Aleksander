@@ -173,14 +173,21 @@ function buildCalCard(day,onClick){
   if(day.label&&day.label.startsWith('DZISIAJ'))card.classList.add('today');
   const months=['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];
   const mIdx=Math.max(0,Math.min(11,(parseInt(p[1],10)||1)-1));
+  const hasAny=dayHasActivity(day);
+  const chipsHtml = hasAny
+    ? (
+        ((day.feedingCount||0)>0 ? chip('<path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="currentColor"/>',`${day.feedingCount} karm.`) : '')+
+        ((day.milkMl||0)>0 ? chip('<path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="currentColor"/>',`${day.milkMl} ml`) : '')+
+        (((day.diaperWet||0)+(day.diaperDirty||0))>0 ? chip('<path d="M4 6h16v5a8 8 0 0 1-16 0V6Z" fill="currentColor"/>',`${(day.diaperWet||0)+(day.diaperDirty||0)} piel.`) : '')+
+        (day.vitaminD?chip('<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/>','Wit.D'):'')
+      )
+    : `<span class="chip chip-empty">Brak wpisów</span>`;
+  if(!hasAny)card.classList.add('cal-empty');
   card.innerHTML=
     `<div class="cd-top">`+
       `<div class="dnum"><span class="d">${p[2]||''}</span><span class="m">${months[mIdx]}</span></div>`+
       `<div class="cbody"><div class="cn">${day.label||''}</div><div class="chips">`+
-        chip('<path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="currentColor"/>',`${day.feedingCount} karm.`)+
-        chip('<path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="currentColor"/>',`${day.milkMl} ml`)+
-        chip('<path d="M4 6h16v5a8 8 0 0 1-16 0V6Z" fill="currentColor"/>',`${(day.diaperWet||0)+(day.diaperDirty||0)} piel.`)+
-        (day.vitaminD?chip('<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/>','Wit.D'):'')+
+        chipsHtml+
       `</div></div>`+
       `<span class="carr"><svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`+
     `</div>`;
@@ -188,11 +195,22 @@ function buildCalCard(day,onClick){
   return card;
 }
 /* Podgląd na stronie: dziś + wczoraj. Pełny modal: 5 dni (z mini-osią dnia). */
+/* Czy dzien ma jakiekolwiek wpisy (do wyboru dni w podgladzie). */
+function dayHasActivity(d){
+  return (d.feedingCount||0)>0 || (d.milkMl||0)>0 || (d.diaperWet||0)>0 || (d.diaperDirty||0)>0 || d.vitaminD;
+}
 function renderCalendarPreview(days){
   if(!days)return;
   const open=(day,from)=>{state.dayFrom=from;openDay(day.date,day.label)};
   const prev=$('calendarList');
-  if(prev){prev.replaceChildren();days.slice(0,2).forEach(day=>{const c=buildCalCard(day,()=>open(day,'home'));prev.append(c);addMiniBar(c,day.date)})}
+  if(prev){
+    prev.replaceChildren();
+    /* Podglad pokazuje 2 najnowsze dni Z AKTYWNOSCIA (puste dni pomijamy, zeby na telefonie
+       nie bylo pustych kart). Gdy zaden dzien nie ma wpisow — pokaz 2 najnowsze jak dotad. */
+    let picked=days.filter(dayHasActivity).slice(0,2);
+    if(!picked.length)picked=days.slice(0,2);
+    picked.forEach(day=>{const c=buildCalCard(day,()=>open(day,'home'));prev.append(c);addMiniBar(c,day.date)});
+  }
   const full=$('calendarListFull');
   if(full){full.replaceChildren();days.forEach(day=>{const c=buildCalCard(day,()=>open(day,'calendar'));full.append(c);addMiniBar(c,day.date)})}
 }
