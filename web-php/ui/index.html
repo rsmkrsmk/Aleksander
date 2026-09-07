@@ -388,6 +388,19 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 .rday{margin-bottom:16px}
 .rday .rh{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--brd)}
 .rday .rn{font-weight:800;font-size:.8rem;color:var(--ink)} .rday .rs{font-size:.72rem;color:var(--muted);font-weight:600} .rday .rs b{color:var(--acc-ink)}
+/* Rytm — pojedynczy wpis: godzina | kreska+kropka | karta (spojne z osia czasu) */
+.rday .ritem{display:grid;grid-template-columns:44px 18px 1fr;align-items:stretch;column-gap:10px}
+.rday .ritem .rt{font-family:var(--fd);font-size:.74rem;font-weight:700;color:var(--ink-2);text-align:right;padding-top:11px;white-space:nowrap}
+.rday .ritem .rn2{position:relative;display:flex;justify-content:center}
+.rday .ritem .rn2::before{content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--brd)}
+.rday .ritem:first-of-type .rn2::before{top:13px}
+.rday .ritem:last-of-type .rn2::before{bottom:calc(100% - 21px)}
+.rday .ritem .rn2::after{content:"";position:relative;margin-top:10px;width:12px;height:12px;border-radius:50%;background:var(--feed);border:3px solid var(--card-solid);box-shadow:0 0 0 2px var(--feed);z-index:1;align-self:flex-start}
+.rday .ritem.milk .rn2::after{background:var(--milk);box-shadow:0 0 0 2px var(--milk)}
+.rday .ritem .ri{min-width:0;margin:4px 0;background:var(--card-2);border:1px solid var(--brd);border-radius:var(--r3);padding:8px 12px}
+.rday .ritem .ri .t{font-weight:800;font-size:.82rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rday .ritem .ri .s{font-size:.7rem;color:var(--muted);font-weight:600;margin-top:1px}
+.rday .ritem.milk .ri .t{color:var(--milk-2)}
 .weight-svg{width:100%;height:auto;display:block;border-radius:var(--r3)}
 .weight-svg .grid{stroke:var(--brd);stroke-width:1}
 .weight-svg .axis-txt{fill:var(--faint);font-size:9px;font-weight:700;font-family:var(--fu)}
