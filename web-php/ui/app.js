@@ -4,10 +4,12 @@
    ============================================================================ */
 'use strict';
 
-const state = { data:null, view:'home', activeDay:null, detailLabel:null,
+const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:null,
   milkType:'MLEKO_MATKI', bottleOpen:false, pumpMode:false, summaryExtra:0 };
 const $ = id => document.getElementById(id);
-const MODALS = ['formModal','calendarModal','detailModal','chartModal','chart5Modal','otherModal','weightModal','sleepModal','diaperModal'];
+const MODALS = ['formModal','otherModal','diaperModal'];
+const PAGES = ['start','diary','stats','weight','sleep'];
+const PAGE_TITLES = {start:'Leśny Dziennik',diary:'Dziennik',stats:'Statystyki',weight:'Waga',sleep:'Sen'};
 
 /* ---------- WHO / przyrost (jak w oryginale) ---------- */
 const WHO_P3=[2.5,3.4,4.4,5.1,5.6,6.1,6.4,6.7,6.9,7.1,7.4,7.6,7.7,7.9,8.1,8.3,8.4,8.6,8.8,8.9,9.1,9.2];
@@ -60,16 +62,35 @@ function toast(msg,kind='ok'){
   setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),320)},3200);
 }
 
-/* ---------- Modale ---------- */
+/* ---------- Nawigacja podstron ---------- */
+function navTo(page){
+  if(!PAGES.includes(page))page='start';
+  state.page=page;
+  PAGES.forEach(p=>{const el=$('page-'+p);if(el){const on=(p===page);el.hidden=!on;el.classList.toggle('page-active',on)}});
+  document.querySelectorAll('.dock .nav').forEach(b=>b.classList.toggle('active',b.dataset.nav===page));
+  setText('pageTitle',PAGE_TITLES[page]||'Leśny Dziennik');
+  // render zawartości przy wejściu (lazy)
+  renderPage(page);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+/* Renderuje zawartość podstrony korzystając z danych z ostatniego /api/status. */
+function renderPage(page){
+  if(page==='diary'){state.activeDay=null;const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');if(state.data)renderCalendarPreview(state.data.calendar)}
+  else if(page==='stats'){state.summaryExtra=0;renderSummary();if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderAnalysis()}
+  else if(page==='weight'){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');renderWeightChart()}
+  else if(page==='sleep'){renderSleep()}
+}
+
+/* ---------- Modale (formularze) ---------- */
 function show(view){
-  state.view=view||'home';
-  MODALS.forEach(m=>{const el=$(m);const on=(m===view);el.classList.toggle('open',on);el.setAttribute('aria-hidden',on?'false':'true')});
-  document.body.classList.toggle('modal-open',!!view&&view!=='home');
-  if(!view||view==='home')window.scrollTo({top:0,behavior:'smooth'});
+  state.view=view||null;
+  MODALS.forEach(m=>{const el=$(m);if(!el)return;const on=(m===view);el.classList.toggle('open',on);el.setAttribute('aria-hidden',on?'false':'true')});
+  document.body.classList.toggle('modal-open',MODALS.some(m=>{const el=$(m);return el&&el.classList.contains('open')}));
 }
 function openFormModal(){$('formModal').classList.add('open');$('formModal').setAttribute('aria-hidden','false');document.body.classList.add('modal-open')}
 function closeFormModal(){$('formModal').classList.remove('open');$('formModal').setAttribute('aria-hidden','true');document.body.classList.remove('modal-open');state.pumpMode=false}
-function clearPanels(){state.activeDay=null;show('home')}
+/* Zamyka otwarte modale-formularze (nie zmienia aktywnej podstrony). */
+function clearPanels(){MODALS.forEach(m=>{const el=$(m);if(el){el.classList.remove('open');el.setAttribute('aria-hidden','true')}});document.body.classList.remove('modal-open')}
 
 /* ---------- Motyw dzień/noc ---------- */
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem('lesny-theme',t)}catch(e){}}
@@ -137,10 +158,11 @@ function render(data){
     `<span class="s">${sdot(data.timeValid)}Czas ${data.timeValid?'OK':'—'}</span>`;
   setText('dockSleep',data.sleepInProgress?'Śpi':'Sen');
 
-  renderCalendarPreview(data.calendar);
   renderDayBand();
   renderDiag(data);
-  if($('sleepModal').classList.contains('open'))renderSleep();
+  // odśwież żywe fragmenty aktywnej podstrony (polling co 10 s)
+  if(state.page==='diary'&&!state.activeDay)renderCalendarPreview(data.calendar);
+  else if(state.page==='sleep')renderSleep();
 }
 /* Rozdziela wpis "…  HH:MM \n szczegóły" na czas + opis dla mini-kart. */
 function fillMini(timeId,descId,value,ago,bottle){
@@ -201,14 +223,11 @@ function dayHasActivity(d){
 /* Podgląd na stronie: dziś + wczoraj. Pełny modal: 5 dni (z mini-osią dnia). */
 function renderCalendarPreview(days){
   if(!days)return;
-  const open=(day,from)=>{state.dayFrom=from;openDay(day.date,day.label)};
-  const prev=$('calendarList');
-  if(prev){
-    prev.replaceChildren();
-    days.slice(0,2).forEach(day=>{const c=buildCalCard(day,()=>open(day,'home'));prev.append(c);addMiniBar(c,day.date)});
+  const list=$('calendarList');
+  if(list){
+    list.replaceChildren();
+    days.forEach(day=>{const c=buildCalCard(day,()=>openDay(day.date,day.label));list.append(c);addMiniBar(c,day.date)});
   }
-  const full=$('calendarListFull');
-  if(full){full.replaceChildren();days.forEach(day=>{const c=buildCalCard(day,()=>open(day,'calendar'));full.append(c);addMiniBar(c,day.date)})}
 }
 /* Cache wpisów per data (TTL 30s) — mini-bary i inne widoki nie odpytują przy każdym pollingu. */
 let _entriesCache={};
@@ -350,10 +369,9 @@ function buildTimeline(entries, onChanged){
 /* Graficzny widok dnia: nagłówek + bento podsumowanie + łuk doby + oś czasu 24h + wpisy. */
 async function openDay(date,label){
   state.activeDay=date;state.detailLabel=label;
-  setText('detailTitle','Dziennik dnia');
+  const dd=$('diaryDetail');if(dd){dd.classList.remove('hidden');dd.scrollIntoView({behavior:'smooth',block:'start'})}
   const list=$('detailList');list.replaceChildren();
   const sk=document.createElement('div');sk.className='skeleton';sk.style.height='120px';list.append(sk);
-  show('detailModal');
   let entries=[];
   try{const data=await request(`/api/entries?date=${encodeURIComponent(date)}`);entries=data.entries||[]}
   catch(e){setText('detailList',e.message);return}
@@ -517,7 +535,7 @@ function renderSleep(){
 /* ============================================================================
    Waga — wykres SVG (pasma WHO + przyrost + pomiary)
    ============================================================================ */
-function openWeight(){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');show('weightModal');renderWeightChart()}
+function openWeight(){navTo('weight')}
 async function saveWeight(){
   const grams=Number($('weightG').value)||0;const n=$('weightNotice');n.className='notice';
   if(grams<2000||grams>15000){n.className='notice error';n.textContent='Podaj wagę 2000–15000 g.';return}
@@ -598,20 +616,23 @@ async function postEvent(type,ml=0){
 
 /* ---------- Delegacja kliknięć ---------- */
 document.addEventListener('click',async ev=>{
+  // Nawigacja podstron (dolny pasek)
+  const navEl=ev.target.closest('[data-nav]');
+  if(navEl){navTo(navEl.dataset.nav);return}
   const el=ev.target.closest('[data-action]');if(!el)return;
   const a=el.dataset.action;
   switch(a){
     case 'new-feed':openForm();break;
-    case 'sleep-open':show('sleepModal');renderSleep();break;
+    case 'sleep-open':navTo('sleep');break;
     case 'sleep':{const t=(state.data&&state.data.sleepInProgress)?'SEN_STOP':'SEN_START';if(await postEvent(t)){toast(t==='SEN_START'?'Zaznaczono zaśnięcie':'Zaznaczono pobudkę');renderSleep()}break;}
-    case 'weight':openWeight();break;
+    case 'weight':navTo('weight');break;
     case 'other':show('otherModal');break;
-    case 'calendar':show('calendarModal');break;
-    case 'today-detail':{state.dayFrom='home';const c=(state.data&&state.data.calendar&&state.data.calendar[0]);openDay(c?c.date:isoDaysAgo(0),c?c.label:null);break;}
-    case 'chart':show('chartModal');state.summaryExtra=0;renderSummary();break;
-    case 'chart5':show('chart5Modal');if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderAnalysis();break;
+    case 'calendar':navTo('diary');break;
+    case 'today-detail':{navTo('diary');const c=(state.data&&state.data.calendar&&state.data.calendar[0]);openDay(c?c.date:isoDaysAgo(0),c?c.label:null);break;}
+    case 'chart':navTo('stats');break;
+    case 'chart5':navTo('stats');break;
     case 'home':clearPanels();break;
-    case 'back-calendar':if(state.dayFrom==='home'){state.dayFrom=null;clearPanels()}else show('calendarModal');break;
+    case 'back-calendar':{const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');state.activeDay=null;break;}
     case 'day-feed':if(state.activeDay)openForm(state.activeDay);break;
     case 'cancel-form':{const rd=state.activeDay;closeFormModal();rd?openDay(rd,state.detailLabel):clearPanels();break;}
     case 'minus5':nudge(-5);break;
@@ -664,5 +685,6 @@ document.addEventListener('keydown',ev=>{
 });
 
 /* ---------- Start ---------- */
+navTo('start');
 refresh();
 setInterval(refresh,10000);

@@ -251,14 +251,32 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .dock{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));z-index:60;
   display:flex;gap:4px;padding:8px;border-radius:999px;background:var(--card-solid);border:1px solid var(--brd);box-shadow:var(--sh-pop);width:min(94%,430px);justify-content:space-between}
 @media(min-width:860px){.dock{width:min(94%,520px)}}
-.dock button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border:none;background:none;cursor:pointer;font-family:inherit;color:var(--muted);border-radius:16px;transition:.16s}
+.dock button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;border:none;background:none;cursor:pointer;font-family:inherit;color:var(--muted);border-radius:16px;transition:color .18s,background .18s,transform .16s;min-width:0}
 .dock button .di{width:26px;height:26px;display:grid;place-items:center}
 .dock button .di svg{width:24px;height:24px}
-.dock button .dl{font-size:.58rem;font-weight:800;letter-spacing:.01em}
+.dock button .dl{font-size:.6rem;font-weight:800;letter-spacing:.01em;white-space:nowrap}
+/* stan aktywny zakładki — pełniejszy, czytelny */
+.dock button.nav.active{color:var(--acc-ink)}
+.dock button.nav.active .di{color:var(--acc-2)}
+.dock button.nav.active .di svg [fill="currentColor"]{filter:drop-shadow(0 1px 2px color-mix(in srgb,var(--acc) 45%,transparent))}
+.dock button.nav::after{content:"";position:absolute;bottom:3px;width:5px;height:5px;border-radius:50%;background:transparent;transition:.2s}
+.dock button.nav{position:relative}
+.dock button.nav.active::after{background:var(--acc-2)}
 .dock button.primary{color:#fff}
 .dock button.primary .di{width:48px;height:48px;border-radius:16px;background:var(--g-feed);box-shadow:0 8px 18px -4px color-mix(in srgb,var(--feed) 60%,transparent);margin-top:-24px;border:3px solid var(--card-solid)}
-.dock button:not(.primary):active{transform:scale(.88)}
+.dock button.primary .dl{color:var(--feed);margin-top:1px}
+.dock button:not(.primary):active{transform:scale(.9)}
 .dock button:not(.primary):hover{color:var(--ink)}
+@media(max-width:360px){.dock{gap:2px;padding:7px 6px}.dock button .dl{font-size:.55rem}.dock button .di svg{width:22px;height:22px}}
+
+/* ---------------- PODSTRONY (zakładki) ---------------- */
+.page{animation:pageIn .32s cubic-bezier(.2,.7,.2,1) both}
+.page[hidden]{display:none!important}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.muted-note{font-size:.7rem;font-weight:700;color:var(--faint)}
+.sec .muted-note{text-align:right;max-width:52%}
+.seg.seg-3{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:400px){.seg.seg-3{grid-template-columns:1fr 1fr 1fr;gap:6px}.seg.seg-3 button{padding:13px 6px;font-size:.78rem}}
 
 /* ---------------- MODALE / bottom sheet ---------------- */
 .modal{position:fixed;inset:0;z-index:90;display:none;align-items:flex-end;justify-content:center;background:rgba(8,20,14,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;transition:opacity .3s}
@@ -446,7 +464,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
   <header class="topbar reveal">
     <div class="brand">
       <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20c8 1 15-4 16-16C9 3 3 10 4 20Z" fill="#fff" opacity=".96"/><path d="M4 20C7 14 12 9 18 6" stroke="#0b6e4b" stroke-width="1.7" stroke-linecap="round"/></svg></span>
-      <div><div class="bt">Leśny Dziennik</div><div class="bs">Aleksander · <span id="ageChip">…</span></div></div>
+      <div><div class="bt" id="pageTitle">Leśny Dziennik</div><div class="bs">Aleksander · <span id="ageChip">…</span></div></div>
     </div>
     <div class="top-right">
       <div class="clock" id="clock">…</div>
@@ -454,6 +472,8 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
     </div>
   </header>
 
+  <!-- ========================= PODSTRONA: START ========================= -->
+  <main class="page page-active" id="page-start" data-page="start">
   <!-- PASEK STATUSU DNIA -->
   <div class="daystat reveal" id="dayStat">
     <div class="ds feed"><div class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="#fff"/><path d="M10.5 13h3l-.5 8h-2l-.5-8Z" fill="#fff"/></svg></div><div class="dv" id="dsFeeds">0</div><div class="dk">karmień</div></div>
@@ -505,41 +525,86 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
     <div><div class="eyebrow">Rozwój dziś</div><p id="devTip">…</p></div>
   </section>
 
-  <!-- KALENDARZ -->
-  <div class="sec"><h2>Ostatnie dni</h2><button class="link" data-action="calendar">Wszystkie (5)</button></div>
-  <div class="cal reveal" id="calendarList"></div>
-
-  <!-- STATYSTYKI -->
-  <div class="sec"><h2>Statystyki</h2></div>
-  <div class="tools reveal">
-    <button class="tool" data-action="chart"><span class="tic"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5M4 19h16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><rect x="7" y="11" width="3" height="5" rx="1" fill="currentColor"/><rect x="12" y="8" width="3" height="8" rx="1" fill="currentColor"/><rect x="17" y="13" width="3" height="3" rx="1" fill="currentColor"/></svg></span><span class="tl">Podsumowanie</span></button>
-    <button class="tool" data-action="chart5"><span class="tic"><svg viewBox="0 0 24 24" fill="none"><path d="M4 15l4-5 4 3 5-7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 20h16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></span><span class="tl">Wykresy</span></button>
-    <button class="tool" data-action="weight"><span class="tic"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="6" r="2" fill="currentColor"/><path d="M6 9h12l2.5 11H3.5L6 9Z" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></span><span class="tl">Waga</span></button>
-  </div>
-
   <div class="status" id="statusline"></div>
-  <div class="sysinfo" id="sysinfo"></div>
+  </main>
 
-  <div class="util reveal">
-    <a class="u-btn" href="/export.csv"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Pobierz CSV</a>
-    <button class="u-btn" data-action="import"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Importuj</button>
-    <button class="u-btn" data-action="toggle-diag"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a7 7 0 0 0 0-2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-5l-.3 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5L2.6 11a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1L9.5 22h5l.3-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2"/></svg>Diagnostyka</button>
-    <input type="file" id="importFile" accept=".csv,text/csv" class="hidden">
-  </div>
+  <!-- ========================= PODSTRONA: DZIENNIK ========================= -->
+  <main class="page" id="page-diary" data-page="diary" hidden>
+    <div class="sec"><h2>Ostatnie dni</h2><span class="muted-note">Dotknij dnia, aby zobaczyć oś czasu</span></div>
+    <div class="cal five reveal" id="calendarList"></div>
+    <!-- Szczegóły wybranego dnia (oś czasu) -->
+    <div id="diaryDetail" class="hidden">
+      <div class="sec" style="margin-top:20px"><button class="link" data-action="back-calendar">← Wróć do listy</button><button class="link" data-action="day-feed">＋ Karmienie</button></div>
+      <div id="detailList"></div>
+    </div>
+  </main>
 
-  <section class="card hidden" id="diagCard" style="margin-top:16px">
-    <div class="m-head" style="margin-bottom:14px"><h2 style="font-size:1.05rem">Diagnostyka</h2></div>
-    <div class="diag" id="diagGrid"></div>
-  </section>
+  <!-- ========================= PODSTRONA: STATYSTYKI ========================= -->
+  <main class="page" id="page-stats" data-page="stats" hidden>
+    <div class="seg seg-3" style="margin-bottom:16px"><button type="button" data-action="pumping">Odciąganie</button><button type="button" id="vitBtn" data-action="vitamin">＋ Wit. D</button><button type="button" data-action="weight">⚖ Waga</button></div>
+    <div class="sec"><h2>Podsumowanie</h2></div>
+    <div id="summaryList"></div>
+
+    <div class="sec" style="margin-top:22px"><h2>Wykresy · 5 dni</h2></div>
+    <div class="chart-legend"><span><span class="dt" style="background:var(--acc)"></span>Mleko matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyfikowane</span><span><span class="dt" style="background:var(--feed)"></span>Karmienia</span></div>
+    <div class="bars" id="milkChart"></div>
+    <div id="extraTable"></div>
+    <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Odstępy karmień — dziś</span></div>
+    <p class="chart-note" id="gapSummary" style="margin:0 0 10px"></p>
+    <div id="gapChart"></div>
+    <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Rytm — 3 dni</span></div>
+    <div id="rhythm3"></div>
+
+    <div class="util reveal" style="margin-top:24px">
+      <a class="u-btn" href="/export.csv"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Pobierz CSV</a>
+      <button class="u-btn" data-action="import"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Importuj</button>
+      <button class="u-btn" data-action="toggle-diag"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a7 7 0 0 0 0-2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-5l-.3 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5L2.6 11a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1L9.5 22h5l.3-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2"/></svg>Diagnostyka</button>
+      <input type="file" id="importFile" accept=".csv,text/csv" class="hidden">
+    </div>
+    <section class="card hidden" id="diagCard" style="margin-top:16px">
+      <div class="m-head" style="margin-bottom:14px"><h2 style="font-size:1.05rem">Diagnostyka</h2></div>
+      <div class="diag" id="diagGrid"></div>
+    </section>
+    <div class="sysinfo" id="sysinfo"></div>
+  </main>
+
+  <!-- ========================= PODSTRONA: WAGA ========================= -->
+  <main class="page" id="page-weight" data-page="weight" hidden>
+    <div class="sec"><h2>Waga Aleksandra</h2><button class="link" data-action="chart5">← Statystyki</button></div>
+    <section class="card">
+      <div class="field" style="margin-top:0"><label for="weightG">Nowy pomiar (gramy)</label>
+        <div class="stepper"><button class="step" type="button" data-action="w-minus">−</button><input class="input" id="weightG" type="number" min="2000" max="15000" step="10" value="3700" inputmode="numeric"><button class="step" type="button" data-action="w-plus">＋</button></div>
+        <button class="btn acc" data-action="w-save" style="margin-top:12px">Zapisz pomiar</button>
+        <p class="notice" id="weightNotice"></p>
+      </div>
+    </section>
+    <div class="chart-legend" style="margin-top:14px"><span><span class="dt" style="background:var(--acc)"></span>Zmierzona</span><span><span class="dt" style="background:var(--milk)"></span>Mediana WHO</span><span><span class="dt" style="background:#bcd9c2"></span>Zakres WHO</span><span><span class="dt" style="background:var(--feed)"></span>Przyrost</span></div>
+    <div id="weightChart"></div><p class="chart-note" id="weightNote"></p>
+  </main>
+
+  <!-- ========================= PODSTRONA: SEN ========================= -->
+  <main class="page" id="page-sleep" data-page="sleep" hidden>
+    <div class="sec"><h2>Sen</h2></div>
+    <section class="card">
+      <div class="sleep-hero"><div class="sleep-big" id="sleepBig">—</div><div class="sleep-bar" id="sleepBar"><span id="sleepBarText">—</span></div><div class="sleep-window" id="sleepWindow"></div></div>
+      <button class="btn sleep" id="sleepToggleBtn" data-action="sleep" style="margin-top:16px">Zasnął</button>
+      <div style="margin-top:20px"><span class="eyebrow">Bilans dnia</span><div class="bal" id="sleepBalGrid"></div></div>
+      <p class="chart-note" style="margin-top:14px">Okno czuwania i cele snu są orientacyjne (wg wieku, na podstawie Napper).</p>
+    </section>
+  </main>
 </div>
 
-<!-- DOCK -->
-<nav class="dock" aria-label="Szybkie akcje">
-  <button data-action="sleep-open"><span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg></span><span class="dl" id="dockSleep">Sen</span></button>
-  <button data-action="other"><span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="dl">Więcej</span></button>
-  <button class="primary" data-action="new-feed"><span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></span><span class="dl">Karmienie</span></button>
-  <button data-action="calendar"><span class="di"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="dl">Kalendarz</span></button>
-  <button data-action="weight"><span class="di"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="6" r="2" fill="currentColor"/><path d="M6 9h12l2.5 11H3.5L6 9Z" stroke="currentColor" stroke-width="1.7" fill="none"/></svg></span><span class="dl">Waga</span></button>
+<!-- DOLNA NAWIGACJA (podstrony) -->
+<nav class="dock" aria-label="Nawigacja">
+  <button class="nav" data-nav="start" aria-label="Start">
+    <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M4 11.5 12 4l8 7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-5h4v5h3a1 1 0 0 0 1-1v-9" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" fill="none"/></svg></span><span class="dl">Start</span></button>
+  <button class="nav" data-nav="diary" aria-label="Dziennik">
+    <span class="di"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" stroke="currentColor" stroke-width="1.9"/><path d="M3.5 9.5h17" stroke="currentColor" stroke-width="1.9"/><path d="M8 3.2v3.4M16 3.2v3.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="13.5" r="1.15" fill="currentColor"/><circle cx="12" cy="13.5" r="1.15" fill="currentColor"/><circle cx="16" cy="13.5" r="1.15" fill="currentColor"/></svg></span><span class="dl">Dziennik</span></button>
+  <button class="primary" data-action="new-feed" aria-label="Dodaj karmienie"><span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="dl">Dodaj</span></button>
+  <button class="nav" data-nav="stats" aria-label="Statystyki">
+    <span class="di"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="12" width="3.6" height="7" rx="1.2" fill="currentColor"/><rect x="10.2" y="8" width="3.6" height="11" rx="1.2" fill="currentColor"/><rect x="16.4" y="5" width="3.6" height="14" rx="1.2" fill="currentColor"/></svg></span><span class="dl">Statystyki</span></button>
+  <button class="nav" data-nav="sleep" aria-label="Sen">
+    <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a6.8 6.8 0 0 0 11 11Z" fill="currentColor"/></svg></span><span class="dl" id="dockSleep">Sen</span></button>
 </nav>
 
 <!-- MODAL: formularz -->
@@ -569,66 +634,11 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
   </form>
 </div></div>
 
-<!-- MODAL: kalendarz -->
-<div class="modal" id="calendarModal" aria-hidden="true"><div class="sheet" role="dialog">
-  <div class="grip"></div><div class="m-head"><h2>Kalendarz · 5 dni</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-  <div id="calendarListFull" class="cal five"></div>
-</div></div>
-
-<!-- MODAL: graficzny widok dnia -->
-<div class="modal" id="detailModal" aria-hidden="true"><div class="sheet" role="dialog">
-  <div class="grip"></div>
-  <div class="m-head"><h2 id="detailTitle">Dziennik dnia</h2><button class="x" data-action="back-calendar" aria-label="Wróć"><svg viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-  <div id="detailList"></div>
-  <button class="btn feed" data-action="day-feed" style="margin-top:8px">＋ Karmienie tego dnia</button>
-</div></div>
-
-<!-- MODAL: podsumowanie -->
-<div class="modal" id="chartModal" aria-hidden="true"><div class="sheet" role="dialog">
-  <div class="grip"></div><div class="m-head"><h2>Podsumowanie</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-  <div class="seg" style="margin-bottom:16px"><button type="button" data-action="pumping">Odciąganie</button><button type="button" id="vitBtn" data-action="vitamin">＋ Wit. D</button></div>
-  <div id="summaryList"></div>
-</div></div>
-
-<!-- MODAL: wykresy -->
-<div class="modal" id="chart5Modal" aria-hidden="true"><div class="sheet" role="dialog">
-  <div class="grip"></div><div class="m-head"><h2>Wykresy · 5 dni</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-  <div class="chart-legend"><span><span class="dt" style="background:var(--acc)"></span>Mleko matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyfikowane</span><span><span class="dt" style="background:var(--feed)"></span>Karmienia</span></div>
-  <div class="bars" id="milkChart"></div>
-  <div id="extraTable"></div>
-  <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Odstępy karmień — dziś</span></div>
-  <p class="chart-note" id="gapSummary" style="margin:0 0 10px"></p>
-  <div id="gapChart"></div>
-  <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Rytm — 3 dni</span></div>
-  <div id="rhythm3"></div>
-</div></div>
-
 <!-- MODAL: więcej -->
 <div class="modal" id="otherModal" aria-hidden="true"><div class="sheet" role="dialog">
   <div class="grip"></div><div class="m-head"><h2>Więcej działań</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
   <button class="btn acc" data-action="diaper" style="margin-bottom:10px">Pielucha</button>
   <button class="btn milk" data-action="pumping">Odciąganie pokarmu</button>
-</div></div>
-
-<!-- MODAL: waga -->
-<div class="modal" id="weightModal" aria-hidden="true"><div class="sheet" role="dialog">
-  <div class="grip"></div><div class="m-head"><h2>Waga Aleksandra</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-  <div class="field"><label for="weightG">Nowy pomiar (gramy)</label>
-    <div class="stepper"><button class="step" type="button" data-action="w-minus">−</button><input class="input" id="weightG" type="number" min="2000" max="15000" step="10" value="3700" inputmode="numeric"><button class="step" type="button" data-action="w-plus">＋</button></div>
-    <button class="btn acc" data-action="w-save" style="margin-top:12px">Zapisz pomiar</button>
-    <p class="notice" id="weightNotice"></p>
-  </div>
-  <div class="chart-legend" style="margin-top:8px"><span><span class="dt" style="background:var(--acc)"></span>Zmierzona</span><span><span class="dt" style="background:var(--milk)"></span>Mediana WHO</span><span><span class="dt" style="background:#bcd9c2"></span>Zakres WHO</span><span><span class="dt" style="background:var(--feed)"></span>Przyrost</span></div>
-  <div id="weightChart"></div><p class="chart-note" id="weightNote"></p>
-</div></div>
-
-<!-- MODAL: sen -->
-<div class="modal" id="sleepModal" aria-hidden="true"><div class="sheet" role="dialog">
-  <div class="grip"></div><div class="m-head"><h2>Sen</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-  <div class="sleep-hero"><div class="sleep-big" id="sleepBig">—</div><div class="sleep-bar" id="sleepBar"><span id="sleepBarText">—</span></div><div class="sleep-window" id="sleepWindow"></div></div>
-  <button class="btn sleep" id="sleepToggleBtn" data-action="sleep" style="margin-top:16px">Zasnął</button>
-  <div style="margin-top:20px"><span class="eyebrow">Bilans dnia</span><div class="bal" id="sleepBalGrid"></div></div>
-  <p class="chart-note">Okno czuwania i cele snu są orientacyjne (wg wieku, na podstawie Napper).</p>
 </div></div>
 
 <!-- MODAL: pielucha -->
