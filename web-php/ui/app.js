@@ -194,22 +194,18 @@ function buildCalCard(day,onClick){
   card.addEventListener('click',onClick);
   return card;
 }
-/* Podgląd na stronie: dziś + wczoraj. Pełny modal: 5 dni (z mini-osią dnia). */
-/* Czy dzien ma jakiekolwiek wpisy (do wyboru dni w podgladzie). */
+/* Czy dzien ma jakiekolwiek wpisy (do czystego stanu "Brak wpisow"). */
 function dayHasActivity(d){
   return (d.feedingCount||0)>0 || (d.milkMl||0)>0 || (d.diaperWet||0)>0 || (d.diaperDirty||0)>0 || d.vitaminD;
 }
+/* Podgląd na stronie: dziś + wczoraj. Pełny modal: 5 dni (z mini-osią dnia). */
 function renderCalendarPreview(days){
   if(!days)return;
   const open=(day,from)=>{state.dayFrom=from;openDay(day.date,day.label)};
   const prev=$('calendarList');
   if(prev){
     prev.replaceChildren();
-    /* Podglad pokazuje 2 najnowsze dni Z AKTYWNOSCIA (puste dni pomijamy, zeby na telefonie
-       nie bylo pustych kart). Gdy zaden dzien nie ma wpisow — pokaz 2 najnowsze jak dotad. */
-    let picked=days.filter(dayHasActivity).slice(0,2);
-    if(!picked.length)picked=days.slice(0,2);
-    picked.forEach(day=>{const c=buildCalCard(day,()=>open(day,'home'));prev.append(c);addMiniBar(c,day.date)});
+    days.slice(0,2).forEach(day=>{const c=buildCalCard(day,()=>open(day,'home'));prev.append(c);addMiniBar(c,day.date)});
   }
   const full=$('calendarListFull');
   if(full){full.replaceChildren();days.forEach(day=>{const c=buildCalCard(day,()=>open(day,'calendar'));full.append(c);addMiniBar(c,day.date)})}
