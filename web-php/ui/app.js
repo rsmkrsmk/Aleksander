@@ -313,7 +313,7 @@ function buildTimeline(entries, onChanged){
     const title=e.type==='KARMIENIE'?'Karmienie':((e.type||'').startsWith('MLEKO')?(e.label||'Butelka'):(e.type==='ODCIAGANIE'?'Odciąganie':(e.type==='PIELUCHA_MOKRA'?'Pielucha':(e.type==='PIELUCHA_BRUDNA'?'Pielucha':(e.type==='WITAMINA_D'?'Witamina D':(e.type==='WAGA'?'Waga':(e.label||e.type)))))));
     row.innerHTML=
       `<span class="tl-time">${e.time}</span>`+
-      `<span class="tl-node"></span>`+
+      `<span class="tl-rail"><span class="tl-node"></span></span>`+
       `<div class="tl-card"><span class="tl-ic ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span>`+
         `<div class="tl-main"><div class="tl-t">${title}</div><div class="tl-s">${sub}</div></div>`+
         gapHtml+
