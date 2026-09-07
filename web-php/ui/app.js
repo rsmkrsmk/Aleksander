@@ -23,6 +23,17 @@ function dischargeGainBand(day){if(day<DISCHARGE_DAY)return null;let lo=DISCHARG
 const NS='http://www.w3.org/2000/svg';
 const svgEl=(n,a)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e};
 function setText(id,v){const el=$(id);if(el)el.textContent=v==null?'':v}
+/* Subtelny count-up liczby (premium/minimal). Respektuje prefers-reduced-motion. */
+const _cuState={};
+function countUp(id,target){
+  const el=$(id);if(!el)return;target=Number(target)||0;
+  const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const from=_cuState[id]||0;_cuState[id]=target;
+  if(reduce||from===target){el.textContent=target;return}
+  const dur=520,t0=performance.now();
+  const step=now=>{const p=Math.min((now-t0)/dur,1);const e=1-Math.pow(1-p,3);el.textContent=Math.round(from+(target-from)*e);if(p<1)requestAnimationFrame(step)};
+  requestAnimationFrame(step);
+}
 function pad(n){return String(n).padStart(2,'0')}
 function dateLabel(iso){const p=(iso||'').split('-');return p.length===3?`${p[2]}.${p[1]}.${p[0]}`:iso}
 function isoDaysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
@@ -100,7 +111,18 @@ function render(data){
   setText('avgGap',fmtGap(data.avgFeedingGapMin));
   const dot=$('mDot');if(dot){dot.className='d';if(ageMin>=240)dot.classList.add('danger');else if(ageMin>=180)dot.classList.add('warn')}
 
-  // dwie mini karty (czas + opis osobno)
+  // oddychający pierścień gdy zbliża się / minął czas karmienia
+  const rw=$('ringWrap');if(rw)rw.classList.toggle('breathe',ageMin>=180);
+
+  // pasek statusu dnia (dziś = calendar[0]) z count-up
+  const t0=(data.calendar&&data.calendar[0])||{};
+  countUp('dsFeeds',t0.feedingCount||0);
+  countUp('dsMilk',t0.milkMl||0);
+  countUp('dsDiaper',(t0.diaperWet||0)+(t0.diaperDirty||0));
+  // "sen" na pasku: liczba drzemek dziś (z /api/status napCount)
+  countUp('dsSleep',data.napCount||0);
+
+  // połączona karta posiłku (czas + opis osobno)
   fillMini('feedTime','feedDesc',data.lastFeeding,data.lastFeedingAgo,false);
   fillMini('milkTime','milkDesc',data.lastMilk,null,true);
 
@@ -174,7 +196,8 @@ function renderCalendarPreview(days){
   if(full){full.replaceChildren();days.forEach(day=>{const c=buildCalCard(day,()=>open(day,'calendar'));full.append(c);addMiniBar(c,day.date)})}
 }
 /* Cache wpisów per data (TTL 30s) — mini-bary i inne widoki nie odpytują przy każdym pollingu. */
-const _entriesCache={};
+let _entriesCache={};
+function invalidateEntries(){_entriesCache={}}
 async function entriesFor(date){
   const c=_entriesCache[date];
   if(c&&(Date.now()-c.t)<30000)return c.es;
@@ -251,6 +274,64 @@ function buildEntry(en,onDeleted){
 const DOW=['niedziela','poniedziałek','wtorek','środa','czwartek','piątek','sobota'];
 function toMin(t){const p=(t||'').split(':');return p.length<2?null:(+p[0])*60+(+p[1])}
 
+/* ============================================================================
+   WSPÓLNA OŚ CZASU (kreska + kropki) — główny sposób pokazywania wpisów.
+   Karmienia = duże kropki (feed), butelki = mniejsze (milk), pieluchy/inne osobno,
+   sen = pasmo. Pod karmieniem pokazujemy odstęp „po Xh Ymin". onChanged() po usunięciu.
+   ============================================================================ */
+function buildTimeline(entries, onChanged){
+  const wrap=document.createElement('div');wrap.className='tline';
+  if(!entries||!entries.length){const em=document.createElement('p');em.className='empty';em.textContent='Brak wpisów';return em}
+  // sekwencja pozycji w porządku wejścia (API jest chronologiczne); sen parujemy do pasm
+  let prevFeed=null,sStart=null;
+  entries.forEach(e=>{
+    if(e.type==='SEN_START'){sStart=e.time;return}
+    if(e.type==='SEN_STOP'){
+      if(sStart!=null){const a=toMin(sStart),b=toMin(e.time);const band=document.createElement('div');band.className='tl-sleepband';
+        band.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen ${sStart}–${e.time}${(a!=null&&b!=null&&b>a)?` · ${fmtGap(b-a)}`:''}`;
+        wrap.append(band);sStart=null}
+      return;
+    }
+    const [cls,icon]=entryIcon(e.type);
+    const row=document.createElement('div');row.className='tl-row '+cls;
+    // podtytuł + odstęp
+    let sub='';
+    if(e.type==='KARMIENIE'){
+      const pm=(e.piersLeftMin||0)+(e.piersRightMin||0);
+      sub=pm>0?`Pierś · L${e.piersLeftMin||0} / P${e.piersRightMin||0} min`:'Karmienie';
+    }else if((e.type||'').startsWith('MLEKO')){
+      sub=(e.label||'Butelka')+(e.ml?` · ${e.ml} ml`:'');
+    }else if(e.type==='ODCIAGANIE'){sub='Odciąganie'+(e.ml?` · ${e.ml} ml`:'');}
+    else if(e.type==='PIELUCHA_MOKRA'){sub='Pielucha mokra';}
+    else if(e.type==='PIELUCHA_BRUDNA'){sub='Pielucha brudna';}
+    else if(e.type==='WITAMINA_D'){sub='Witamina D';}
+    else if(e.type==='WAGA'){sub='Waga'+(e.ml?` · ${e.ml} g`:'');}
+    else sub=e.label||e.type;
+    // odstęp od poprzedniego karmienia (tylko dla karmień)
+    let gapHtml='';
+    if(e.type==='KARMIENIE'){const m=toMin(e.time);if(prevFeed!=null&&m!=null&&m>prevFeed)gapHtml=`<span class="tl-gap">po ${fmtGap(m-prevFeed)}</span>`;if(m!=null)prevFeed=m}
+    const title=e.type==='KARMIENIE'?'Karmienie':((e.type||'').startsWith('MLEKO')?(e.label||'Butelka'):(e.type==='ODCIAGANIE'?'Odciąganie':(e.type==='PIELUCHA_MOKRA'?'Pielucha':(e.type==='PIELUCHA_BRUDNA'?'Pielucha':(e.type==='WITAMINA_D'?'Witamina D':(e.type==='WAGA'?'Waga':(e.label||e.type)))))));
+    row.innerHTML=
+      `<span class="tl-time">${e.time}</span>`+
+      `<span class="tl-node"></span>`+
+      `<div class="tl-card"><span class="tl-ic ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span>`+
+        `<div class="tl-main"><div class="tl-t">${title}</div><div class="tl-s">${sub}</div></div>`+
+        gapHtml+
+        `<button class="tl-del" title="Usuń wpis"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>`+
+      `</div>`;
+    row.querySelector('.tl-del').addEventListener('click',async ev=>{
+      ev.stopPropagation();
+      if(!confirm(`Usunąć wpis?\n${title}, ${e.time}`))return;
+      try{await request('/api/delete-entry',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({line:String(e.lineIndex)})});toast('Usunięto wpis');invalidateEntries();await refresh();if(onChanged)onChanged()}
+      catch(ex){toast(ex.message,'err')}
+    });
+    wrap.append(row);
+  });
+  // sen w toku (otwarty start bez stop)
+  if(sStart!=null){const band=document.createElement('div');band.className='tl-sleepband';band.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen od ${sStart} · w toku`;wrap.append(band)}
+  return wrap;
+}
+
 /* Graficzny widok dnia: nagłówek + bento podsumowanie + łuk doby + oś czasu 24h + wpisy. */
 async function openDay(date,label){
   state.activeDay=date;state.detailLabel=label;
@@ -302,38 +383,9 @@ async function openDay(date,label){
   entries.forEach(e=>{const mins=toMin(e.time);if(mins==null)return;let cls=e.type==='KARMIENIE'?'feed':(e.type||'').startsWith('MLEKO')?'milk':(e.type==='PIELUCHA_MOKRA'||e.type==='PIELUCHA_BRUDNA')?'diaper':null;if(!cls)return;const m=document.createElement('div');m.className='db-mark '+cls;m.style.left=(mins/1440*100)+'%';arc.append(m)});
   list.append(arc);
 
-  // oś czasu 24h (grupowanie po godzinie)
-  const tlTitle=document.createElement('div');tlTitle.className='tl-title';tlTitle.textContent='Oś czasu';list.append(tlTitle);
-  if(!entries.length){const em=document.createElement('p');em.className='empty';em.textContent='Brak wpisów tego dnia';list.append(em);return}
-  const tl=document.createElement('div');tl.className='timeline';
-  const axis=document.createElement('div');axis.className='axis';tl.append(axis);
-  const byHour={};
-  entries.forEach(e=>{if(e.type==='SEN_START'||e.type==='SEN_STOP')return;const mins=toMin(e.time);if(mins==null)return;const hr=Math.floor(mins/60);(byHour[hr]=byHour[hr]||[]).push(e)});
-  let hours=Object.keys(byHour).map(Number);
-  sleeps.forEach(([a])=>{const hr=Math.floor(a/60);if(!hours.includes(hr))hours.push(hr)});
-  hours=[...new Set(hours)].sort((a,b)=>a-b);
-  hours.forEach(hr=>{
-    const row=document.createElement('div');row.className='tl-hour';
-    row.innerHTML=`<span class="hl">${pad(hr)}:00</span>`;
-    sleeps.filter(([a])=>Math.floor(a/60)===hr).forEach(([a,b])=>{
-      const dur=b-a;const sl=document.createElement('div');sl.className='tl-sleep';
-      sl.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen ${pad(Math.floor(a/60))}:${pad(a%60)}–${pad(Math.floor(b/60))}:${pad(b%60)} · ${fmtGap(dur)}`;
-      row.append(sl);
-    });
-    (byHour[hr]||[]).forEach(e=>{
-      const [cls,icon]=entryIcon(e.type);
-      const ml=(e.type==='KARMIENIE'||Number(e.ml)===0)?'':` · ${e.ml} ml`;
-      const chip=document.createElement('span');chip.className='tl-ev';
-      chip.innerHTML=`<span class="ed ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span><span class="et">${e.time}</span>${e.label||e.type}${ml}`;
-      row.append(chip);
-    });
-    tl.append(row);
-  });
-  list.append(tl);
-
-  // pełna lista wpisów (z usuwaniem)
-  const listTitle=document.createElement('div');listTitle.className='tl-title';listTitle.style.marginTop='18px';listTitle.textContent='Wszystkie wpisy';list.append(listTitle);
-  entries.forEach(en=>list.append(buildEntry(en,()=>openDay(state.activeDay,state.detailLabel))));
+  // OŚ CZASU — kreska + kropki (główny widok wpisów)
+  const tlTitle=document.createElement('div');tlTitle.className='tl-title';tlTitle.textContent='Oś czasu dnia';list.append(tlTitle);
+  list.append(buildTimeline(entries,()=>openDay(state.activeDay,state.detailLabel)));
 }
 
 /* ---------- Podsumowanie (2 dni + starsze) ---------- */
@@ -344,21 +396,23 @@ async function renderSummary(){
   const days=[cal[0],cal[1]].filter(Boolean);
   let lists;try{lists=await Promise.all(days.map(d=>request(`/api/entries?date=${encodeURIComponent(d.date)}`).catch(()=>({entries:[]}))))}catch(e){root.replaceChildren();setText('summaryList',e.message);return}
   root.replaceChildren();
+  const dayStatLine=es=>{let f=0,ml=0;es.forEach(e=>{if(e.type==='KARMIENIE')f++;else if((e.type||'').startsWith('MLEKO'))ml+=e.ml||0});return `${f} karmień · ${ml} ml`};
   days.forEach((d,i)=>{
-    const block=document.createElement('div');block.className='day-block';
-    const h=document.createElement('div');h.className='dbh';h.textContent=(i===0?'Dzisiaj · ':'Wczoraj · ')+dateLabel(d.date).slice(0,5);block.append(h);
     const es=(lists[i]&&lists[i].entries)||[];
-    if(!es.length){const p=document.createElement('p');p.className='empty';p.textContent='Brak wpisów';block.append(p)}
-    es.forEach(en=>block.append(buildEntry(en,()=>renderSummary())));
+    const block=document.createElement('div');block.className='day-block';
+    const h=document.createElement('div');h.className='dbh';
+    h.innerHTML=`<span class="t">${(i===0?'Dzisiaj':'Wczoraj')} · ${dateLabel(d.date).slice(0,5)}</span><span class="s">${dayStatLine(es)}</span>`;
+    block.append(h);
+    block.append(buildTimeline(es,()=>renderSummary()));
     root.append(block);
   });
   for(let k=2;k<2+(state.summaryExtra||0);k++){
     const ds=isoDaysAgo(k);
-    try{const data=await request(`/api/entries?date=${encodeURIComponent(ds)}`);const es=data.entries||[];
+    try{const es=await entriesFor(ds);
       const block=document.createElement('div');block.className='day-block';
-      const h=document.createElement('div');h.className='dbh';h.textContent=dateLabel(ds).slice(0,5);block.append(h);
-      if(!es.length){const p=document.createElement('p');p.className='empty';p.textContent='Brak wpisów';block.append(p)}
-      es.forEach(en=>block.append(buildEntry(en,()=>renderSummary())));root.append(block);
+      const h=document.createElement('div');h.className='dbh';
+      h.innerHTML=`<span class="t">${dateLabel(ds).slice(0,5)}</span><span class="s">${dayStatLine(es)}</span>`;
+      block.append(h);block.append(buildTimeline(es,()=>renderSummary()));root.append(block);
     }catch(e){}
   }
   const more=document.createElement('button');more.className='btn ghost';more.textContent='＋ Wczytaj starsze dni';more.style.marginTop='4px';
