@@ -284,6 +284,54 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .ico-link{display:inline-flex;align-items:center;gap:5px}
 .ico-link svg{width:15px;height:15px}
 
+/* ---------------- Przełącznik widoków (taby) ---------------- */
+.tabs{display:flex;gap:4px;padding:5px;margin-bottom:18px;background:var(--card-2);border:1px solid var(--brd);border-radius:999px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tabs .tab{flex:1;min-width:max-content;padding:10px 14px;border:none;background:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:.82rem;color:var(--muted);border-radius:999px;white-space:nowrap;transition:color .18s,background .18s,box-shadow .18s}
+.tabs .tab:hover{color:var(--ink)}
+.tabs .tab.active{color:#fff;background:var(--g-acc);box-shadow:var(--sh-1)}
+.tabs.tabs-sub{margin-bottom:14px}
+.tabs.tabs-sub .tab{font-size:.78rem;padding:8px 12px}
+.tabs.tabs-sub .tab.active{background:var(--g-milk)}
+.statview{animation:pageIn .28s cubic-bezier(.2,.7,.2,1) both}
+.statview.hidden{display:none!important}
+
+/* ---------------- Porównanie 3 dni (Rytm) ---------------- */
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:14px}
+@media(min-width:560px){.cmp-grid{grid-template-columns:repeat(4,1fr)}}
+.cmp-card{background:var(--card);border:1px solid var(--brd);border-radius:var(--r3);padding:12px 10px;box-shadow:var(--sh-1)}
+.cmp-name{font-size:.64rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:10px}
+.cmp-bars{display:flex;align-items:flex-end;justify-content:space-around;gap:6px;height:96px}
+.cmp-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.cmp-track{width:100%;max-width:26px;height:60px;display:flex;align-items:flex-end;border-radius:7px 7px 4px 4px;background:var(--card-2);overflow:hidden}
+.cmp-fill{width:100%;border-radius:7px 7px 4px 4px;transition:height .6s cubic-bezier(.3,.9,.3,1);min-height:4px}
+.cmp-fill.feed{background:var(--g-feed)} .cmp-fill.milk{background:var(--g-milk)} .cmp-fill.diaper{background:var(--g-acc)} .cmp-fill.acc{background:linear-gradient(135deg,#9a7ce8,#6a45c8)}
+.cmp-v{font-family:var(--fd);font-size:.7rem;font-weight:800;color:var(--ink);white-space:nowrap}
+.cmp-d{font-size:.56rem;font-weight:700;color:var(--faint);white-space:nowrap}
+.cmp-trend{background:var(--card);border:1px solid var(--brd);border-radius:var(--r3);padding:6px 14px;box-shadow:var(--sh-1);margin-bottom:18px}
+.ct-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;font-size:.8rem;font-weight:700;color:var(--ink-2);border-bottom:1px solid var(--brd)}
+.ct-row:last-child{border-bottom:none}
+.trend{font-family:var(--fd);font-weight:800;font-size:.8rem;display:inline-flex;align-items:center;gap:4px}
+.trend svg{width:14px;height:14px;flex:none}
+.trend.up{color:var(--acc-ink)} .trend.down{color:var(--danger)} .trend.flat{color:var(--muted)}
+
+/* ---------------- Historia ---------------- */
+.hist-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+@media(max-width:420px){.hist-kpi{grid-template-columns:1fr 1fr}}
+.hk{border-radius:var(--r3);padding:14px 10px;text-align:center;color:#fff;box-shadow:var(--sh-1)}
+.hk.feed{background:var(--g-feed)} .hk.milk{background:var(--g-milk)} .hk.diaper{background:var(--g-acc)} .hk.sleep{background:var(--g-sleep)}
+.hk-v{font-family:var(--fd);font-size:1.5rem;font-weight:800;line-height:1}
+.hk-k{font-size:.6rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;opacity:.9;margin-top:5px}
+.hist-chart{padding:16px}
+.hbars{display:flex;align-items:flex-end;gap:5px;height:150px;padding-top:8px}
+.hbar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px;min-width:0}
+.hbar-v{font-size:.6rem;font-weight:800;color:var(--ink-2);white-space:nowrap;min-height:.8em}
+.hbar-track{width:100%;max-width:34px;height:96px;display:flex;align-items:flex-end;background:var(--card-2);border-radius:7px 7px 4px 4px;overflow:hidden}
+.hbar-fill{width:100%;border-radius:7px 7px 4px 4px;transition:height .6s cubic-bezier(.3,.9,.3,1);min-height:3px}
+.hbar-fill.feed{background:var(--g-feed)} .hbar-fill.milk{background:var(--g-milk)} .hbar-fill.diaper{background:var(--g-acc)} .hbar-fill.sleep{background:var(--g-sleep)}
+.hbar-stack{width:100%;display:flex;flex-direction:column;border-radius:7px 7px 4px 4px;overflow:hidden;min-height:3px}
+.hbar-stack .hs.mother{background:var(--g-acc)} .hbar-stack .hs.modified{background:var(--g-milk)}
+.hbar-lab{font-size:.56rem;font-weight:700;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
 /* ---------------- MODALE / bottom sheet ---------------- */
 .modal{position:fixed;inset:0;z-index:90;display:none;align-items:flex-end;justify-content:center;background:rgba(8,20,14,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;transition:opacity .3s}
 .modal.open{display:flex;opacity:1}
@@ -547,31 +595,59 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 
   <!-- ========================= PODSTRONA: STATYSTYKI ========================= -->
   <main class="page" id="page-stats" data-page="stats" hidden>
-    <div class="seg" style="margin-bottom:16px"><button type="button" data-action="pumping"><svg class="bico" viewBox="0 0 24 24" fill="none"><path d="M9 2.5h6v3l1 2.5v11a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-11l1-2.5v-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8.5 10.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Odciąganie</button><button type="button" id="vitBtn" data-action="vitamin"><svg class="bico" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 8.5v7M8.5 12h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Wit. D</button></div>
-    <div class="sec"><h2>Podsumowanie</h2></div>
-    <div id="summaryList"></div>
-
-    <div class="sec" style="margin-top:22px"><h2>Wykresy · 5 dni</h2></div>
-    <div class="chart-legend"><span><span class="dt" style="background:var(--acc)"></span>Mleko matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyfikowane</span><span><span class="dt" style="background:var(--feed)"></span>Karmienia</span></div>
-    <div class="bars" id="milkChart"></div>
-    <div id="extraTable"></div>
-    <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Odstępy karmień — dziś</span></div>
-    <p class="chart-note" id="gapSummary" style="margin:0 0 10px"></p>
-    <div id="gapChart"></div>
-    <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Rytm — 3 dni</span></div>
-    <div id="rhythm3"></div>
-
-    <div class="util reveal" style="margin-top:24px">
-      <a class="u-btn" href="/export.csv"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Pobierz CSV</a>
-      <button class="u-btn" data-action="import"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Importuj</button>
-      <button class="u-btn" data-action="toggle-diag"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a7 7 0 0 0 0-2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-5l-.3 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5L2.6 11a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1L9.5 22h5l.3-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2"/></svg>Diagnostyka</button>
-      <input type="file" id="importFile" accept=".csv,text/csv" class="hidden">
+    <!-- Przełącznik widoków -->
+    <div class="tabs" id="statTabs" role="tablist">
+      <button class="tab active" data-stat="summary" role="tab">Podsumowanie</button>
+      <button class="tab" data-stat="charts" role="tab">Wykresy</button>
+      <button class="tab" data-stat="rhythm" role="tab">Rytm</button>
+      <button class="tab" data-stat="history" role="tab">Historia</button>
     </div>
-    <section class="card hidden" id="diagCard" style="margin-top:16px">
-      <div class="m-head" style="margin-bottom:14px"><h2 style="font-size:1.05rem">Diagnostyka</h2></div>
-      <div class="diag" id="diagGrid"></div>
+
+    <!-- WIDOK: PODSUMOWANIE -->
+    <section class="statview" id="stat-summary">
+      <div class="seg" style="margin-bottom:16px"><button type="button" data-action="pumping"><svg class="bico" viewBox="0 0 24 24" fill="none"><path d="M9 2.5h6v3l1 2.5v11a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-11l1-2.5v-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8.5 10.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Odciąganie</button><button type="button" id="vitBtn" data-action="vitamin"><svg class="bico" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 8.5v7M8.5 12h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Wit. D</button></div>
+      <div class="sec"><h2>Podsumowanie</h2></div>
+      <div id="summaryList"></div>
+      <div class="util reveal" style="margin-top:24px">
+        <a class="u-btn" href="/export.csv"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Pobierz CSV</a>
+        <button class="u-btn" data-action="import"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21V9m0 0 4 4m-4-4-4 4M5 3h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>Importuj</button>
+        <button class="u-btn" data-action="toggle-diag"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a7 7 0 0 0 0-2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-5l-.3 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5L2.6 11a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1L9.5 22h5l.3-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2"/></svg>Diagnostyka</button>
+        <input type="file" id="importFile" accept=".csv,text/csv" class="hidden">
+      </div>
+      <section class="card hidden" id="diagCard" style="margin-top:16px">
+        <div class="m-head" style="margin-bottom:14px"><h2 style="font-size:1.05rem">Diagnostyka</h2></div>
+        <div class="diag" id="diagGrid"></div>
+      </section>
+      <div class="sysinfo" id="sysinfo"></div>
     </section>
-    <div class="sysinfo" id="sysinfo"></div>
+
+    <!-- WIDOK: WYKRESY -->
+    <section class="statview hidden" id="stat-charts">
+      <div class="sec"><h2>Wykresy · 5 dni</h2></div>
+      <div class="chart-legend"><span><span class="dt" style="background:var(--acc)"></span>Mleko matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyfikowane</span><span><span class="dt" style="background:var(--feed)"></span>Karmienia</span></div>
+      <div class="bars" id="milkChart"></div>
+      <div id="extraTable"></div>
+      <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Odstępy karmień — dziś</span></div>
+      <p class="chart-note" id="gapSummary" style="margin:0 0 10px"></p>
+      <div id="gapChart"></div>
+    </section>
+
+    <!-- WIDOK: RYTM 3 DNI -->
+    <section class="statview hidden" id="stat-rhythm">
+      <div class="sec"><h2>Rytm — 3 dni</h2></div>
+      <div id="rhythmCompare"></div>
+      <div id="rhythm3"></div>
+    </section>
+
+    <!-- WIDOK: HISTORIA -->
+    <section class="statview hidden" id="stat-history">
+      <div class="tabs tabs-sub" id="histTabs" role="tablist">
+        <button class="tab active" data-hist="week" role="tab">Tydzień</button>
+        <button class="tab" data-hist="month" role="tab">Miesiąc</button>
+        <button class="tab" data-hist="year" role="tab">Rok</button>
+      </div>
+      <div id="historyBody"></div>
+    </section>
   </main>
 
   <!-- ========================= PODSTRONA: WAGA ========================= -->

@@ -5,7 +5,8 @@
 'use strict';
 
 const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:null,
-  milkType:'MLEKO_MATKI', bottleOpen:false, pumpMode:false, summaryExtra:0 };
+  milkType:'MLEKO_MATKI', bottleOpen:false, pumpMode:false, summaryExtra:0,
+  statView:'summary', histPeriod:'week' };
 const $ = id => document.getElementById(id);
 const MODALS = ['formModal','otherModal','diaperModal'];
 const PAGES = ['start','diary','stats','weight','sleep'];
@@ -76,9 +77,21 @@ function navTo(page){
 /* Renderuje zawartość podstrony korzystając z danych z ostatniego /api/status. */
 function renderPage(page){
   if(page==='diary'){state.activeDay=null;const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');if(state.data)renderCalendarPreview(state.data.calendar)}
-  else if(page==='stats'){state.summaryExtra=0;renderSummary();if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderAnalysis()}
+  else if(page==='stats'){renderStatView(state.statView)}
   else if(page==='weight'){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');renderWeightChart()}
   else if(page==='sleep'){renderSleep()}
+}
+/* Przełącznik widoków w Statystykach: summary | charts | rhythm | history */
+const STAT_VIEWS=['summary','charts','rhythm','history'];
+function renderStatView(view){
+  if(!STAT_VIEWS.includes(view))view='summary';
+  state.statView=view;
+  STAT_VIEWS.forEach(v=>{const el=$('stat-'+v);if(el)el.classList.toggle('hidden',v!==view)});
+  document.querySelectorAll('#statTabs .tab').forEach(t=>t.classList.toggle('active',t.dataset.stat===view));
+  if(view==='summary'){state.summaryExtra=0;renderSummary()}
+  else if(view==='charts'){if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderGaps()}
+  else if(view==='rhythm'){renderAnalysis()}
+  else if(view==='history'){renderHistory(state.histPeriod)}
 }
 
 /* ---------- Modale (formularze) ---------- */
@@ -475,24 +488,78 @@ function renderChart(cal){
   cal.forEach(d=>{const label=(d.label||'').split(' - ')[0];const suma=(d.motherMilkMl||0)+(d.modifiedMilkMl||0);html+=`<tr><td>${label}</td><td>${d.feedingCount}</td><td>${d.motherMilkMl} ml</td><td>${d.modifiedMilkMl} ml</td><td class="ok">${suma} ml</td></tr>`});
   html+='</table>';$('extraTable').innerHTML=html;
 }
+/* Odstępy karmień dziś — renderowane w widoku "Wykresy". */
+async function renderGaps(){
+  const gapHost=$('gapChart');if(!gapHost)return;gapHost.replaceChildren();
+  let today=[];try{today=await entriesFor(isoDaysAgo(0))}catch(e){}
+  const feeds=today.filter(e=>e.type==='KARMIENIE').map(e=>e.time).filter(Boolean).sort();
+  if(feeds.length<2){const p=document.createElement('p');p.className='empty';p.textContent=feeds.length?'Tylko jedno karmienie dziś.':'Brak karmień dziś.';gapHost.append(p);setText('gapSummary','');return}
+  let gaps=[],maxGap=0;for(let i=1;i<feeds.length;i++){const g=toMin(feeds[i])-toMin(feeds[i-1]);gaps.push({from:feeds[i-1],to:feeds[i],min:g});if(g>maxGap)maxGap=g}
+  const avg=Math.round(gaps.reduce((a,b)=>a+b.min,0)/gaps.length);
+  setText('gapSummary',`Karmień: ${feeds.length} · średni odstęp ${fmtGap(avg)}`);
+  gaps.forEach(g=>{const row=document.createElement('div');row.className='gap-row';row.innerHTML=`<div class="gap-time">${g.from} → ${g.to}</div><div class="gap-track"><div class="gap-fill" style="width:${maxGap?Math.max(6,g.min/maxGap*100):6}%"></div></div><div class="gap-val">${fmtGap(g.min)}</div>`;gapHost.append(row)});
+}
+
+/* Rytm — 3 dni: wizualne porównanie + szczegółowa oś każdego dnia. */
 async function renderAnalysis(){
-  const gapHost=$('gapChart'),rh=$('rhythm3');gapHost.replaceChildren();rh.replaceChildren();
+  const rh=$('rhythm3');if(rh)rh.replaceChildren();
+  const cmp=$('rhythmCompare');if(cmp)cmp.replaceChildren();
   const cal=(state.data&&state.data.calendar)||[];const days=cal.slice(0,3);
+  if(!days.length){if(rh){const p=document.createElement('p');p.className='empty';p.textContent='Brak danych.';rh.append(p)}return}
   let lists=[];try{lists=await Promise.all(days.map(d=>request(`/api/entries?date=${encodeURIComponent(d.date)}`).then(r=>r.entries||[]).catch(()=>[])))}catch(e){lists=days.map(()=>[])}
-  const toMin=t=>{const p=t.split(':');return(+p[0])*60+(+p[1])};
-  const todayFeeds=(lists[0]||[]).filter(e=>e.type==='KARMIENIE').map(e=>e.time).sort();
-  if(todayFeeds.length<2){const p=document.createElement('p');p.className='empty';p.textContent=todayFeeds.length?'Tylko jedno karmienie dziś.':'Brak karmień dziś.';gapHost.append(p);setText('gapSummary','')}
-  else{let gaps=[],maxGap=0;for(let i=1;i<todayFeeds.length;i++){const g=toMin(todayFeeds[i])-toMin(todayFeeds[i-1]);gaps.push({from:todayFeeds[i-1],to:todayFeeds[i],min:g});if(g>maxGap)maxGap=g}
-    const avg=Math.round(gaps.reduce((a,b)=>a+b.min,0)/gaps.length);
-    setText('gapSummary',`Karmień: ${todayFeeds.length} · średni odstęp ${fmtGap(avg)}`);
-    gaps.forEach(g=>{const row=document.createElement('div');row.className='gap-row';row.innerHTML=`<div class="gap-time">${g.from} → ${g.to}</div><div class="gap-track"><div class="gap-fill" style="width:${maxGap?Math.max(6,g.min/maxGap*100):6}%"></div></div><div class="gap-val">${fmtGap(g.min)}</div>`;gapHost.append(row)});
+
+  // Metryki per dzień
+  const dayLabels=['Dziś','Wczoraj','2 dni temu'];
+  const stats=days.map((d,i)=>{
+    const es=lists[i]||[];
+    const feedTimes=es.filter(e=>e.type==='KARMIENIE').map(e=>toMin(e.time)).filter(v=>v!=null).sort((a,b)=>a-b);
+    const gaps=[];for(let j=1;j<feedTimes.length;j++)gaps.push(feedTimes[j]-feedTimes[j-1]);
+    const avgGap=gaps.length?Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length):0;
+    let ml=0;es.forEach(e=>{if((e.type||'').startsWith('MLEKO'))ml+=e.ml||0});
+    const diapers=es.filter(e=>e.type==='PIELUCHA_MOKRA'||e.type==='PIELUCHA_BRUDNA').length;
+    return {label:dayLabels[i]||dateLabel(d.date).slice(0,5),date:d.date,feeds:feedTimes.length,ml,diapers,avgGap,feedTimes};
+  });
+
+  // --- WIZUALNE PORÓWNANIE (słupki obok siebie dla 4 metryk) ---
+  if(cmp){
+    const metrics=[
+      {key:'feeds',name:'Karmienia',unit:'',cls:'feed'},
+      {key:'ml',name:'Mleko',unit:' ml',cls:'milk'},
+      {key:'diapers',name:'Pieluchy',unit:'',cls:'diaper'},
+      {key:'avgGap',name:'Śr. przerwa',unit:'',fmt:fmtGap,cls:'acc'},
+    ];
+    let h='<div class="cmp-grid">';
+    metrics.forEach(m=>{
+      const vals=stats.map(s=>s[m.key]||0);const max=Math.max(1,...vals);
+      h+=`<div class="cmp-card"><div class="cmp-name">${m.name}</div><div class="cmp-bars">`;
+      stats.forEach((s,i)=>{
+        const v=s[m.key]||0;const pct=Math.round(v/max*100);
+        const disp=m.fmt?m.fmt(v):(v+m.unit);
+        h+=`<div class="cmp-col"><div class="cmp-track"><div class="cmp-fill ${m.cls}" style="height:${Math.max(4,pct)}%"></div></div><div class="cmp-v">${disp}</div><div class="cmp-d">${s.label.replace('2 dni temu','2 dni')}</div></div>`;
+      });
+      h+='</div></div>';
+    });
+    h+='</div>';
+    // trend: dziś vs wczoraj
+    if(stats.length>=2){
+      const d0=stats[0],d1=stats[1];
+      const arrows={up:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',down:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 19V5M6 13l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',flat:'<svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'};
+      const trend=(a,b,unit,fmt)=>{const diff=a-b;const cls=diff>0?'up':diff<0?'down':'flat';const val=fmt?fmt(Math.abs(diff)):(Math.abs(diff)+unit);return `<span class="trend ${cls}">${arrows[cls]}${diff===0?'bez zmian':val}</span>`};
+      h+=`<div class="cmp-trend"><div class="ct-row"><span>Karmienia vs wczoraj</span>${trend(d0.feeds,d1.feeds,'')}</div>`+
+         `<div class="ct-row"><span>Mleko vs wczoraj</span>${trend(d0.ml,d1.ml,' ml')}</div>`+
+         `<div class="ct-row"><span>Pieluchy vs wczoraj</span>${trend(d0.diapers,d1.diapers,'')}</div></div>`;
+    }
+    cmp.innerHTML=h;
   }
+
+  // --- SZCZEGÓŁOWA OŚ KAŻDEGO DNIA ---
+  if(!rh)return;
   days.forEach((d,i)=>{
     const all=(lists[i]||[]).map(e=>{const f=e.type==='KARMIENIE',mk=(e.type||'').startsWith('MLEKO');if(!f&&!mk)return null;const p=e.time.split(':');return{mins:(+p[0])*60+(+p[1]),milk:mk,time:e.time,label:e.label||e.type,ml:e.ml||0}}).filter(Boolean).sort((a,b)=>a.mins-b.mins);
     const feeds=all.filter(f=>!f.milk);const gaps=[];for(let j=1;j<feeds.length;j++)gaps.push(feeds[j].mins-feeds[j-1].mins);
     const avg=gaps.length?Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length):0;
     const wrap=document.createElement('div');wrap.className='rday';
-    wrap.innerHTML=`<div class="rh"><span class="rn">${i===0?'Dziś':i===1?'Wczoraj':'2 dni temu'} · ${dateLabel(d.date).slice(0,5)}</span><span class="rs"><b>${feeds.length}</b> karmień${gaps.length?` · śr. ${fmtGap(avg)}`:''}</span></div>`;
+    wrap.innerHTML=`<div class="rh"><span class="rn">${dayLabels[i]||''} · ${dateLabel(d.date).slice(0,5)}</span><span class="rs"><b>${feeds.length}</b> karmień${gaps.length?` · śr. ${fmtGap(avg)}`:''}</span></div>`;
     if(!all.length){const em=document.createElement('div');em.className='empty';em.textContent='Brak karmień';wrap.append(em);rh.append(wrap);return}
     let prev=null;
     all.forEach(f=>{const it=document.createElement('div');it.className='ritem'+(f.milk?' milk':'');
@@ -501,6 +568,156 @@ async function renderAnalysis(){
       wrap.append(it)});
     rh.append(wrap);
   });
+}
+
+/* ============================================================================
+   HISTORIA — agregacja z /export.csv (tydzień / miesiąc / rok)
+   ============================================================================ */
+let _csvCache=null; // {t, rows:[{date,time,type,ml,l,p}]}
+async function loadCsvRows(){
+  if(_csvCache&&(Date.now()-_csvCache.t)<60000)return _csvCache.rows;
+  let text='';
+  try{const r=await fetch('/export.csv');text=await r.text()}catch(e){return []}
+  const rows=[];
+  text.split(/\r?\n/).forEach((line,idx)=>{
+    if(!line.trim())return;
+    const c=line.split(',');
+    if(idx===0&&/data/i.test(c[0]))return; // nagłówek
+    const [date,time,type,ml,l,p]=c;
+    if(!date||!type)return;
+    rows.push({date:(date||'').trim(),time:(time||'').trim(),type:(type||'').trim(),ml:parseInt(ml,10)||0,l:parseInt(l,10)||0,p:parseInt(p,10)||0});
+  });
+  _csvCache={t:Date.now(),rows};
+  return rows;
+}
+/* Agreguje wiersze CSV do mapy per-dzień z metrykami. */
+function aggregateByDay(rows){
+  const days={};
+  const get=d=>days[d]||(days[d]={feeds:0,milkMl:0,motherMl:0,modMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,weightG:0,_sleepStart:null});
+  rows.forEach(r=>{
+    const d=get(r.date);
+    switch(r.type){
+      case 'KARMIENIE':d.feeds++;break;
+      case 'MLEKO_MATKI':d.milkMl+=r.ml;d.motherMl+=r.ml;break;
+      case 'MLEKO_MODYFIKOWANE':d.milkMl+=r.ml;d.modMl+=r.ml;break;
+      case 'MLEKO':d.milkMl+=r.ml;d.modMl+=r.ml;break;
+      case 'PIELUCHA_MOKRA':d.wet++;break;
+      case 'PIELUCHA_BRUDNA':d.dirty++;break;
+      case 'ODCIAGANIE':d.pump+=r.ml;break;
+      case 'WITAMINA_D':d.vitD++;break;
+      case 'WAGA':d.weightG=r.ml;break;
+      case 'SEN_START':d._sleepStart=toMin(r.time);break;
+      case 'SEN_STOP':if(d._sleepStart!=null){const e=toMin(r.time);if(e!=null&&e>d._sleepStart)d.sleepMin+=e-d._sleepStart;d._sleepStart=null}break;
+    }
+  });
+  return days;
+}
+const MONTHS_PL=['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];
+
+async function renderHistory(period){
+  const host=$('historyBody');if(!host)return;
+  host.replaceChildren();
+  const sk=document.createElement('div');sk.className='skeleton';sk.style.height='160px';host.append(sk);
+  const rows=await loadCsvRows();
+  const byDay=aggregateByDay(rows);
+  const allDates=Object.keys(byDay).sort();
+  host.replaceChildren();
+  if(!allDates.length){const p=document.createElement('p');p.className='empty';p.textContent='Brak danych w historii.';host.append(p);return}
+
+  // Zbuduj kubełki wg okresu
+  let buckets;
+  if(period==='week'){
+    buckets=[];for(let i=6;i>=0;i--){const d=isoDaysAgo(i);buckets.push({sub:d.split('-')[2],dates:[d]})}
+  }else if(period==='month'){
+    buckets=[];for(let w=4;w>=0;w--){const ds=[];for(let k=6;k>=0;k--)ds.push(isoDaysAgo(w*7+k));buckets.push({sub:(w===0?'ten':'−'+w),dates:ds})}
+  }else{
+    buckets=[];const now=new Date();
+    for(let m=11;m>=0;m--){const dt=new Date(now.getFullYear(),now.getMonth()-m,1);const y=dt.getFullYear(),mo=dt.getMonth();const ds=[];const daysInMonth=new Date(y,mo+1,0).getDate();for(let day=1;day<=daysInMonth;day++)ds.push(`${y}-${pad(mo+1)}-${pad(day)}`);buckets.push({sub:MONTHS_PL[mo],dates:ds})}
+  }
+
+  // Agreguj metryki w każdym kubełku
+  const B=buckets.map(b=>{
+    let feeds=0,milkMl=0,motherMl=0,modMl=0,wet=0,dirty=0,pump=0,vitD=0,sleepMin=0,activeDays=0,lastWeight=0;
+    b.dates.forEach(d=>{const x=byDay[d];if(!x)return;if(x.feeds||x.milkMl||x.wet||x.dirty)activeDays++;feeds+=x.feeds;milkMl+=x.milkMl;motherMl+=x.motherMl;modMl+=x.modMl;wet+=x.wet;dirty+=x.dirty;pump+=x.pump;vitD+=x.vitD;sleepMin+=x.sleepMin;if(x.weightG)lastWeight=x.weightG});
+    return {sub:b.sub,feeds,milkMl,motherMl,modMl,wet,dirty,pump,vitD,sleepMin,activeDays,lastWeight};
+  });
+
+  // Sumy zbiorcze okresu
+  const tot=B.reduce((a,b)=>({feeds:a.feeds+b.feeds,milkMl:a.milkMl+b.milkMl,motherMl:a.motherMl+b.motherMl,modMl:a.modMl+b.modMl,wet:a.wet+b.wet,dirty:a.dirty+b.dirty,pump:a.pump+b.pump,vitD:a.vitD+b.vitD,sleepMin:a.sleepMin+b.sleepMin,activeDays:a.activeDays+b.activeDays}),{feeds:0,milkMl:0,motherMl:0,modMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,activeDays:0});
+  const dd=Math.max(1,tot.activeDays);
+
+  // --- KAFELKI ZBIORCZE ---
+  const kpi=document.createElement('div');kpi.className='hist-kpi';
+  const kcell=(v,k,cls)=>`<div class="hk ${cls}"><div class="hk-v">${v}</div><div class="hk-k">${k}</div></div>`;
+  kpi.innerHTML=
+    kcell(tot.feeds,'karmień','feed')+
+    kcell(tot.milkMl+' ml','mleka','milk')+
+    kcell(tot.wet+tot.dirty,'pieluch','diaper')+
+    kcell(fmtDurShort(tot.sleepMin),'snu','sleep');
+  host.append(kpi);
+  const avgLine=document.createElement('p');avgLine.className='chart-note';avgLine.style.margin='0 2px 18px';
+  avgLine.innerHTML=`Średnio na dzień (${tot.activeDays} dni z danymi): <b>${(tot.feeds/dd).toFixed(1)}</b> karmień · <b>${Math.round(tot.milkMl/dd)}</b> ml · <b>${((tot.wet+tot.dirty)/dd).toFixed(1)}</b> pieluch`;
+  host.append(avgLine);
+
+  // --- WYKRESY ---
+  host.append(histBarChart('Karmienia w czasie',B,b=>b.feeds,'feed',''));
+  host.append(histStackChart('Mleko: matki vs modyfikowane',B));
+  host.append(histBarChart('Pieluchy w czasie',B,b=>b.wet+b.dirty,'diaper',''));
+  if(B.some(b=>b.sleepMin>0))host.append(histBarChart('Sen (godziny) w czasie',B,b=>Math.round(b.sleepMin/60*10)/10,'sleep',' h'));
+  if(B.some(b=>b.pump>0))host.append(histBarChart('Odciąganie (ml) w czasie',B,b=>b.pump,'milk',' ml'));
+
+  // --- WAGA w okresie ---
+  try{
+    const ws=await request('/api/weight-series');
+    if(ws&&ws.points&&ws.points.length){
+      const pts=ws.points.slice().sort((a,b)=>a.day-b.day);
+      const card=document.createElement('section');card.className='card';card.style.marginTop='16px';
+      card.innerHTML=`<div class="eyebrow" style="margin-bottom:8px">Waga — pomiary</div>`;
+      card.append(miniLineChart(pts.map(p=>({x:p.day,y:p.g,lbl:p.g+'g'}))));
+      host.append(card);
+    }
+  }catch(e){}
+}
+function fmtDurShort(m){if(!m)return'0h';const h=Math.floor(m/60);return h>0?`${h}h`:`${m}min`}
+
+/* Wykres słupkowy dla kubełków historii. */
+function histBarChart(title,buckets,valFn,cls,unit){
+  const wrap=document.createElement('section');wrap.className='card hist-chart';wrap.style.marginTop='16px';
+  const vals=buckets.map(valFn);const max=Math.max(1,...vals);
+  let h=`<div class="eyebrow" style="margin-bottom:12px">${title}</div><div class="hbars">`;
+  buckets.forEach((b,i)=>{
+    const v=vals[i];const pct=Math.round(v/max*100);
+    h+=`<div class="hbar-col"><div class="hbar-v">${v||''}${v&&unit?unit:''}</div><div class="hbar-track"><div class="hbar-fill ${cls}" style="height:${v?Math.max(3,pct):0}%"></div></div><div class="hbar-lab">${b.sub}</div></div>`;
+  });
+  h+='</div>';wrap.innerHTML=h;return wrap;
+}
+/* Wykres słupkowy ze stosem matki/modyfikowane. */
+function histStackChart(title,buckets){
+  const wrap=document.createElement('section');wrap.className='card hist-chart';wrap.style.marginTop='16px';
+  const max=Math.max(1,...buckets.map(b=>b.milkMl));
+  let h=`<div class="eyebrow" style="margin-bottom:6px">${title}</div><div class="chart-legend" style="margin:0 0 12px"><span><span class="dt" style="background:var(--acc)"></span>Matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyf.</span></div><div class="hbars">`;
+  buckets.forEach(b=>{
+    const totH=Math.round(b.milkMl/max*100);
+    const motherPct=b.milkMl?Math.round(b.motherMl/b.milkMl*100):0;
+    h+=`<div class="hbar-col"><div class="hbar-v">${b.milkMl||''}</div><div class="hbar-track"><div class="hbar-stack" style="height:${b.milkMl?Math.max(3,totH):0}%"><div class="hs mother" style="height:${motherPct}%"></div><div class="hs modified" style="height:${100-motherPct}%"></div></div></div><div class="hbar-lab">${b.sub}</div></div>`;
+  });
+  h+='</div>';wrap.innerHTML=h;return wrap;
+}
+/* Prosty wykres liniowy SVG (waga). */
+function miniLineChart(points){
+  const W=320,H=120,pd=14;
+  const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const sx=x=>pd+(maxX===minX?0.5:(x-minX)/(maxX-minX))*(W-2*pd);
+  const sy=y=>H-pd-(maxY===minY?0.5:(y-minY)/(maxY-minY))*(H-2*pd);
+  const d=points.map((p,i)=>`${i?'L':'M'}${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(' ');
+  const svgNS='http://www.w3.org/2000/svg';
+  const el=document.createElementNS(svgNS,'svg');el.setAttribute('viewBox',`0 0 ${W} ${H}`);el.setAttribute('class','weight-svg');el.style.width='100%';el.style.height='auto';
+  el.innerHTML=`<path d="${d}" fill="none" stroke="var(--acc-2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`+
+    points.map(p=>`<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3" fill="var(--acc)"/>`).join('')+
+    `<text x="4" y="${sy(points[0].y)-6}" class="axis-txt">${points[0].lbl}</text>`+
+    `<text x="${W-42}" y="${sy(points[points.length-1].y)-6}" class="axis-txt">${points[points.length-1].lbl}</text>`;
+  return el;
 }
 
 /* ============================================================================
@@ -619,6 +836,12 @@ document.addEventListener('click',async ev=>{
   // Nawigacja podstron (dolny pasek)
   const navEl=ev.target.closest('[data-nav]');
   if(navEl){navTo(navEl.dataset.nav);return}
+  // Przełącznik widoków w Statystykach
+  const statEl=ev.target.closest('[data-stat]');
+  if(statEl){renderStatView(statEl.dataset.stat);return}
+  // Przełącznik okresu w Historii
+  const histEl=ev.target.closest('[data-hist]');
+  if(histEl){state.histPeriod=histEl.dataset.hist;document.querySelectorAll('#histTabs .tab').forEach(t=>t.classList.toggle('active',t.dataset.hist===histEl.dataset.hist));renderHistory(state.histPeriod);return}
   const el=ev.target.closest('[data-action]');if(!el)return;
   const a=el.dataset.action;
   switch(a){
