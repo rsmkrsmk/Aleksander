@@ -121,8 +121,26 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 @keyframes breathe{50%{stroke:rgba(255,255,255,.42)}}
 .hero .lead .eyebrow{color:rgba(255,255,255,.8);margin-bottom:6px}
 .hero .lead .big{font-family:var(--fd);font-size:1.5rem;font-weight:800;letter-spacing:-.02em;line-height:1.1;margin-bottom:12px}
-.hero-metrics{display:flex;gap:10px}
+/* ostatnie karmienie + butelka w hero */
+.hero-last{display:flex;flex-direction:column;gap:7px;margin:2px 0 13px}
+.hl-row{display:flex;align-items:center;gap:9px;font-size:.82rem;min-width:0}
+.hl-ic{width:24px;height:24px;flex:none;border-radius:8px;display:grid;place-items:center;color:#fff}
+.hl-ic svg{width:14px;height:14px}
+.hl-ic.feed{background:rgba(255,255,255,.22)} .hl-ic.milk{background:rgba(255,255,255,.22)}
+.hl-k{font-weight:800;opacity:.85;font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;flex:none;width:74px}
+.hl-v{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.96}
+.hl-v b{font-family:var(--fd);font-weight:800}
+@media(max-width:420px){.hl-row{justify-content:center}.hl-k{width:auto}}
+.hero-metrics{display:flex;gap:10px;flex-wrap:wrap}
+.hero-metrics .hm{min-width:120px}
 @media(max-width:420px){.hero-metrics{justify-content:center}}
+/* mini szybkie akcje pod hero */
+.quickmini{display:flex;gap:10px;margin-bottom:14px}
+.qm{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:var(--r3);border:1px solid var(--brd);background:var(--card);box-shadow:var(--sh-1);cursor:pointer;font-family:inherit;font-weight:800;font-size:.82rem;color:var(--ink);transition:transform .16s}
+.qm:active{transform:scale(.97)}
+.qm .qm-ic{width:26px;height:26px;flex:none;border-radius:8px;display:grid;place-items:center;color:#fff}
+.qm .qm-ic svg{width:15px;height:15px}
+.qm.feed .qm-ic{background:var(--g-feed)} .qm.milk .qm-ic{background:var(--g-milk)}
 .hm{flex:1;max-width:150px;padding:10px 12px;border-radius:var(--r4);background:rgba(255,255,255,.14);backdrop-filter:blur(6px)}
 .hm .k{font-size:.6rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:.82;display:flex;align-items:center;gap:5px}
 .hm .k .d{width:7px;height:7px;border-radius:50%;background:#fff}
@@ -433,6 +451,11 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
       <div class="lead">
         <div class="eyebrow">Ostatnie karmienie</div>
         <div class="big" id="counterHeadline">Brak wpisu</div>
+        <!-- ostatnie karmienie + butelka: zwięźle w hero -->
+        <div class="hero-last">
+          <div class="hl-row"><span class="hl-ic feed"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="#fff"/><path d="M10.5 13h3l-.5 8h-2l-.5-8Z" fill="#fff"/></svg></span><span class="hl-k">Karmienie</span><span class="hl-v"><b id="feedTime">—</b> <span id="feedDesc"></span></span></div>
+          <div class="hl-row"><span class="hl-ic milk"><svg viewBox="0 0 24 24" fill="none"><path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="#fff"/></svg></span><span class="hl-k">Butelka</span><span class="hl-v"><b id="milkTime">—</b> <span id="milkDesc"></span></span></div>
+        </div>
         <div class="hero-metrics">
           <div class="hm"><div class="k"><span class="d" id="mDot"></span>Następne</div><div class="v" id="nextTime">—</div></div>
           <div class="hm"><div class="k">Śr. przerwa</div><div class="v" id="avgGap">—</div></div>
@@ -441,20 +464,11 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
     </div>
   </section>
 
-  <!-- POŁĄCZONA KARTA POSIŁKU -->
-  <section class="card meal reveal">
-    <div class="mtabs">
-      <div class="mtab tap" data-action="new-feed">
-        <span class="plus"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>
-        <span class="ic feed"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="#fff"/><path d="M10.5 13h3l-.5 8h-2l-.5-8Z" fill="#fff"/></svg></span>
-        <span class="mm"><span class="mk">Ostatnie karmienie</span><span class="mt" id="feedTime">—</span><span class="md" id="feedDesc"></span></span>
-      </div>
-      <div class="mtab">
-        <span class="ic milk"><svg viewBox="0 0 24 24" fill="none"><path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="#fff"/></svg></span>
-        <span class="mm"><span class="mk">Ostatnia butelka</span><span class="mt" id="milkTime">—</span><span class="md" id="milkDesc"></span></span>
-      </div>
-    </div>
-  </section>
+  <!-- MINI SZYBKIE AKCJE (małe, minimalistyczne) -->
+  <div class="quickmini reveal">
+    <button class="qm feed" data-action="new-feed"><span class="qm-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3h8l-1 5a4 4 0 0 1-6 0L8 3Z" fill="#fff"/><path d="M10.5 13h3l-.5 8h-2l-.5-8Z" fill="#fff"/></svg></span>Karmienie</button>
+    <button class="qm milk" data-action="new-feed"><span class="qm-ic"><svg viewBox="0 0 24 24" fill="none"><path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="#fff"/></svg></span>Butelka</button>
+  </div>
 
   <!-- PRZEBIEG DNIA -->
   <div class="sec"><h2>Dziś</h2><button class="link" data-action="today-detail">Pełny widok</button></div>

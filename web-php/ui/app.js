@@ -123,7 +123,8 @@ function render(data){
   countUp('dsSleep',data.napCount||0);
 
   // połączona karta posiłku (czas + opis osobno)
-  fillMini('feedTime','feedDesc',data.lastFeeding,data.lastFeedingAgo,false);
+  // W hero: karmienie = sama godzina (bo "X temu" jest w wielkim nagłówku), butelka = godz + ml/rodzaj
+  fillMini('feedTime','feedDesc',data.lastFeeding,null,false);
   fillMini('milkTime','milkDesc',data.lastMilk,null,true);
 
   // motyw wg pory (o ile użytkownik nie wybrał ręcznie)
@@ -156,9 +157,9 @@ function fillMini(timeId,descId,value,ago,bottle){
     let kind='';
     if(/MODYFIKOWANE/i.test(raw))kind='modyfikowane';
     else if(/MATKI/i.test(raw))kind='matki';
-    desc=[ml,kind].filter(Boolean).join(' · ')||'zapisano';
+    desc=[ml,kind].filter(Boolean).join(' · ');
   }
-  else desc='zapisano';
+  else desc='';  // karmienie w hero: sama godzina (bez powielania "temu")
   setText(timeId,time);setText(descId,desc);
 }
 
