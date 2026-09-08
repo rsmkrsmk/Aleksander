@@ -901,13 +901,17 @@ $('importFile').addEventListener('change',async ev=>{
   catch(e){toast(e.message,'err')}
 });
 
-/* ---------- Wgranie pliku CSV z danymi (test) — POST /api/upload-data ---------- */
+/* ---------- Wgranie pliku CSV z danymi (test) — POST /api/upload-data ----------
+   Uwaga: wysyłamy jako multipart/form-data (pole "file"), NIE surowy text/csv —
+   firewall hostingu (WAF) potrafi blokować surowe body POST (błąd 403). Multipart
+   (zwykły formularz z plikiem) przechodzi tak samo jak inne zapisy panelu. */
 $('uploadDataFile').addEventListener('change',async ev=>{
   const f=ev.target.files&&ev.target.files[0];ev.target.value='';if(!f)return;
   if(!confirm('Wgranie ZASTĄPI wszystkie dane zawartością pliku.\nDotychczasowe dane zostaną najpierw zapisane jako kopia (.bakap).\nKontynuować?'))return;
+  if(f.size>512*1024){toast('Plik za duży (limit 512 KB)','err');return}
   try{
-    const text=await f.text();if(text.length>512*1024){toast('Plik za duży (limit 512 KB)','err');return}
-    const r=await request('/api/upload-data',{method:'POST',headers:{'Content-Type':'text/csv'},body:text});
+    const fd=new FormData();fd.append('file',f,f.name||'karmienia.csv');
+    const r=await request('/api/upload-data',{method:'POST',body:fd});
     invalidateEntries();await refresh();
     toast(r.message||'Przyjęto plik');
   }catch(e){toast(e.message,'err')}

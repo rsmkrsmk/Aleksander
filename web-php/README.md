@@ -57,8 +57,10 @@ i co najmniej jeden poprawny wiersz; niepoprawne wiersze są pomijane.
 - **Metoda / URL:** `POST https://TWOJA-DOMENA/api/upload-data`
   (albo wprost w silnik: `POST https://TWOJA-DOMENA/engine/api.php?route=upload-data`)
 - **Ciało żądania — dwa warianty:**
-  1. **surowy CSV** w ciele (`Content-Type: text/csv`), albo
-  2. **multipart/form-data** z polem pliku o nazwie `file`.
+  1. **multipart/form-data** z polem pliku o nazwie `file` — **ZALECANE** (przechodzi
+     przez firewall/WAF hostingu, np. BitNinja na webd.pl), albo
+  2. **surowy CSV** w ciele (`Content-Type: text/csv`) — prostsze, ale **WAF hostingu
+     potrafi je blokować (403)**; używaj tylko jeśli Twój serwer nie ma takiego firewalla.
 - **Limit rozmiaru:** 512 KB.
 - **Token (opcjonalny, zalecany dla urządzeń):** ustaw zmienną środowiskową
   `UPLOAD_TOKEN=twoj_sekret` na serwerze. Gdy ustawiona, żądanie MUSI podać ten sam
@@ -70,20 +72,27 @@ i co najmniej jeden poprawny wiersz; niepoprawne wiersze są pomijane.
 **Przykłady wywołania (urządzenie / inna strona):**
 
 ```bash
-# 1) surowy plik CSV w ciele, z tokenem w nagłówku
+# 1) ZALECANE — multipart (pole "file"), token w nagłówku. Przechodzi przez WAF.
+curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
+     -H "X-Upload-Token: twoj_sekret" \
+     -F "file=@karmienia.csv"
+
+# 2) multipart bez tokenu (gdy UPLOAD_TOKEN nie jest ustawiony)
+curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
+     -F "file=@karmienia.csv"
+
+# 3) surowy CSV w ciele (może zostać zablokowane przez WAF hostingu -> 403)
 curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
      -H "Content-Type: text/csv" \
      -H "X-Upload-Token: twoj_sekret" \
      --data-binary @karmienia.csv
-
-# 2) multipart (pole "file"), token w query
-curl -X POST "https://TWOJA-DOMENA/api/upload-data?token=twoj_sekret" \
-     -F "file=@karmienia.csv"
-
-# 3) bez tokenu (gdy UPLOAD_TOKEN nie jest ustawiony na serwerze)
-curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
-     -H "Content-Type: text/csv" --data-binary @karmienia.csv
 ```
+
+> **Firewall hostingu (WAF):** webd.pl używa BitNinja, który blokuje surowe body
+> POST (`text/csv`, `--data-binary`) do `/api/*` — zwraca stronę „403 Forbidden".
+> Dlatego zarówno przycisk „wgraj CSV" w panelu, jak i urządzenie powinny wysyłać
+> plik jako **multipart/form-data** (pole `file`). Ten sam mechanizm co zwykłe
+> zapisy panelu (formularze), więc WAF go przepuszcza.
 
 > Ręczne wgranie z przeglądarki: w prawym górnym rogu (przy dacie) jest tymczasowy
 > link **„wgraj CSV"** — wskazuje plik i wysyła go tym samym endpointem. To wersja
