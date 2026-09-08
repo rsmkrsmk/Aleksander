@@ -37,7 +37,7 @@ CSV jest źródłem prawdy.
 `GET /` · `GET /api/status` · `GET /api/entries?date=YYYY-MM-DD` ·
 `GET /api/weight-series` · `POST /api/entry` · `POST /api/delete-entry` ·
 `POST /api/event` · `POST /api/setting` · `POST /api/import` ·
-`POST /api/send-backup` · `GET /export.csv`
+`POST /api/upload-data` · `POST /api/send-backup` · `GET /export.csv`
 
 Urządzenia mogą uderzać wprost w silnik: `…/engine/api.php?route=status` (GET) itd.
 
@@ -45,6 +45,49 @@ Urządzenia mogą uderzać wprost w silnik: `…/engine/api.php?route=status` (G
 urządzenia będą łączyć się z innego originu, ustaw `Config::corsOrigin()` (albo zmienną
 `CORS_ORIGIN`) na konkretny origin lub `*` — świadomie, bo API nie ma jeszcze
 uwierzytelniania. Docelowo warto dodać token/klucz dla urządzeń.
+
+### Przyjmowanie pliku CSV z zewnątrz — `POST /api/upload-data`
+
+Wysyła kompletny plik CSV z danymi na serwer. Strona **najpierw robi kopię
+zapasową** dotychczasowych danych pod nazwą `RRRR-MM-DD-GG-MM-SS.bakap` (aktualny
+czas, w katalogu `data/` obok pliku danych), a potem **podmienia** dane na przesłane.
+Plik jest walidowany: musi mieć nagłówek `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`
+i co najmniej jeden poprawny wiersz; niepoprawne wiersze są pomijane.
+
+- **Metoda / URL:** `POST https://TWOJA-DOMENA/api/upload-data`
+  (albo wprost w silnik: `POST https://TWOJA-DOMENA/engine/api.php?route=upload-data`)
+- **Ciało żądania — dwa warianty:**
+  1. **surowy CSV** w ciele (`Content-Type: text/csv`), albo
+  2. **multipart/form-data** z polem pliku o nazwie `file`.
+- **Limit rozmiaru:** 512 KB.
+- **Token (opcjonalny, zalecany dla urządzeń):** ustaw zmienną środowiskową
+  `UPLOAD_TOKEN=twoj_sekret` na serwerze. Gdy ustawiona, żądanie MUSI podać ten sam
+  token — w nagłówku `X-Upload-Token: twoj_sekret` **lub** w query `?token=twoj_sekret`.
+  Gdy `UPLOAD_TOKEN` jest pusty, endpoint jest otwarty (jak dotychczasowy import).
+- **Odpowiedź:** `200` `{"message":"...","backup":"RRRR-MM-DD-GG-MM-SS.bakap","lines":N}`;
+  błędy: `400` (pusty/za duży/niepoprawny plik), `403` (brak/zły token).
+
+**Przykłady wywołania (urządzenie / inna strona):**
+
+```bash
+# 1) surowy plik CSV w ciele, z tokenem w nagłówku
+curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
+     -H "Content-Type: text/csv" \
+     -H "X-Upload-Token: twoj_sekret" \
+     --data-binary @karmienia.csv
+
+# 2) multipart (pole "file"), token w query
+curl -X POST "https://TWOJA-DOMENA/api/upload-data?token=twoj_sekret" \
+     -F "file=@karmienia.csv"
+
+# 3) bez tokenu (gdy UPLOAD_TOKEN nie jest ustawiony na serwerze)
+curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
+     -H "Content-Type: text/csv" --data-binary @karmienia.csv
+```
+
+> Ręczne wgranie z przeglądarki: w prawym górnym rogu (przy dacie) jest tymczasowy
+> link **„wgraj CSV"** — wskazuje plik i wysyła go tym samym endpointem. To wersja
+> testowa; docelowo przeniesiemy ten przycisk w inne miejsce.
 
 ## Warstwa wizualna (`ui/`)
 

@@ -27,7 +27,7 @@ if ($route !== null) {
         if (Config::corsOrigin() !== '') {
             apiCorsHeader();
             header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type');
+            header('Access-Control-Allow-Headers: Content-Type, X-Upload-Token');
         }
         http_response_code(204); exit;
     }

@@ -127,6 +127,21 @@ final class MysqlRepository implements Repository
         return ['ok' => true, 'imported' => $imported, 'skipped' => $skipped];
     }
 
+    public function replaceRawCsv(string $rawText): array
+    {
+        // 1) Kopia zapasowa DOTYCHCZASOWYCH danych (zrzut BAZY) z aktualnym czasem.
+        $backupPath = Config::timestampedBackupFile();
+        $backupName = '';
+        if (@file_put_contents($backupPath, $this->rawCsv(), LOCK_EX) !== false) $backupName = basename($backupPath);
+
+        // 2) Zaladuj przeslany plik do bazy (importCsv robi walidacje + transakcje + odswieza CSV).
+        $res = $this->importCsv($rawText);
+        if (!$res['ok']) return ['ok' => false, 'backup' => $backupName, 'lines' => 0, 'message' => 'Brak poprawnych wierszy danych.'];
+
+        return ['ok' => true, 'backup' => $backupName, 'lines' => $res['imported'],
+                'message' => "Przyjeto plik: {$res['imported']} wpisow." . ((int)$res['skipped'] > 0 ? " Pominieto {$res['skipped']} niepoprawnych." : '') . ($backupName !== '' ? " Kopia: {$backupName}." : '')];
+    }
+
     // Zrzut bazy do CSV (backup zawsze odzwierciedla stan danych).
     private function rewriteCsvBackup(): void
     {

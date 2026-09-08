@@ -866,6 +866,7 @@ document.addEventListener('click',async ev=>{
     case 'pumping':openPumping();break;
     case 'vitamin':{const ok=await postEvent('WITAMINA_D');if(ok){toast('Zapisano witaminę D');renderSummary()}break;}
     case 'import':$('importFile').click();break;
+    case 'upload-data':$('uploadDataFile').click();break;
     case 'toggle-diag':{const c=$('diagCard');c.classList.toggle('hidden');if(!c.classList.contains('hidden')&&state.data)renderDiag(state.data);break;}
     case 'w-minus':{const w=$('weightG');w.value=Math.max(2000,(Number(w.value)||3700)-10);break;}
     case 'w-plus':{const w=$('weightG');w.value=Math.min(15000,(Number(w.value)||3700)+10);break;}
@@ -898,6 +899,18 @@ $('importFile').addEventListener('change',async ev=>{
   try{const text=await f.text();if(text.length>512*1024){toast('Plik za duży (limit 512 KB)','err');return}
     const r=await request('/api/import',{method:'POST',headers:{'Content-Type':'text/csv'},body:text});await refresh();toast(r.message||'Zaimportowano')}
   catch(e){toast(e.message,'err')}
+});
+
+/* ---------- Wgranie pliku CSV z danymi (test) — POST /api/upload-data ---------- */
+$('uploadDataFile').addEventListener('change',async ev=>{
+  const f=ev.target.files&&ev.target.files[0];ev.target.value='';if(!f)return;
+  if(!confirm('Wgranie ZASTĄPI wszystkie dane zawartością pliku.\nDotychczasowe dane zostaną najpierw zapisane jako kopia (.bakap).\nKontynuować?'))return;
+  try{
+    const text=await f.text();if(text.length>512*1024){toast('Plik za duży (limit 512 KB)','err');return}
+    const r=await request('/api/upload-data',{method:'POST',headers:{'Content-Type':'text/csv'},body:text});
+    invalidateEntries();await refresh();
+    toast(r.message||'Przyjęto plik');
+  }catch(e){toast(e.message,'err')}
 });
 
 /* ---------- ESC / klawiatura ---------- */

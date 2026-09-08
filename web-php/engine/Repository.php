@@ -24,6 +24,14 @@ interface Repository
     /** Import: zastepuje caly zbior danych zawartoscia CSV. Zwraca ['ok','imported','skipped']. */
     public function importCsv(string $rawText): array;
 
+    /**
+     * Przyjmuje z ZEWNATRZ caly plik CSV i czyni go biezacymi danymi.
+     * Najpierw zapisuje kopie zapasowa DOTYCHCZASOWYCH danych pod nazwa
+     * "YYYY-MM-DD-HH-MM-SS.bakap", potem podmienia dane na przeslane.
+     * Zwraca ['ok'=>bool,'backup'=>string,'lines'=>int,'message'=>string].
+     */
+    public function replaceRawCsv(string $rawText): array;
+
     /** Surowy CSV (do /export.csv) — zawsze aktualny zrzut danych. */
     public function rawCsv(): string;
 

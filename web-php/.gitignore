@@ -1,3 +1,5 @@
 # Pliki generowane w czasie dzialania (backup, ustawienia). Zrodlem prawdy jest data/karmienia.csv.
 data/karmienia_backup.csv
 data/ustawienia.cfg
+# Kopie zapasowe tworzone przy przyjeciu pliku z zewnatrz (POST /api/upload-data).
+data/*.bakap

@@ -7,7 +7,7 @@
    Obslugiwane sciezki (dowolny prefiks jest obcinany do ostatniego segmentu):
      GET  /api/status | /api/entries?date= | /api/weight-series | /export.csv
      POST /api/entry | /api/delete-entry | /api/event | /api/send-backup
-          /api/import | /api/setting
+          /api/import | /api/upload-data | /api/setting
    ============================================================================ */
 declare(strict_types=1);
 
@@ -241,6 +241,27 @@ function handle_api(string $route, string $method, Repository $repo): void
         sendJson(200, ['message' => $msg]);
     }
 
+    if ($route === 'upload-data' && $method === 'POST') {
+        // Opcjonalny token (gdy Config::uploadToken() niepusty — wymagany).
+        $need = Config::uploadToken();
+        if ($need !== '') {
+            $got = $_SERVER['HTTP_X_UPLOAD_TOKEN'] ?? param('token', '') ?? '';
+            if (!hash_equals($need, (string)$got)) sendJson(403, ['message' => 'Brak lub bledny token uploadu.']);
+        }
+        // Zrodlo pliku: multipart (pole "file") LUB surowe cialo zadania (text/csv).
+        $raw = '';
+        if (!empty($_FILES['file']['tmp_name']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
+            $raw = (string)file_get_contents($_FILES['file']['tmp_name']);
+        } else {
+            $raw = file_get_contents('php://input'); if ($raw === false) $raw = '';
+        }
+        if ($raw === '') sendJson(400, ['message' => 'Pusty plik.']);
+        if (strlen($raw) > 512 * 1024) sendJson(400, ['message' => 'Plik jest za duzy (limit 512 KB).']);
+        $result = $repo->replaceRawCsv($raw);
+        if (!$result['ok']) sendJson(400, ['message' => $result['message'] ?? 'Nie przyjeto pliku.']);
+        sendJson(200, ['message' => $result['message'], 'backup' => $result['backup'], 'lines' => $result['lines']]);
+    }
+
     if ($route === 'setting' && $method === 'POST') {
         if (param('key') !== 'sleepTelegram') sendJson(400, ['message' => 'Nieznane ustawienie.']);
         $settings = $repo->loadSettings();
@@ -263,7 +284,7 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === realpath(__FILE__)) {
         if (Config::corsOrigin() !== '') {
             apiCorsHeader();
             header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type');
+            header('Access-Control-Allow-Headers: Content-Type, X-Upload-Token');
         }
         http_response_code(204); exit;
     }

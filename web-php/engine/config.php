@@ -102,4 +102,22 @@ final class Config
     public static function dataFile(): string    { return getenv('DATA_FILE') ?: (self::dataDir() . '/karmienia.csv'); }
     public static function backupFile(): string  { return getenv('BACKUP_FILE') ?: (self::dataDir() . '/karmienia_backup.csv'); }
     public static function settingsFile(): string{ return getenv('SETTINGS_FILE') ?: (self::dataDir() . '/ustawienia.cfg'); }
+
+    // Sciezka do kopii zapasowej z aktualnym czasem: DATA-GODZINA-SEKUNDA.bakap
+    // (format YYYY-MM-DD-HH-MM-SS.bakap), zapisywana OBOK pliku danych
+    // (ten sam katalog co dataFile — dziala tez gdy DATA_FILE wskazuje inne miejsce).
+    public static function timestampedBackupFile(?DateTimeImmutable $when = null): string
+    {
+        $when = $when ?? new DateTimeImmutable();
+        return dirname(self::dataFile()) . '/' . $when->format('Y-m-d-H-i-s') . '.bakap';
+    }
+
+    // Opcjonalny token dla przyjmowania pliku CSV z zewnatrz (POST /api/upload-data).
+    // Gdy pusty => endpoint otwarty (jak dotychczasowy import). Gdy ustawiony (env
+    // UPLOAD_TOKEN), zadanie MUSI podac ten sam token (naglowek X-Upload-Token lub ?token=).
+    public static function uploadToken(): string
+    {
+        $v = getenv('UPLOAD_TOKEN');
+        return $v === false ? '' : (string)$v;
+    }
 }

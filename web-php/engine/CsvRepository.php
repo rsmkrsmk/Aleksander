@@ -95,6 +95,39 @@ final class CsvRepository implements Repository
         return ['ok' => true, 'imported' => $imported, 'skipped' => $skipped];
     }
 
+    public function replaceRawCsv(string $rawText): array
+    {
+        $this->ensureFile();
+        // 1) Walidacja przeslanego pliku: musi miec naglowek i >=1 poprawny wiersz.
+        $lines = preg_split('/\r?\n/', $rawText);
+        $out = [Config::CSV_HEADER]; $valid = 0; $skipped = 0; $sawHeader = false;
+        foreach ($lines as $line) {
+            $t = trim($line);
+            if ($t === '') continue;
+            if (!$sawHeader) { if (strncmp($t, 'data,', 5) === 0) { $sawHeader = true; continue; } }
+            if (strncmp($t, 'data,', 5) === 0) continue; // pomin ewentualne kolejne naglowki
+            if (strlen($t) > 160) { $skipped++; continue; }
+            if (Domain::parseCsvLine($t) === null) { $skipped++; continue; }
+            $out[] = $t; $valid++;
+        }
+        if (!$sawHeader) return ['ok' => false, 'backup' => '', 'lines' => 0, 'message' => 'Brak naglowka CSV (spodziewano "data,...").'];
+        if ($valid === 0) return ['ok' => false, 'backup' => '', 'lines' => 0, 'message' => 'Brak poprawnych wierszy danych.'];
+
+        // 2) Kopia zapasowa DOTYCHCZASOWYCH danych z aktualnym czasem: YYYY-MM-DD-HH-MM-SS.bakap
+        $backupPath = Config::timestampedBackupFile();
+        $backupName = '';
+        if (is_file($this->file) && filesize($this->file) > 0) {
+            if (@copy($this->file, $backupPath)) $backupName = basename($backupPath);
+        }
+
+        // 3) Podmiana danych na przeslane (znormalizowane: naglowek + poprawne wiersze).
+        $ok = file_put_contents($this->file, implode("\n", $out) . "\n", LOCK_EX) !== false;
+        if (!$ok) return ['ok' => false, 'backup' => $backupName, 'lines' => 0, 'message' => 'Nie udalo sie zapisac danych.'];
+
+        return ['ok' => true, 'backup' => $backupName, 'lines' => $valid,
+                'message' => "Przyjeto plik: {$valid} wpisow." . ($skipped > 0 ? " Pominieto {$skipped} niepoprawnych." : '') . ($backupName !== '' ? " Kopia: {$backupName}." : '')];
+    }
+
     public function rawCsv(): string
     {
         if (!is_file($this->file)) return Config::CSV_HEADER . "\n";
