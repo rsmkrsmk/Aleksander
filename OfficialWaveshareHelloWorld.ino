@@ -231,6 +231,11 @@ SemaphoreHandle_t telegramMutex = nullptr;
 // z rdzenia serwera WWW / loop(); obsluga w telegramTask (rdzen 0, obok Telegrama).
 volatile bool hostSyncPending = false;
 unsigned long hostSyncNextMs = 0;   // najwczesniejszy czas kolejnej wysylki (debounce/retry)
+// Znacznik ostatniej aktywnosci TLS Telegrama. Host-sync (drugi TLS) czeka po nim krotki
+// czas, aby pierwszy klient TLS zwolnil pamiec i heap sie skonsolidowal (bez tego drugi
+// handshake pada na "esp-aes: Failed to allocate memory" przez fragmentacje).
+unsigned long lastTelegramTlsMs = 0;
+constexpr unsigned long TLS_COOLDOWN_MS = 3000;
 bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
@@ -4194,10 +4199,13 @@ bool sendBackupViaTelegram(const String &fileName) {
   client.print(head);
 
   uint8_t chunk[512];
+  int chunkNo = 0;
   while (file.available()) {
     const size_t n = file.read(chunk, sizeof(chunk));
     if (n == 0) break;
     client.write(chunk, n);
+    // Okresowy restart DMA panelu — profilaktyka dryfu obrazu podczas transmisji.
+    if ((++chunkNo & 0x07) == 0) requestRgbResync();
   }
   client.print(tail);
   client.flush();
@@ -4215,6 +4223,7 @@ bool sendBackupViaTelegram(const String &fileName) {
   client.stop();
   file.close();
   feedWatchdog();
+  requestRgbResync(); // po zakonczeniu transmisji — korekta ewentualnego dryfu
 
   if (code == 200) {
     Serial.println("Telegram: backup wyslany.");
@@ -4261,6 +4270,8 @@ bool uploadCsvToHost() {
   const size_t fileSize = file.size();
 
   feedWatchdog(); // TLS trwa dluzej — chronimy watchdog
+  Serial.printf("HostSync: freeHeap=%u maxAlloc=%u przed TLS\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   WiFiClientSecure client;
   client.setInsecure();
   client.setHandshakeTimeout(8000);
@@ -4289,10 +4300,14 @@ bool uploadCsvToHost() {
   client.print(head);
 
   uint8_t chunk[512];
+  int chunkNo = 0;
   while (file.available()) {
     const size_t n = file.read(chunk, sizeof(chunk));
     if (n == 0) break;
     client.write(chunk, n);
+    // Operacje sieciowe obciazaja magistrale — okresowo zglaszamy restart DMA panelu,
+    // by zapobiec dryfowi obrazu RGB (widocznemu jako "przesuwanie" ekranu).
+    if ((++chunkNo & 0x07) == 0) requestRgbResync();
   }
   client.print(tail);
   client.flush();
@@ -4309,6 +4324,7 @@ bool uploadCsvToHost() {
   client.stop();
   file.close();
   feedWatchdog();
+  requestRgbResync(); // po zakonczeniu transmisji — korekta ewentualnego dryfu
 
   if (code == 200 || code == 201) {
     Serial.println("HostSync: CSV wyslany na panel.");
@@ -4356,7 +4372,9 @@ void pumpTelegramQueue() {
 
   // Priorytet: backup (dokument) przed zwykla wiadomoscia.
   if (doBackup) {
+    lastTelegramTlsMs = millis(); // znacznik aktywnosci TLS (host-sync poczeka po nim)
     const bool ok = sendBackupViaTelegram(backupNameSnapshot);
+    lastTelegramTlsMs = millis();
     if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
     if (ok) {
       // Tylko jesli w miedzyczasie nie zaplanowano nowego backupu.
@@ -4386,8 +4404,10 @@ void pumpTelegramQueue() {
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   const String body = "chat_id=" + String(TELEGRAM_CHAT_ID) +
                       "&text=" + telegramUrlEncode(textToSend);
+  lastTelegramTlsMs = millis(); // znacznik aktywnosci TLS (host-sync poczeka po nim)
   const int code = http.POST(body);
   http.end();
+  lastTelegramTlsMs = millis();
 
   if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
   if (code == 200) {
@@ -4425,7 +4445,11 @@ void telegramTask(void *parameter) {
     pumpTelegramQueue();
 #if FEATURE_HOST_SYNC
     // Auto-wysylka CSV na panel WWW po zmianie danych (debounce/retry na hostSyncNextMs).
-    if (hostSyncPending && WiFi.status() == WL_CONNECTED && millis() >= hostSyncNextMs) {
+    // NIE robimy tego w tej samej iteracji co TLS Telegrama — czekamy TLS_COOLDOWN_MS po
+    // ostatniej aktywnosci TLS, by pierwszy klient zwolnil pamiec (unikamy fragmentacji
+    // i bledu "esp-aes: Failed to allocate memory" przy drugim handshake).
+    if (hostSyncPending && WiFi.status() == WL_CONNECTED && millis() >= hostSyncNextMs &&
+        (millis() - lastTelegramTlsMs) >= TLS_COOLDOWN_MS) {
       hostSyncPending = false;
       hostSyncNextMs = millis() + HOST_SYNC_MIN_INTERVAL_MS;
       if (!uploadCsvToHost()) {
@@ -5504,7 +5528,10 @@ void initWatchdog() {
 // Karmienie watchdoga + aktualizacja lekkiej telemetrii. Wolane co iteracje loop()
 // oraz recznie przed/po dlugich operacjach sieciowych (Telegram/pogoda).
 void feedWatchdog() {
-  if (watchdogReady) esp_task_wdt_reset();
+  // Resetujemy WDT tylko gdy BIEZACY task jest jego subskrybentem. Bez tego wywolanie
+  // z telegramTask (rdzen 0, NIE dodany do WDT) daje "esp_task_wdt_reset: task not found".
+  // Do WDT dodany jest wylacznie loopTask (initWatchdog: esp_task_wdt_add(nullptr)).
+  if (watchdogReady && esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
   const uint32_t freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (freeInt < minFreeHeapEver) minFreeHeapEver = freeInt;
 }
