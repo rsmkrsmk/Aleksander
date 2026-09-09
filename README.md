@@ -65,10 +65,13 @@ Program podczas pierwszego uruchomienia tworzy w LittleFS plik `/karmienia.csv` 
 | Nagłówek | `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min` |
 | Wpis karmienia piersią | `2026-08-18,11:45,KARMIENIE,0,10,8` |
 | Wpis mleka (butelka) | `2026-08-18,12:30,MLEKO_MATKI,90` |
+| Wpis mleka mieszanego | `2026-08-18,12:30,MLEKO_MIESZANE,120` |
 | Zdarzenie snu | `2026-08-18,13:10,SEN_START,0` / `...,SEN_STOP,0` |
 | Waga (gramy w kolumnie ml) | `2026-08-18,09:00,WAGA,4200` |
 
-Obsługiwane typy wpisów: `KARMIENIE`, `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `ODCIAGANIE`, `WITAMINA_D`, `WAGA`, `SEN_START`, `SEN_STOP`.
+Obsługiwane typy wpisów: `KARMIENIE`, `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `MLEKO_MIESZANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `ODCIAGANIE`, `WITAMINA_D`, `WAGA`, `SEN_START`, `SEN_STOP`.
+
+**Butelka — rodzaj i ilość:** w formularzu karmienia (urządzenie i WWW) rodzaj mleka wybiera się dwoma niezależnymi przełącznikami **Matki** / **Modyfikowane**. Można zaznaczyć jeden lub **oba naraz** — zaznaczenie obu zapisuje jeden wpis `MLEKO_MIESZANE`. Ilość podaje wspólny suwak **20–200 ml, skok 10 ml (domyślnie 60)**. W raportach mleko rozbite jest na trzy kategorie: Matki / Mieszane / Modyfikowane; najważniejsza pozostaje łączna ilość ml. (Odciąganie ma osobny, niezmieniony zakres.)
 
 Dane pozostają w wewnętrznej pamięci Flash również po zwykłym wyłączeniu urządzenia. Należy jednak zachować ostrożność przy wgrywaniu nowego szkicu lub zmianie ustawień partycji Flash: operacja wymazania Flash może usunąć historię. Cały plik można wyeksportować z panelu WWW (`/export.csv`) oraz zaimportować z powrotem (import robi najpierw kopię bezpieczeństwa). Gdy plik przekroczy 256 KB, urządzenie tworzy jednorazowo kopię archiwalną i sygnalizuje to w diagnostyce (dane nie są usuwane).
 
@@ -126,6 +129,7 @@ Pełny opis ekranów i formatu danych znajduje się w `PROJECT_DESIGN.md`.
 | Motyw nocny | 21:00–7:00 ciemna paleta + przyciemnione podświetlenie (na urządzeniu i w WWW) |
 | Cofnij | Bezpieczne, atomowe usunięcie ostatniego wpisu (urządzenie i WWW) |
 | Backup | Automatyczna dzienna kopia `/karmienia_backup.csv`; miękka rotacja (archiwum) po przekroczeniu 256 KB |
+| **Synchronizacja z panelem WWW** | Po **każdej zmianie danych** (dodanie/edycja/usunięcie/import) urządzenie wysyła cały plik CSV na hosting: `POST` multipart do `PANEL_UPLOAD_URL` (`/api/upload-data`). Panel robi kopię `RRRR-MM-DD-GG-MM-SS.bakap` i podmienia dane. **Urządzenie pozostaje źródłem prawdy — hosting jest lustrem** (nadpisywanym przy kolejnej zmianie). Wysyłka w tle (rdzeń 0, nie blokuje UI), łączenie serii zmian (min. 15 s odstępu), ponowienie po błędzie. Włącznik `FEATURE_HOST_SYNC` w `config.h`. **Obecnie BEZ tokena (rozwiązanie testowe)** — patrz „Znane długi / TODO” |
 | Telegram | Powiadomienia o wpisach do drugiego rodzica — uzupełnij `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID` w `config.h` (puste = wyłączone). Wysyłka w osobnym zadaniu (nie blokuje UI) |
 | OTA | Wgrywanie szkicu przez Wi‑Fi — ustaw `OTA_PASSWORD` w `config.h` (puste = wyłączone) |
 | mDNS | `http://karmienie.local` |
@@ -145,6 +149,11 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
   | Ekran jest czarny po wgraniu starszej wersji szkicu | Wgraj obecną wersję. Poprzednie szkice pomijały wymaganą sekwencję pinów `5` i `6` ekspandera TCA9554 przed uruchomieniem panelu. Oficjalny przykład Waveshare wykonuje tę sekwencję, aby uruchomić panel ST7701. |
   | Ekran nadal jest czarny po wgraniu obecnej wersji | Wgraj wyłącznie `LCD_Official_Config_Test/LCD_Official_Config_Test.ino` (szkic diagnostyczny z sekwencją uruchomienia oficjalnego przykładu `01_HelloWorld`). Prześlij pełny log z monitora portu, zwłaszcza komunikaty rozpoczynające się od `LCD:`. |
 | Po aktualizacji programu brakuje historii | Sprawdź ustawienia wgrywania; wymazanie Flash lub zmiana schematu partycji usuwa dane LittleFS. |
+
+## Znane długi / TODO (bezpieczeństwo)
+
+- **Token uploadu (`/api/upload-data`)** — synchronizacja urządzenie → hosting działa obecnie **bez tokena** (rozwiązanie testowe). Każdy, kto zna URL, może nadpisać dane na hostingu. Przed wyjściem poza testy: ustawić wspólny sekret w `UPLOAD_TOKEN` na hostingu (panel WWW) oraz `PANEL_UPLOAD_TOKEN` w `config.h` urządzenia.
+- **Token Telegrama jawny w repo** — `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` są wpisane w `config.h` w publicznym repozytorium. Zalecane: zrewokować bota u @BotFather i przenieść sekrety poza repo (np. do `secrets.h`, który nie jest publikowany).
 
 ## Historia zmian
 

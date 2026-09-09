@@ -227,6 +227,10 @@ String backupFileName;              // chroniony telegramMutex
 // wspoldzielone miedzy rdzeniami, wiec dostep chronimy mutexem.
 TaskHandle_t telegramTaskHandle = nullptr;
 SemaphoreHandle_t telegramMutex = nullptr;
+// Synchronizacja CSV z panelem WWW (auto-wysylka po zmianie danych). Flaga ustawiana
+// z rdzenia serwera WWW / loop(); obsluga w telegramTask (rdzen 0, obok Telegrama).
+volatile bool hostSyncPending = false;
+unsigned long hostSyncNextMs = 0;   // najwczesniejszy czas kolejnej wysylki (debounce/retry)
 bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
@@ -454,6 +458,8 @@ void handleWebNotFound();
 bool appendBackupIfDue();
 String buildBackupFileName();
 bool sendBackupViaTelegram(const String &fileName);
+bool uploadCsvToHost();
+void requestHostSync();
 void resyncNtpIfDue();
 void queueTelegram(const String &text);
 String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight, time_t when);
@@ -1506,6 +1512,7 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
     appendBackupIfDue();
     archiveDataFileIfHuge(); // miekka rotacja: kopia + ostrzezenie przy duzym pliku
     queueTelegram(telegramTextFor(String(entryType), ml, piersLeft, piersRight, when));
+    requestHostSync(); // wyslij aktualny CSV na panel WWW (hosting = lustro danych)
   }
   return saved;
 }
@@ -2247,6 +2254,7 @@ void handleApiDeleteEntry() {
     return;
   }
   updateHomeInformation();
+  requestHostSync(); // dane sie zmienily — zsynchronizuj CSV z panelem WWW
   sendJson(200, "{\"message\":\"Usunieto wpis.\",\"removed\":\"" + jsonEscape(removed) + "\"}");
 }
 
@@ -2474,6 +2482,7 @@ void handleApiImport() {
   invalidateDayStats();
   loadLatestEntries();
   updateHomeInformation();
+  requestHostSync(); // po imporcie zsynchronizuj CSV z panelem WWW
   String payload = "{\"message\":\"Zaimportowano ";
   payload += rowCount;
   payload += " wpisow.";
@@ -4215,6 +4224,101 @@ bool sendBackupViaTelegram(const String &fileName) {
   return false;
 }
 
+// Zglasza chec wyslania aktualnego CSV na panel WWW (po zmianie danych).
+// Bezpieczne z dowolnego rdzenia — sama wysylka biegnie w telegramTask.
+void requestHostSync() {
+#if FEATURE_HOST_SYNC
+  hostSyncPending = true;
+  wakeTelegramTask();
+#endif
+}
+
+#if FEATURE_HOST_SYNC
+// Wysyla caly plik CSV na panel WWW jako multipart/form-data (pole "file"),
+// endpoint /api/upload-data. Wzorzec jak sendBackupViaTelegram (WiFiClientSecure,
+// streaming pliku), ale host/sciezka parsowane z PANEL_UPLOAD_URL. Zwraca true przy 200.
+bool uploadCsvToHost() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  if (!storageReady || !LittleFS.exists(DATA_FILE_PATH)) return false;
+
+  // Parsowanie PANEL_UPLOAD_URL: wymagany https://host[:port]/sciezka
+  String url = String(PANEL_UPLOAD_URL);
+  if (!url.startsWith("https://")) {
+    Serial.println("HostSync: PANEL_UPLOAD_URL musi byc https:// — pomijam.");
+    return false;
+  }
+  String rest = url.substring(8); // po "https://"
+  int slash = rest.indexOf('/');
+  String hostPort = (slash >= 0) ? rest.substring(0, slash) : rest;
+  String path = (slash >= 0) ? rest.substring(slash) : "/";
+  int colon = hostPort.indexOf(':');
+  String host = (colon >= 0) ? hostPort.substring(0, colon) : hostPort;
+  int port = (colon >= 0) ? hostPort.substring(colon + 1).toInt() : 443;
+  if (host.length() == 0) return false;
+
+  File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+  if (!file) return false;
+  const size_t fileSize = file.size();
+
+  feedWatchdog(); // TLS trwa dluzej — chronimy watchdog
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setHandshakeTimeout(8000);
+  client.setTimeout(8000);
+  if (!client.connect(host.c_str(), port)) {
+    Serial.printf("HostSync: blad TLS do %s:%d\n", host.c_str(), port);
+    file.close();
+    return false;
+  }
+
+  const String boundary = String("----csvsync") + String(millis());
+  String head = String("--") + boundary +
+                "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"karmienia.csv\"\r\n" +
+                "Content-Type: text/csv\r\n\r\n";
+  const String tail = String("\r\n--") + boundary + "--\r\n";
+  const size_t bodyLen = head.length() + fileSize + tail.length();
+
+  client.printf("POST %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ESP32\r\n",
+                path.c_str(), host.c_str());
+  if (strlen(PANEL_UPLOAD_TOKEN) > 0) {
+    client.printf("X-Upload-Token: %s\r\n", PANEL_UPLOAD_TOKEN);
+  }
+  client.printf("Content-Type: multipart/form-data; boundary=%s\r\n"
+                "Content-Length: %u\r\nConnection: close\r\n\r\n",
+                boundary.c_str(), static_cast<unsigned>(bodyLen));
+  client.print(head);
+
+  uint8_t chunk[512];
+  while (file.available()) {
+    const size_t n = file.read(chunk, sizeof(chunk));
+    if (n == 0) break;
+    client.write(chunk, n);
+  }
+  client.print(tail);
+  client.flush();
+
+  unsigned long waitUntil = millis() + 6000;
+  String statusLine;
+  while (!client.available() && millis() < waitUntil) delay(10);
+  if (client.available()) statusLine = client.readStringUntil('\n');
+  int code = 0;
+  if (statusLine.startsWith("HTTP/1.") && statusLine.length() >= 12) {
+    code = statusLine.substring(9, 12).toInt();
+  }
+  while (client.available()) client.read();
+  client.stop();
+  file.close();
+  feedWatchdog();
+
+  if (code == 200 || code == 201) {
+    Serial.println("HostSync: CSV wyslany na panel.");
+    return true;
+  }
+  Serial.printf("HostSync: wysylka nieudana (kod %d).\n", code);
+  return false;
+}
+#endif
+
 // Jedna proba obslugi kolejki Telegrama. Wywolywana WYLACZNIE z telegramTask
 // (rdzen 0) — blokujace operacje TLS nie dotykaja loop()/LVGL/dotyku. Dostep do
 // wspoldzielonego stanu (pendingTelegramText/backupState/backupFileName) jest
@@ -4319,6 +4423,17 @@ void telegramTask(void *parameter) {
     // Timeout 5 s: nawet bez notyfikacji obsluzymy zaplanowane ponowienia/backup.
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
     pumpTelegramQueue();
+#if FEATURE_HOST_SYNC
+    // Auto-wysylka CSV na panel WWW po zmianie danych (debounce/retry na hostSyncNextMs).
+    if (hostSyncPending && WiFi.status() == WL_CONNECTED && millis() >= hostSyncNextMs) {
+      hostSyncPending = false;
+      hostSyncNextMs = millis() + HOST_SYNC_MIN_INTERVAL_MS;
+      if (!uploadCsvToHost()) {
+        hostSyncPending = true;                        // ponow po HOST_SYNC_RETRY_MS
+        hostSyncNextMs = millis() + HOST_SYNC_RETRY_MS;
+      }
+    }
+#endif
   }
 }
 

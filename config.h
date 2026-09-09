@@ -103,5 +103,23 @@ constexpr char WEATHER_CACHE_FILE[] = "/pogoda.cache";
 constexpr char TELEGRAM_BOT_TOKEN[] = "8468018843:AAHjt-X20pzkJWG07HkTeRya6b5iR-6oVc4";
 constexpr char TELEGRAM_CHAT_ID[] = "6567938576";
 
+// ---------------- Synchronizacja z panelem WWW na hostingu (auto-wysylka CSV) --
+// Po KAZDEJ zmianie danych urzadzenie wysyla pelny plik CSV na panel WWW
+// (POST multipart/form-data pole "file" -> /api/upload-data). Panel robi kopie
+// .bakap i podmienia dane. Urzadzenie pozostaje zrodlem prawdy; hosting to lustro.
+// FEATURE_HOST_SYNC=0 wylacza cala funkcje.
+#ifndef FEATURE_HOST_SYNC
+#define FEATURE_HOST_SYNC 1
+#endif
+// Pelny URL endpointu przyjmujacego CSV (musi byc HTTPS).
+constexpr char PANEL_UPLOAD_URL[] = "https://phpmapy1.webd.pro/api/upload-data";
+// Token uploadu (naglowek X-Upload-Token). PUSTY = bez tokena (rozwiazanie TESTOWE).
+// TODO(bezpieczenstwo): przed wyjsciem poza testy ustawic wspolny token tu i na hostingu.
+constexpr char PANEL_UPLOAD_TOKEN[] = "";
+// Minimalny odstep miedzy wysylkami (laczy serie szybkich wpisow w jeden upload).
+constexpr uint32_t HOST_SYNC_MIN_INTERVAL_MS = 15000UL;
+// Odstep ponowienia po nieudanej wysylce.
+constexpr uint32_t HOST_SYNC_RETRY_MS = 30000UL;
+
 // ArduinoOTA: hasło do wgrywania szkicu przez Wi-Fi. Puste = OTA wyłączone.
 constexpr char OTA_PASSWORD[] = "";
