@@ -333,7 +333,7 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .hbar-fill{width:100%;border-radius:7px 7px 4px 4px;transition:height .6s cubic-bezier(.3,.9,.3,1);min-height:3px}
 .hbar-fill.feed{background:var(--g-feed)} .hbar-fill.milk{background:var(--g-milk)} .hbar-fill.diaper{background:var(--g-acc)} .hbar-fill.sleep{background:var(--g-sleep)}
 .hbar-stack{width:100%;display:flex;flex-direction:column;border-radius:7px 7px 4px 4px;overflow:hidden;min-height:3px}
-.hbar-stack .hs.mother{background:var(--g-acc)} .hbar-stack .hs.modified{background:var(--g-milk)}
+.hbar-stack .hs.mother{background:var(--g-acc)} .hbar-stack .hs.mixed{background:linear-gradient(135deg,#12b877,#5f95ec)} .hbar-stack .hs.modified{background:var(--g-milk)}
 .hbar-lab{font-size:.56rem;font-weight:700;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
 /* ---------------- MODALE / bottom sheet ---------------- */
@@ -410,6 +410,16 @@ input[type=datetime-local].input{color-scheme:light}
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .seg button{padding:15px;border-radius:var(--r3);border:1px solid var(--brd);background:var(--card-2);color:var(--ink-2);font:inherit;font-weight:800;cursor:pointer;transition:.16s;font-size:.84rem}
 .seg button.sel{background:var(--g-milk);color:#fff;border-color:transparent;box-shadow:var(--sh-1)}
+/* Checkboxy rodzaju mleka — mozna zaznaczyc oba (Mieszane) */
+.milkchk{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.mchk{display:flex;align-items:center;justify-content:center;gap:9px;padding:14px;border-radius:var(--r3);border:2px solid var(--brd);background:var(--card-2);color:var(--ink-2);font:inherit;font-weight:800;font-size:.84rem;cursor:pointer;transition:.16s}
+.mchk .mchk-box{width:22px;height:22px;flex:none;border-radius:7px;border:2px solid var(--faint);background:transparent;display:grid;place-items:center;transition:.16s}
+.mchk .mchk-box svg{width:15px;height:15px;color:#fff;opacity:0;transform:scale(.6);transition:.16s}
+.mchk.sel{color:#fff;border-color:transparent;box-shadow:var(--sh-2)}
+.mchk.sel .mchk-box{border-color:rgba(255,255,255,.7);background:rgba(255,255,255,.22)}
+.mchk.sel .mchk-box svg{opacity:1;transform:scale(1)}
+.mchk.mother.sel{background:var(--g-acc)} .mchk.modified.sel{background:var(--g-milk)}
+.mchk:active{transform:scale(.97)}
 .two-in{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .two-in .wrap{position:relative}
 .two-in .wrap span{position:absolute;top:8px;left:14px;font-size:.58rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);pointer-events:none}
@@ -448,7 +458,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
 .bar-col .v{font-size:.68rem;font-weight:800;color:var(--ink-2)}
 .bstack{width:100%;max-width:36px;display:flex;flex-direction:column-reverse;border-radius:9px 9px 4px 4px;overflow:hidden;transition:height .6s cubic-bezier(.3,.9,.3,1)}
-.bseg{width:100%}.bseg.mother{background:var(--g-acc)}.bseg.modified{background:var(--g-milk)}
+.bseg{width:100%}.bseg.mother{background:var(--g-acc)}.bseg.modified{background:var(--g-milk)}.bseg.mixed{background:linear-gradient(135deg,#12b877,#5f95ec)}
 .bar-col .feeds{font-size:.62rem;font-weight:800;color:var(--feed)}
 .bar-col .lab{font-size:.62rem;font-weight:700;color:var(--muted)}
 .dtable{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:8px}
@@ -633,7 +643,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
     <!-- WIDOK: WYKRESY -->
     <section class="statview hidden" id="stat-charts">
       <div class="sec"><h2>Wykresy · 5 dni</h2></div>
-      <div class="chart-legend"><span><span class="dt" style="background:var(--acc)"></span>Mleko matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyfikowane</span><span><span class="dt" style="background:var(--feed)"></span>Karmienia</span></div>
+      <div class="chart-legend"><span><span class="dt" style="background:var(--acc)"></span>Matki</span><span><span class="dt" style="background:linear-gradient(135deg,#12b877,#5f95ec)"></span>Mieszane</span><span><span class="dt" style="background:var(--milk)"></span>Modyfikowane</span><span><span class="dt" style="background:var(--feed)"></span>Karmienia</span></div>
       <div class="bars" id="milkChart"></div>
       <div id="extraTable"></div>
       <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Odstępy karmień — dziś</span></div>
@@ -715,11 +725,14 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
     <p class="hint" id="quickNotice">Karmienie zapisuje czas. Ilość podajesz po dodaniu butelki.</p>
     <button type="button" class="btn milk" id="bottleToggle" style="margin-top:12px"><svg class="bico" viewBox="0 0 24 24" fill="none"><path d="M12 6v12M6 12h12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Dodaj butelkę</button>
     <div class="hidden" id="extraMilkOptions" style="margin-top:12px">
-      <div class="field" id="kindField"><label id="extraTitle">Rodzaj mleka</label>
-        <div class="seg" id="kindRow"><button type="button" id="milkMother" class="sel">Matki</button><button type="button" id="milkModified">Modyfikowane</button></div>
+      <div class="field" id="kindField"><label id="extraTitle">Rodzaj mleka (możesz zaznaczyć oba → Mieszane)</label>
+        <div class="milkchk" id="kindRow">
+          <button type="button" class="mchk mother sel" id="milkMother" aria-pressed="true"><span class="mchk-box"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Matki</button>
+          <button type="button" class="mchk modified" id="milkModified" aria-pressed="false"><span class="mchk-box"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Modyfikowane</button>
+        </div>
       </div>
-      <div class="field" id="mlField"><div class="range-lbl"><label id="bottleLabel" for="milkMl" style="margin:0">Ilość</label><span class="rv" id="milkAmount">30 ml</span></div>
-        <input id="milkMl" type="range" min="10" max="120" value="30">
+      <div class="field" id="mlField"><div class="range-lbl"><label id="bottleLabel" for="milkMl" style="margin:0">Ilość mleka</label><span class="rv" id="milkAmount">60 ml</span></div>
+        <input id="milkMl" type="range" min="20" max="200" step="10" value="60">
       </div>
     </div>
     <div class="btn-row"><button type="submit" class="btn acc" id="saveButton">Zapisz</button><button type="button" class="btn ghost" data-action="cancel-form">Anuluj</button></div>
@@ -743,6 +756,6 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 </div></div>
 
 <div class="toasts" id="toastWrap"></div>
-<script src="app.js?v=20260908b"></script>
+<script src="app.js?v=20260909"></script>
 </body>
 </html>

@@ -81,11 +81,12 @@ final class Domain
     }
 
     /* ------------------------------- Typy wpisow --------------------------------- */
-    public static function isMilkType(string $t): bool { return $t === 'MLEKO' || $t === 'MLEKO_MATKI' || $t === 'MLEKO_MODYFIKOWANE'; }
+    public static function isMilkType(string $t): bool { return $t === 'MLEKO' || $t === 'MLEKO_MATKI' || $t === 'MLEKO_MODYFIKOWANE' || $t === 'MLEKO_MIESZANE'; }
     public static function milkTypeLabel(string $t): string
     {
         if ($t === 'MLEKO_MATKI') return 'MLEKO MATKI';
         if ($t === 'MLEKO_MODYFIKOWANE') return 'MLEKO MODYFIKOWANE';
+        if ($t === 'MLEKO_MIESZANE') return 'MLEKO MIESZANE';
         return 'MLEKO';
     }
 
@@ -214,7 +215,7 @@ final class Domain
     /* --------------------------- Statystyki dnia --------------------------------- */
     private static function emptyDaySummary(): array
     {
-        return ['feedingCount'=>0,'milkCount'=>0,'milkMl'=>0,'motherMilkMl'=>0,'modifiedMilkMl'=>0,
+        return ['feedingCount'=>0,'milkCount'=>0,'milkMl'=>0,'motherMilkMl'=>0,'modifiedMilkMl'=>0,'mixedMilkMl'=>0,
             'piersLeftMin'=>0,'piersRightMin'=>0,'diaperWet'=>0,'diaperDirty'=>0,'pumpingMl'=>0,
             'vitaminD'=>false,'weightG'=>0,'sleepDayMin'=>0,'sleepNightMin'=>0,'napCount'=>0];
     }
@@ -258,7 +259,7 @@ final class Domain
                 if ($e['date'] !== $isoDate) continue;
                 $s = &$stats[$i];
                 if ($e['type'] === 'KARMIENIE') { $s['feedingCount']++; $s['piersLeftMin'] += $e['piersLeft']; $s['piersRightMin'] += $e['piersRight']; }
-                elseif (self::isMilkType($e['type'])) { $s['milkCount']++; $s['milkMl'] += $e['ml']; if ($e['type'] === 'MLEKO_MATKI') $s['motherMilkMl'] += $e['ml']; elseif ($e['type'] === 'MLEKO_MODYFIKOWANE') $s['modifiedMilkMl'] += $e['ml']; }
+                elseif (self::isMilkType($e['type'])) { $s['milkCount']++; $s['milkMl'] += $e['ml']; if ($e['type'] === 'MLEKO_MATKI') $s['motherMilkMl'] += $e['ml']; elseif ($e['type'] === 'MLEKO_MODYFIKOWANE') $s['modifiedMilkMl'] += $e['ml']; elseif ($e['type'] === 'MLEKO_MIESZANE') $s['mixedMilkMl'] += $e['ml']; }
                 elseif ($e['type'] === 'PIELUCHA_MOKRA') $s['diaperWet']++;
                 elseif ($e['type'] === 'PIELUCHA_BRUDNA') $s['diaperDirty']++;
                 elseif ($e['type'] === 'ODCIAGANIE') $s['pumpingMl'] += $e['ml'];

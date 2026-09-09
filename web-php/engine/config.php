@@ -17,9 +17,15 @@ final class Config
     const BIRTH_YEAR = 2026;
 
     // -------------------------------- Formularze -----------------------------------
+    // ML_MIN/ML_MAX/DEFAULT_ML dotyczą ODCIAGANIA (bez zmian).
     const ML_MIN = 10;
     const ML_MAX = 120;
     const DEFAULT_ML = 30;
+    // Osobny zakres dla ILOSCI MLEKA w karmieniu (butelka): 20..200 ml, skok 10, domyslnie 60.
+    const MILK_ML_MIN = 20;
+    const MILK_ML_MAX = 200;
+    const MILK_ML_STEP = 10;
+    const MILK_ML_DEFAULT = 60;
     const WEIGHT_MIN_G = 2000;
     const WEIGHT_MAX_G = 15000;
     const DEFAULT_WEIGHT_G = 3700;

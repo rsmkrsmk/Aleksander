@@ -5,7 +5,7 @@
 'use strict';
 
 const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:null,
-  milkType:'MLEKO_MATKI', bottleOpen:false, pumpMode:false, summaryExtra:0,
+  milkMother:true, milkModified:false, bottleOpen:false, pumpMode:false, summaryExtra:0,
   statView:'summary', histPeriod:'week' };
 const $ = id => document.getElementById(id);
 const MODALS = ['formModal','otherModal','diaperModal'];
@@ -479,13 +479,15 @@ function renderChart(cal){
     const v=document.createElement('div');v.className='v';v.textContent=d.milkMl||'0';
     const stack=document.createElement('div');stack.className='bstack';stack.style.height=((d.milkMl/MAX)*150+4)+'px';
     if(d.motherMilkMl>0){const s=document.createElement('div');s.className='bseg mother';s.style.height=(d.motherMilkMl/Math.max(d.milkMl,1)*100)+'%';s.title=d.motherMilkMl+' ml matki';stack.append(s)}
+    if((d.mixedMilkMl||0)>0){const s=document.createElement('div');s.className='bseg mixed';s.style.height=(d.mixedMilkMl/Math.max(d.milkMl,1)*100)+'%';s.title=d.mixedMilkMl+' ml mieszane';stack.append(s)}
     if(d.modifiedMilkMl>0){const s=document.createElement('div');s.className='bseg modified';s.style.height=(d.modifiedMilkMl/Math.max(d.milkMl,1)*100)+'%';s.title=d.modifiedMilkMl+' ml modyf.';stack.append(s)}
     const lab=document.createElement('div');lab.className='lab';lab.textContent=(d.label||'').split(' - ').pop().slice(0,5);
     const feeds=document.createElement('div');feeds.className='feeds';feeds.textContent='● '+d.feedingCount;
     col.append(v,stack,feeds,lab);host.append(col);
   });
-  let html='<table class="dtable"><tr><th>Dzień</th><th>Karm.</th><th>Matki</th><th>Mod.</th><th>Suma</th></tr>';
-  cal.forEach(d=>{const label=(d.label||'').split(' - ')[0];const suma=(d.motherMilkMl||0)+(d.modifiedMilkMl||0);html+=`<tr><td>${label}</td><td>${d.feedingCount}</td><td>${d.motherMilkMl} ml</td><td>${d.modifiedMilkMl} ml</td><td class="ok">${suma} ml</td></tr>`});
+  const anyMixed=cal.some(d=>(d.mixedMilkMl||0)>0);
+  let html='<table class="dtable"><tr><th>Dzień</th><th>Karm.</th><th>Matki</th><th>Mod.</th>'+(anyMixed?'<th>Miesz.</th>':'')+'<th>Suma</th></tr>';
+  cal.forEach(d=>{const label=(d.label||'').split(' - ')[0];html+=`<tr><td>${label}</td><td>${d.feedingCount}</td><td>${d.motherMilkMl} ml</td><td>${d.modifiedMilkMl} ml</td>`+(anyMixed?`<td>${d.mixedMilkMl||0} ml</td>`:'')+`<td class="ok">${d.milkMl||0} ml</td></tr>`});
   html+='</table>';$('extraTable').innerHTML=html;
 }
 /* Odstępy karmień dziś — renderowane w widoku "Wykresy". */
@@ -593,13 +595,14 @@ async function loadCsvRows(){
 /* Agreguje wiersze CSV do mapy per-dzień z metrykami. */
 function aggregateByDay(rows){
   const days={};
-  const get=d=>days[d]||(days[d]={feeds:0,milkMl:0,motherMl:0,modMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,weightG:0,_sleepStart:null});
+  const get=d=>days[d]||(days[d]={feeds:0,milkMl:0,motherMl:0,modMl:0,mixMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,weightG:0,_sleepStart:null});
   rows.forEach(r=>{
     const d=get(r.date);
     switch(r.type){
       case 'KARMIENIE':d.feeds++;break;
       case 'MLEKO_MATKI':d.milkMl+=r.ml;d.motherMl+=r.ml;break;
       case 'MLEKO_MODYFIKOWANE':d.milkMl+=r.ml;d.modMl+=r.ml;break;
+      case 'MLEKO_MIESZANE':d.milkMl+=r.ml;d.mixMl+=r.ml;break;
       case 'MLEKO':d.milkMl+=r.ml;d.modMl+=r.ml;break;
       case 'PIELUCHA_MOKRA':d.wet++;break;
       case 'PIELUCHA_BRUDNA':d.dirty++;break;
@@ -637,13 +640,13 @@ async function renderHistory(period){
 
   // Agreguj metryki w każdym kubełku
   const B=buckets.map(b=>{
-    let feeds=0,milkMl=0,motherMl=0,modMl=0,wet=0,dirty=0,pump=0,vitD=0,sleepMin=0,activeDays=0,lastWeight=0;
-    b.dates.forEach(d=>{const x=byDay[d];if(!x)return;if(x.feeds||x.milkMl||x.wet||x.dirty)activeDays++;feeds+=x.feeds;milkMl+=x.milkMl;motherMl+=x.motherMl;modMl+=x.modMl;wet+=x.wet;dirty+=x.dirty;pump+=x.pump;vitD+=x.vitD;sleepMin+=x.sleepMin;if(x.weightG)lastWeight=x.weightG});
-    return {sub:b.sub,feeds,milkMl,motherMl,modMl,wet,dirty,pump,vitD,sleepMin,activeDays,lastWeight};
+    let feeds=0,milkMl=0,motherMl=0,modMl=0,mixMl=0,wet=0,dirty=0,pump=0,vitD=0,sleepMin=0,activeDays=0,lastWeight=0;
+    b.dates.forEach(d=>{const x=byDay[d];if(!x)return;if(x.feeds||x.milkMl||x.wet||x.dirty)activeDays++;feeds+=x.feeds;milkMl+=x.milkMl;motherMl+=x.motherMl;modMl+=x.modMl;mixMl+=(x.mixMl||0);wet+=x.wet;dirty+=x.dirty;pump+=x.pump;vitD+=x.vitD;sleepMin+=x.sleepMin;if(x.weightG)lastWeight=x.weightG});
+    return {sub:b.sub,feeds,milkMl,motherMl,modMl,mixMl,wet,dirty,pump,vitD,sleepMin,activeDays,lastWeight};
   });
 
   // Sumy zbiorcze okresu
-  const tot=B.reduce((a,b)=>({feeds:a.feeds+b.feeds,milkMl:a.milkMl+b.milkMl,motherMl:a.motherMl+b.motherMl,modMl:a.modMl+b.modMl,wet:a.wet+b.wet,dirty:a.dirty+b.dirty,pump:a.pump+b.pump,vitD:a.vitD+b.vitD,sleepMin:a.sleepMin+b.sleepMin,activeDays:a.activeDays+b.activeDays}),{feeds:0,milkMl:0,motherMl:0,modMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,activeDays:0});
+  const tot=B.reduce((a,b)=>({feeds:a.feeds+b.feeds,milkMl:a.milkMl+b.milkMl,motherMl:a.motherMl+b.motherMl,modMl:a.modMl+b.modMl,mixMl:a.mixMl+b.mixMl,wet:a.wet+b.wet,dirty:a.dirty+b.dirty,pump:a.pump+b.pump,vitD:a.vitD+b.vitD,sleepMin:a.sleepMin+b.sleepMin,activeDays:a.activeDays+b.activeDays}),{feeds:0,milkMl:0,motherMl:0,modMl:0,mixMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,activeDays:0});
   const dd=Math.max(1,tot.activeDays);
 
   // --- KAFELKI ZBIORCZE ---
@@ -691,15 +694,19 @@ function histBarChart(title,buckets,valFn,cls,unit){
   });
   h+='</div>';wrap.innerHTML=h;return wrap;
 }
-/* Wykres słupkowy ze stosem matki/modyfikowane. */
+/* Wykres słupkowy ze stosem matki/mieszane/modyfikowane. */
 function histStackChart(title,buckets){
   const wrap=document.createElement('section');wrap.className='card hist-chart';wrap.style.marginTop='16px';
   const max=Math.max(1,...buckets.map(b=>b.milkMl));
-  let h=`<div class="eyebrow" style="margin-bottom:6px">${title}</div><div class="chart-legend" style="margin:0 0 12px"><span><span class="dt" style="background:var(--acc)"></span>Matki</span><span><span class="dt" style="background:var(--milk)"></span>Modyf.</span></div><div class="hbars">`;
+  const anyMix=buckets.some(b=>(b.mixMl||0)>0);
+  let h=`<div class="eyebrow" style="margin-bottom:6px">${title}</div><div class="chart-legend" style="margin:0 0 12px"><span><span class="dt" style="background:var(--acc)"></span>Matki</span>`+(anyMix?`<span><span class="dt" style="background:linear-gradient(135deg,#12b877,#5f95ec)"></span>Mieszane</span>`:'')+`<span><span class="dt" style="background:var(--milk)"></span>Modyf.</span></div><div class="hbars">`;
   buckets.forEach(b=>{
     const totH=Math.round(b.milkMl/max*100);
-    const motherPct=b.milkMl?Math.round(b.motherMl/b.milkMl*100):0;
-    h+=`<div class="hbar-col"><div class="hbar-v">${b.milkMl||''}</div><div class="hbar-track"><div class="hbar-stack" style="height:${b.milkMl?Math.max(3,totH):0}%"><div class="hs mother" style="height:${motherPct}%"></div><div class="hs modified" style="height:${100-motherPct}%"></div></div></div><div class="hbar-lab">${b.sub}</div></div>`;
+    const tot=Math.max(b.milkMl,1);
+    const motherPct=Math.round(b.motherMl/tot*100);
+    const mixPct=Math.round((b.mixMl||0)/tot*100);
+    const modPct=Math.max(0,100-motherPct-mixPct);
+    h+=`<div class="hbar-col"><div class="hbar-v">${b.milkMl||''}</div><div class="hbar-track"><div class="hbar-stack" style="height:${b.milkMl?Math.max(3,totH):0}%"><div class="hs mother" style="height:${motherPct}%"></div><div class="hs mixed" style="height:${mixPct}%"></div><div class="hs modified" style="height:${modPct}%"></div></div></div><div class="hbar-lab">${b.sub}</div></div>`;
   });
   h+='</div>';wrap.innerHTML=h;return wrap;
 }
@@ -793,16 +800,28 @@ async function renderWeightChart(){
 /* ============================================================================
    Formularz karmienia / odciągania
    ============================================================================ */
-function setMilkType(t){state.milkType=t;$('milkMother').classList.toggle('sel',t==='MLEKO_MATKI');$('milkModified').classList.toggle('sel',t==='MLEKO_MODYFIKOWANE')}
+/* Rodzaj mleka jako 2 niezalezne checkboxy: mozna zaznaczyc oba (=> Mieszane). */
+function toggleMilkKind(which){
+  if(which==='mother')state.milkMother=!state.milkMother;
+  else state.milkModified=!state.milkModified;
+  refreshMilkKindButtons();
+}
+function refreshMilkKindButtons(){
+  const bm=$('milkMother'),bx=$('milkModified');
+  if(bm){bm.classList.toggle('sel',!!state.milkMother);bm.setAttribute('aria-pressed',state.milkMother?'true':'false')}
+  if(bx){bx.classList.toggle('sel',!!state.milkModified);bx.setAttribute('aria-pressed',state.milkModified?'true':'false')}
+}
 function updateBottle(){const o=state.bottleOpen;$('extraMilkOptions').classList.toggle('hidden',!o);$('bottleToggle').textContent=o?'− Ukryj butelkę':'＋ Dodaj butelkę'}
 function openForm(date){
   state.pumpMode=false;
   ['timeField','nudgeBox','quickNotice','bottleToggle','nursingBox'].forEach(id=>$(id).classList.remove('hidden'));
-  setText('extraTitle','Rodzaj mleka');$('kindField').classList.remove('hidden');$('mlField').querySelector('label').innerHTML='Ilość: <span id="milkAmount">30 ml</span>';
+  setText('extraTitle','Rodzaj mleka (możesz zaznaczyć oba → Mieszane)');$('kindField').classList.remove('hidden');$('mlField').querySelector('label').innerHTML='Ilość mleka';
   setText('formTitle',date?`Karmienie · ${dateLabel(date)}`:'Nowe karmienie');
   $('entryTime').value=date?`${date}T12:00`:dateTimeInput(state.data&&state.data.nowIso);
-  const d=state.data||{};$('milkMl').value=d.defaultMl||30;$('milkMl').min=d.minMl||10;$('milkMl').max=d.maxMl||120;
-  $('piersL').value=0;$('piersR').value=0;state.bottleOpen=false;setMilkType('MLEKO_MATKI');updateBottle();
+  const d=state.data||{};const mn=d.milkMinMl||20,mx=d.milkMaxMl||200,st=d.milkStepMl||10,dv=d.milkDefaultMl||60;
+  $('milkMl').min=mn;$('milkMl').max=mx;$('milkMl').step=st;$('milkMl').value=dv;
+  $('piersL').value=0;$('piersR').value=0;state.bottleOpen=false;
+  state.milkMother=true;state.milkModified=false;refreshMilkKindButtons();updateBottle();
   setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
 }
 function openPumping(){
@@ -810,8 +829,9 @@ function openPumping(){
   ['timeField','nudgeBox','quickNotice','bottleToggle','nursingBox'].forEach(id=>$(id).classList.add('hidden'));
   $('extraMilkOptions').classList.remove('hidden');$('kindField').classList.add('hidden');
   setText('formTitle','Odciąganie mleka');
-  $('mlField').querySelector('label').innerHTML='Ilość: <span id="milkAmount">30 ml</span>';
-  const d=state.data||{};$('milkMl').value=d.defaultMl||30;$('milkMl').min=d.minMl||10;$('milkMl').max=d.maxMl||120;
+  $('mlField').querySelector('label').innerHTML='Ilość';
+  // Odciaganie NIE zmienia sie — uzywa starego zakresu ml (10..120 z minMl/maxMl/defaultMl).
+  const d=state.data||{};$('milkMl').min=d.minMl||10;$('milkMl').max=d.maxMl||120;$('milkMl').step=5;$('milkMl').value=d.defaultMl||30;
   // przywracamy pole czasu dla odciągania (musimy wysłać when)
   $('timeField').classList.remove('hidden');$('nudgeBox').classList.add('hidden');
   $('entryTime').value=dateTimeInput(state.data&&state.data.nowIso);
@@ -877,14 +897,19 @@ document.addEventListener('click',async ev=>{
 /* ---------- Formularz submit ---------- */
 $('milkMl').addEventListener('input',()=>setText('milkAmount',`${$('milkMl').value} ml`));
 $('bottleToggle').addEventListener('click',()=>{state.bottleOpen=!state.bottleOpen;updateBottle()});
-$('milkMother').addEventListener('click',()=>setMilkType('MLEKO_MATKI'));
-$('milkModified').addEventListener('click',()=>setMilkType('MLEKO_MODYFIKOWANE'));
+$('milkMother').addEventListener('click',()=>toggleMilkKind('mother'));
+$('milkModified').addEventListener('click',()=>toggleMilkKind('modified'));
 $('entryForm').addEventListener('submit',async ev=>{
   ev.preventDefault();const n=$('formNotice');n.className='notice';n.textContent='Zapisywanie…';
   try{
     let body;
     if(state.pumpMode){body=new URLSearchParams({type:'ODCIAGANIE',when:$('entryTime').value,ml:$('milkMl').value})}
-    else{const extra=state.bottleOpen;body=new URLSearchParams({type:'KARMIENIE',when:$('entryTime').value,ml:'0',extraMilk:extra?'1':'0',lewaMin:Number($('piersL').value)||0,prawaMin:Number($('piersR').value)||0});if(extra){body.set('milkType',state.milkType);body.set('milkMl',$('milkMl').value)}}
+    else{
+      const extra=state.bottleOpen;
+      if(extra&&!state.milkMother&&!state.milkModified){n.className='notice error';n.textContent='Zaznacz rodzaj mleka (matki i/lub modyfikowane).';return}
+      body=new URLSearchParams({type:'KARMIENIE',when:$('entryTime').value,ml:'0',extraMilk:extra?'1':'0',lewaMin:Number($('piersL').value)||0,prawaMin:Number($('piersR').value)||0});
+      if(extra){body.set('milkMl',$('milkMl').value);body.set('milkMother',state.milkMother?'1':'0');body.set('milkModified',state.milkModified?'1':'0')}
+    }
     const r=await request('/api/entry',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
     n.className='notice ok';n.textContent=r.message||'Zapisano.';toast(state.pumpMode?'Zapisano odciąganie':'Zapisano karmienie');
     await refresh();

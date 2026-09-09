@@ -91,7 +91,7 @@ function handle_api(string $route, string $method, Repository $repo): void
             $calendar[] = [
                 'date' => Domain::dateIso($d), 'label' => Domain::calendarDayTitle($d, $i),
                 'feedingCount' => $s['feedingCount'], 'milkMl' => $s['milkMl'],
-                'motherMilkMl' => $s['motherMilkMl'], 'modifiedMilkMl' => $s['modifiedMilkMl'],
+                'motherMilkMl' => $s['motherMilkMl'], 'modifiedMilkMl' => $s['modifiedMilkMl'], 'mixedMilkMl' => $s['mixedMilkMl'],
                 'piersLeftMin' => $s['piersLeftMin'], 'piersRightMin' => $s['piersRightMin'],
                 'diaperWet' => $s['diaperWet'], 'diaperDirty' => $s['diaperDirty'],
                 'pumpingMl' => $s['pumpingMl'], 'vitaminD' => $s['vitaminD'], 'weightG' => $s['weightG'],
@@ -129,6 +129,8 @@ function handle_api(string $route, string $method, Repository $repo): void
             'sleepTelegram' => $settings['sleepTelegram'],
             'wifi' => true, 'storage' => true, 'dataFileHuge' => false, 'timeValid' => true,
             'minMl' => Config::ML_MIN, 'maxMl' => Config::ML_MAX, 'defaultMl' => Config::DEFAULT_ML,
+            'milkMinMl' => Config::MILK_ML_MIN, 'milkMaxMl' => Config::MILK_ML_MAX,
+            'milkStepMl' => Config::MILK_ML_STEP, 'milkDefaultMl' => Config::MILK_ML_DEFAULT,
             'birthWeightG' => Config::BIRTH_WEIGHT_G, 'lastWeightG' => $latest['lastWeightG'],
             'calendar' => $calendar, 'night' => $nightActive,
             'mdns' => 'karmienie.local', 'undoWindowSec' => 60,
@@ -161,7 +163,7 @@ function handle_api(string $route, string $method, Repository $repo): void
         if ($when === null) sendJson(400, ['message' => 'Nieprawidlowy czas wpisu.']);
 
         if (Domain::isMilkType($type)) {
-            if ($ml < Config::ML_MIN || $ml > Config::ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
+            if ($ml < Config::MILK_ML_MIN || $ml > Config::MILK_ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
             $repo->append($type, $when, $ml);
             sendJson(201, ['message' => 'Wpis mleka zapisany w pamieci urzadzenia.']);
         }
@@ -182,14 +184,27 @@ function handle_api(string $route, string $method, Repository $repo): void
         if ($type !== 'KARMIENIE' || $ml !== 0) sendJson(400, ['message' => 'Karmienie nie wymaga ilosci ml; podaj ja tylko dla Butelki.']);
         $extraMilk = param('extraMilk') === '1'; $milkType = ''; $milkMl = 0;
         if ($extraMilk) {
-            if (param('milkType') === null || param('milkMl') === null) sendJson(400, ['message' => 'Brakuje typu lub ilosci dodatkowego mleka.']);
-            $milkType = (string)param('milkType'); $milkMl = (int)param('milkMl', '0');
-            if (($milkType !== 'MLEKO_MATKI' && $milkType !== 'MLEKO_MODYFIKOWANE') || $milkMl < Config::ML_MIN || $milkMl > Config::ML_MAX) sendJson(400, ['message' => 'Nieprawidlowe dodatkowe mleko.']);
+            if (param('milkMl') === null) sendJson(400, ['message' => 'Brakuje ilosci mleka.']);
+            $milkMl = (int)param('milkMl', '0');
+            if ($milkMl < Config::MILK_ML_MIN || $milkMl > Config::MILK_ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
+            // Nowy format: flagi milkMother/milkModified (mozna obie => MLEKO_MIESZANE).
+            // Wsteczna zgodnosc: gdy brak flag, uzyj milkType (MLEKO_MATKI/MLEKO_MODYFIKOWANE).
+            $mother = param('milkMother') === '1';
+            $modified = param('milkModified') === '1';
+            if (!$mother && !$modified && param('milkType') !== null) {
+                $mt = (string)param('milkType');
+                $mother = ($mt === 'MLEKO_MATKI');
+                $modified = ($mt === 'MLEKO_MODYFIKOWANE');
+            }
+            if (!$mother && !$modified) sendJson(400, ['message' => 'Zaznacz rodzaj mleka (matki i/lub modyfikowane).']);
+            if ($mother && $modified) $milkType = 'MLEKO_MIESZANE';
+            elseif ($mother) $milkType = 'MLEKO_MATKI';
+            else $milkType = 'MLEKO_MODYFIKOWANE';
         }
         $clamp = static fn($v, $lo, $hi) => max($lo, min((int)$v, $hi));
         $repo->append('KARMIENIE', $when, $ml, $clamp(param('lewaMin', '0'), 0, 120), $clamp(param('prawaMin', '0'), 0, 120));
         if ($extraMilk) $repo->append($milkType, $when, $milkMl);
-        sendJson(201, $extraMilk ? ['message' => 'Zapisano karmienie i dodatkowe mleko.'] : ['message' => 'Karmienie zapisane w pamieci urzadzenia.']);
+        sendJson(201, $extraMilk ? ['message' => 'Zapisano karmienie i mleko.'] : ['message' => 'Karmienie zapisane w pamieci urzadzenia.']);
     }
 
     if ($route === 'delete-entry' && $method === 'POST') {
