@@ -82,8 +82,9 @@ bool storageReady = false;
 bool dataFileHuge = false;          // true gdy plik danych przekroczyl prog rotacji (ostrzezenie)
 bool timeIsValid = false;
 bool extraMilkEnabled = false;
-bool extraMilkModified = false;
-int selectedMilkMl = DEFAULT_ML;
+bool milkMotherSel = true;    // rodzaj mleka: matki (mozna razem z modyfikowanym => MIESZANE)
+bool milkModifiedSel = false; // rodzaj mleka: modyfikowane
+int selectedMilkMl = MILK_ML_DEFAULT;
 
 // Minuty karmienia piersią w bieżącym wpisie (lewa/prawa); edytowane przyciskami -5/+5.
 struct PiersControl {
@@ -185,6 +186,7 @@ struct DaySummary {
   int milkMl;
   int motherMilkMl;
   int modifiedMilkMl;
+  int mixedMilkMl;
   int piersLeftMin;
   int piersRightMin;
   int diaperWet;
@@ -307,6 +309,8 @@ lv_obj_t *formMilkMlLabel = nullptr;
 lv_obj_t *formMilkCard = nullptr;
 lv_obj_t *formMilkMatkiButton = nullptr;
 lv_obj_t *formMilkModifiedButton = nullptr;
+lv_obj_t *formMilkMatkiLabel = nullptr;
+lv_obj_t *formMilkModifiedLabel = nullptr;
 lv_obj_t *formBottleToggleButton = nullptr;
 lv_obj_t *formBottleToggleLabel = nullptr;
 lv_obj_t *formSaveButton = nullptr;
@@ -1030,12 +1034,13 @@ bool initialiseStorage() {
 }
 
 bool isMilkType(const String &entryType) {
-  return entryType == "MLEKO" || entryType == "MLEKO_MATKI" || entryType == "MLEKO_MODYFIKOWANE";
+  return entryType == "MLEKO" || entryType == "MLEKO_MATKI" || entryType == "MLEKO_MODYFIKOWANE" || entryType == "MLEKO_MIESZANE";
 }
 
 String milkTypeLabel(const String &entryType) {
   if (entryType == "MLEKO_MATKI") return "MLEKO MATKI";
   if (entryType == "MLEKO_MODYFIKOWANE") return "MLEKO MODYFIKOWANE";
+  if (entryType == "MLEKO_MIESZANE") return "MLEKO MIESZANE";
   return "MLEKO";
 }
 
@@ -1666,6 +1671,7 @@ void refreshDayStats() {
     s.milkMl = 0;
     s.motherMilkMl = 0;
     s.modifiedMilkMl = 0;
+    s.mixedMilkMl = 0;
     s.piersLeftMin = 0;
     s.piersRightMin = 0;
     s.diaperWet = 0;
@@ -1713,6 +1719,7 @@ void refreshDayStats() {
             s.milkMl += entry.ml;
             if (entry.type == "MLEKO_MATKI") s.motherMilkMl += entry.ml;
             else if (entry.type == "MLEKO_MODYFIKOWANE") s.modifiedMilkMl += entry.ml;
+            else if (entry.type == "MLEKO_MIESZANE") s.mixedMilkMl += entry.ml;
           } else if (entry.type == "PIELUCHA_MOKRA") {
             ++s.diaperWet;
           } else if (entry.type == "PIELUCHA_BRUDNA") {
@@ -1751,6 +1758,7 @@ void dayStats(time_t day, DaySummary &out) {
   out.milkMl = 0;
   out.motherMilkMl = 0;
   out.modifiedMilkMl = 0;
+  out.mixedMilkMl = 0;
   out.piersLeftMin = 0;
   out.piersRightMin = 0;
   out.diaperWet = 0;
@@ -1949,6 +1957,10 @@ void handleApiStatus() {
   payload += "\"minMl\":" + String(ML_MIN) + ",";
   payload += "\"maxMl\":" + String(ML_MAX) + ",";
   payload += "\"defaultMl\":" + String(DEFAULT_ML) + ",";
+  payload += "\"milkMinMl\":" + String(MILK_ML_MIN) + ",";
+  payload += "\"milkMaxMl\":" + String(MILK_ML_MAX) + ",";
+  payload += "\"milkStepMl\":" + String(MILK_ML_STEP) + ",";
+  payload += "\"milkDefaultMl\":" + String(MILK_ML_DEFAULT) + ",";
   payload += "\"birthWeightG\":" + String(BIRTH_WEIGHT_G) + ",";
   payload += "\"lastWeightG\":" + String(lastWeightG) + ",";
   payload += "\"calendar\":[";
@@ -1960,6 +1972,7 @@ void handleApiStatus() {
     payload += "{\"date\":\"" + dateIso(day) + "\",\"label\":\"" + jsonEscape(calendarDayTitle(day, i)) +
                "\",\"feedingCount\":" + String(s.feedingCount) + ",\"milkMl\":" + String(s.milkMl) +
                ",\"motherMilkMl\":" + String(s.motherMilkMl) + ",\"modifiedMilkMl\":" + String(s.modifiedMilkMl) +
+               ",\"mixedMilkMl\":" + String(s.mixedMilkMl) +
                ",\"piersLeftMin\":" + String(s.piersLeftMin) + ",\"piersRightMin\":" + String(s.piersRightMin) +
                ",\"diaperWet\":" + String(s.diaperWet) + ",\"diaperDirty\":" + String(s.diaperDirty) +
                ",\"pumpingMl\":" + String(s.pumpingMl) + ",\"vitaminD\":" + String(s.vitaminD ? "true" : "false") +
@@ -2120,7 +2133,7 @@ void handleApiEntry() {
 
   // Zachowuje obsluge starszych, samodzielnych wpisow mleka wysylanych przez poprzednia wersje WWW.
   if (isMilkType(type)) {
-    if (ml < ML_MIN || ml > ML_MAX) {
+    if (ml < MILK_ML_MIN || ml > MILK_ML_MAX) {
       sendJson(400, "{\"message\":\"Nieprawidlowa ilosc mleka.\"}");
       return;
     }
@@ -2178,16 +2191,31 @@ void handleApiEntry() {
   String milkType;
   int milkMl = 0;
   if (extraMilk) {
-    if (!webServer.hasArg("milkType") || !webServer.hasArg("milkMl")) {
-      sendJson(400, "{\"message\":\"Brakuje typu lub ilosci dodatkowego mleka.\"}");
+    if (!webServer.hasArg("milkMl")) {
+      sendJson(400, "{\"message\":\"Brakuje ilosci mleka.\"}");
       return;
     }
-    milkType = webServer.arg("milkType");
     milkMl = webServer.arg("milkMl").toInt();
-    if ((milkType != "MLEKO_MATKI" && milkType != "MLEKO_MODYFIKOWANE") || milkMl < ML_MIN || milkMl > ML_MAX) {
-      sendJson(400, "{\"message\":\"Nieprawidlowe dodatkowe mleko.\"}");
+    if (milkMl < MILK_ML_MIN || milkMl > MILK_ML_MAX) {
+      sendJson(400, "{\"message\":\"Nieprawidlowa ilosc mleka.\"}");
       return;
     }
+    // Nowy format: flagi milkMother/milkModified (mozna obie => MLEKO_MIESZANE).
+    // Wsteczna zgodnosc: gdy brak flag, uzyj starego milkType.
+    bool mother = webServer.hasArg("milkMother") && webServer.arg("milkMother") == "1";
+    bool modified = webServer.hasArg("milkModified") && webServer.arg("milkModified") == "1";
+    if (!mother && !modified && webServer.hasArg("milkType")) {
+      const String mt = webServer.arg("milkType");
+      mother = (mt == "MLEKO_MATKI");
+      modified = (mt == "MLEKO_MODYFIKOWANE");
+    }
+    if (!mother && !modified) {
+      sendJson(400, "{\"message\":\"Zaznacz rodzaj mleka (matki i/lub modyfikowane).\"}");
+      return;
+    }
+    if (mother && modified) milkType = "MLEKO_MIESZANE";
+    else if (mother) milkType = "MLEKO_MATKI";
+    else milkType = "MLEKO_MODYFIKOWANE";
   }
 
   // Minuty karmienia piersią są opcjonalne (0, gdy panel ich nie wysłał).
@@ -2826,7 +2854,7 @@ void createFeedingChartScreen() {
           if (entry.date != iso[d]) continue;
           if (isMilkType(entry.type)) {
             aggMilk[d] += entry.ml;
-            const uint8_t mkind = (entry.type == "MLEKO_MATKI") ? 0 : (entry.type == "MLEKO_MODYFIKOWANE" ? 1 : 2);
+            const uint8_t mkind = (entry.type == "MLEKO_MATKI") ? 0 : (entry.type == "MLEKO_MODYFIKOWANE" ? 1 : (entry.type == "MLEKO_MIESZANE" ? 3 : 2));
             dayEntries[d].push_back({dataIndex, entry.time, 1, entry.ml, 0, 0, mkind});
           } else if (entry.type == "KARMIENIE") {
             ++aggFeed[d];
@@ -2885,7 +2913,7 @@ void createFeedingChartScreen() {
             break;
           }
           case 1: {
-            const char *mkind = (ce.milkKind == 0) ? "MLEKO MATKI" : (ce.milkKind == 1 ? "MLEKO MODYFIKOWANE" : "MLEKO");
+            const char *mkind = (ce.milkKind == 0) ? "MLEKO MATKI" : (ce.milkKind == 1 ? "MLEKO MODYFIKOWANE" : (ce.milkKind == 3 ? "MLEKO MIESZANE" : "MLEKO"));
             display = ce.time + "  " + mkind + "  " + String(ce.ml) + " ml";
             break;
           }
@@ -3674,8 +3702,11 @@ void counterAlarmTickCb(lv_timer_t *timer) {
 // ---------------------------------- Formularz -----------------------------------
 void updateMilkTypeButtons() {
   if (!formMilkMatkiButton || !formMilkModifiedButton) return;
-  lv_obj_set_style_bg_color(formMilkMatkiButton, extraMilkModified ? COLOR_MUTED : COLOR_GREEN, 0);
-  lv_obj_set_style_bg_color(formMilkModifiedButton, extraMilkModified ? COLOR_ORANGE : COLOR_MUTED, 0);
+  // Checkboxy: zaznaczony = pelny kolor rodzaju, odznaczony = szary. Mozna zaznaczyc oba.
+  lv_obj_set_style_bg_color(formMilkMatkiButton, milkMotherSel ? COLOR_GREEN : COLOR_MUTED, 0);
+  lv_obj_set_style_bg_color(formMilkModifiedButton, milkModifiedSel ? COLOR_BLUE : COLOR_MUTED, 0);
+  if (formMilkMatkiLabel) lv_label_set_text(formMilkMatkiLabel, milkMotherSel ? "[v] MATKI" : "MATKI");
+  if (formMilkModifiedLabel) lv_label_set_text(formMilkModifiedLabel, milkModifiedSel ? "[v] MODYFIKOWANE" : "MODYFIKOWANE");
 }
 
 void updateExtraMilkVisibility() {
@@ -3719,17 +3750,17 @@ void plus5Event(lv_event_t *event) {
 
 void milkSliderEvent(lv_event_t *event) {
   lv_obj_t *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
-  // Skok co 5 ml (5, 10, 15, ... 120).
+  // Skok co MILK_ML_STEP (20, 30, ... 200).
   const int raw = lv_slider_get_value(slider);
-  int snapped = ((raw + 2) / 5) * 5;
-  snapped = constrain(snapped, ML_MIN, ML_MAX);
+  int snapped = ((raw + MILK_ML_STEP / 2) / MILK_ML_STEP) * MILK_ML_STEP;
+  snapped = constrain(snapped, MILK_ML_MIN, MILK_ML_MAX);
   lv_slider_set_value(slider, snapped, LV_ANIM_OFF);
   selectedMilkMl = snapped;
   updateFormValues();
 }
 
 void milkMatkiEvent(lv_event_t *event) {
-  extraMilkModified = false;
+  milkMotherSel = !milkMotherSel;   // niezalezny przelacznik (mozna oba => MIESZANE)
   updateMilkTypeButtons();
 }
 
@@ -3743,7 +3774,7 @@ void piersStepEvent(lv_event_t *event) {
 }
 
 void milkModifiedEvent(lv_event_t *event) {
-  extraMilkModified = true;
+  milkModifiedSel = !milkModifiedSel;   // niezalezny przelacznik (mozna oba => MIESZANE)
   updateMilkTypeButtons();
 }
 
@@ -3771,7 +3802,9 @@ void performSaveForm() {
     return;
   }
   if (extraMilkEnabled) {
-    const char *milkType = extraMilkModified ? "MLEKO_MODYFIKOWANE" : "MLEKO_MATKI";
+    // Oba zaznaczone => MIESZANE; jeden => odpowiedni rodzaj.
+    const char *milkType = (milkMotherSel && milkModifiedSel) ? "MLEKO_MIESZANE"
+                          : (milkModifiedSel ? "MLEKO_MODYFIKOWANE" : "MLEKO_MATKI");
     if (!appendEntry(milkType, selectedEntryTime, selectedMilkMl)) {
       lv_label_set_text(formStatusLabel, "Karmienie zapisane, ale blad zapisu mleka.");
       lv_obj_set_style_text_color(formStatusLabel, COLOR_RED, 0);
@@ -3821,6 +3854,12 @@ void saveFormEvent(lv_event_t *event) {
     lv_obj_set_style_text_color(formStatusLabel, COLOR_RED, 0);
     return;
   }
+  // Gdy butelka rozwinieta — musi byc zaznaczony co najmniej jeden rodzaj mleka.
+  if (extraMilkEnabled && !milkMotherSel && !milkModifiedSel) {
+    lv_label_set_text(formStatusLabel, "Zaznacz rodzaj mleka (matki i/lub modyfikowane).");
+    lv_obj_set_style_text_color(formStatusLabel, COLOR_RED, 0);
+    return;
+  }
 
   showFormConfirm();
 }
@@ -3832,6 +3871,8 @@ void createFormScreen() {
   formMilkCard = nullptr;
   formMilkMatkiButton = nullptr;
   formMilkModifiedButton = nullptr;
+  formMilkMatkiLabel = nullptr;
+  formMilkModifiedLabel = nullptr;
   formBottleToggleButton = nullptr;
   formBottleToggleLabel = nullptr;
   formSaveButton = nullptr;
@@ -3900,19 +3941,21 @@ void createFormScreen() {
   lv_obj_t *milkSlider = lv_slider_create(formMilkCard);
   lv_obj_set_pos(milkSlider, 8, 46);
   lv_obj_set_size(milkSlider, 412, 10);
-  lv_slider_set_range(milkSlider, ML_MIN, ML_MAX);
+  lv_slider_set_range(milkSlider, MILK_ML_MIN, MILK_ML_MAX);
   lv_slider_set_value(milkSlider, selectedMilkMl, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(milkSlider, COLOR_BORDER, LV_PART_MAIN);
   lv_obj_set_style_bg_color(milkSlider, COLOR_ORANGE, LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(milkSlider, COLOR_ORANGE, LV_PART_KNOB);
   lv_obj_add_event_cb(milkSlider, milkSliderEvent, LV_EVENT_VALUE_CHANGED, nullptr);
-  createLabel(formMilkCard, "10 ML", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 8, 54);
-  createLabel(formMilkCard, "120 ML", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -8, 54);
+  createLabel(formMilkCard, "20 ML", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 8, 54);
+  createLabel(formMilkCard, "200 ML", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -8, 54);
   // Rzad przyciskow w obszarze wewn. karty (428 px). Szer. 196, odstep 20, marginesy 8:
   // MATKI x=8..204, MODYFIKOWANE x=224..420 — z zapasem ~8 px do brzegu (na cien przyciskow).
   formMilkMatkiButton = createButton(formMilkCard, "MATKI", 8, 80, 196, 34, COLOR_GREEN);
+  formMilkMatkiLabel = lv_obj_get_child(formMilkMatkiButton, 0);
   lv_obj_add_event_cb(formMilkMatkiButton, milkMatkiEvent, LV_EVENT_CLICKED, nullptr);
-  formMilkModifiedButton = createButton(formMilkCard, "MODYFIKOWANE", 224, 80, 196, 34, COLOR_ORANGE);
+  formMilkModifiedButton = createButton(formMilkCard, "MODYFIKOWANE", 224, 80, 196, 34, COLOR_BLUE);
+  formMilkModifiedLabel = lv_obj_get_child(formMilkModifiedButton, 0);
   lv_obj_add_event_cb(formMilkModifiedButton, milkModifiedEvent, LV_EVENT_CLICKED, nullptr);
 
   formStatusLabel = createLabel(formScreen, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 25, 384);
@@ -3930,9 +3973,10 @@ void createFormScreen() {
 
 void openEntryForm() {
   formReturnToCalendar = false;
-  selectedMilkMl = DEFAULT_ML;
+  selectedMilkMl = MILK_ML_DEFAULT;
   extraMilkEnabled = false;
-  extraMilkModified = false;
+  milkMotherSel = true;
+  milkModifiedSel = false;
   piersLeftCtl.value = 0;
   piersRightCtl.value = 0;
   selectedEntryTime = time(nullptr);
@@ -3942,9 +3986,10 @@ void openEntryForm() {
 void openEntryFormForDay(time_t day) {
   formReturnToCalendar = true;
   selectedCalendarDay = beginningOfDay(day);
-  selectedMilkMl = DEFAULT_ML;
+  selectedMilkMl = MILK_ML_DEFAULT;
   extraMilkEnabled = false;
-  extraMilkModified = false;
+  milkMotherSel = true;
+  milkModifiedSel = false;
   piersLeftCtl.value = 0;
   piersRightCtl.value = 0;
 

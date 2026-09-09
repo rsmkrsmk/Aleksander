@@ -13,9 +13,15 @@ constexpr int BIRTH_MONTH = 8;
 constexpr int BIRTH_YEAR = 2026;
 
 // -------------------------------- Formularze -----------------------------------
+// ML_MIN/ML_MAX/DEFAULT_ML dotycza ODCIAGANIA (bez zmian).
 constexpr int ML_MIN = 10;
 constexpr int ML_MAX = 120;
 constexpr int DEFAULT_ML = 30;
+// Osobny zakres dla ILOSCI MLEKA w karmieniu (butelka): 20..200 ml, skok 10, domyslnie 60.
+constexpr int MILK_ML_MIN = 20;
+constexpr int MILK_ML_MAX = 200;
+constexpr int MILK_ML_STEP = 10;
+constexpr int MILK_ML_DEFAULT = 60;
 // Zakres wagi dziecka w gramach (ekran WAGA i walidacja API). Domyslnie 3700 g.
 constexpr int WEIGHT_MIN_G = 2000;
 constexpr int WEIGHT_MAX_G = 15000;
