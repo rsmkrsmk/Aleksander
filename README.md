@@ -169,6 +169,12 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
 
 Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
 
+### Stabilność: odzyskanie RAM wewnętrznego (restart przy ładowaniu strony WWW)
+- **Naprawiło:** restart urządzenia przy pierwszym wejściu na stronę WWW serwowaną z urządzenia. Przyczyną był skrajnie niski wolny **RAM wewnętrzny** (~20 KB) — serwer WWW działa na tym samym zadaniu co LVGL i współdzieli deficytowy heap z Wi‑Fi/TLS/LVGL, więc obsługa żądania (streaming strony + budowa odpowiedzi API) przepychała pamięć za granicę → panic.
+- **Zmieniło:** `bounce_buffer_size_px` panelu RGB z 80 na **40 linii** — bufory bounce DMA żyją w RAM wewnętrznym, więc odzyskuje to ~**75 KB** (ze 150 KB do 75 KB). Ochroną przed dryfem obrazu pozostaje restart DMA panelu przy każdym VSYNC, więc mniejszy bounce jest bezpieczny.
+- **Zmieniło:** `handleApiEntries` buduje odpowiedź **strumieniowo** (jak `handleApiWeightSeries`) zamiast alokować jeden duży `String` (dawniej rezerwacja 4 KB); rezerwacja w `handleApiStatus` zmniejszona do 2560 B.
+- **Dodało:** zabezpieczenie `httpBailIfLowMemory()` — ciężkie handlery (`/`, `/api/status`, `/api/entries`, `/api/weight-series`) przy zbyt niskim wolnym RAM wewn. zwracają **503** zamiast ryzykować panic; zdarzenie jest logowane na Serial.
+
 ### Edycja wpisu karmienia (mleko + godzina)
 - **Dodało:** możliwość **edycji istniejącego karmienia** w panelu WWW hostingu oraz na stronie serwowanej przez urządzenie — przycisk edycji (✎) przy każdym karmieniu w dzienniku dnia. Można dodać mleko do karmienia bez mleka, zmienić rodzaj (w tym `MLEKO_MIESZANE`) i ilość, usunąć mleko oraz zmienić godzinę.
 - **Dodało:** endpoint `POST /api/update-feeding` (firmware urządzenia i silnik panelu) — parametry `feedLine`, `when`, oraz `milkMother`/`milkModified`/`milkMl` albo `milkRemove=1`; zaznaczenie obu rodzajów zapisuje `MLEKO_MIESZANE`; walidacja ilości w zakresie 20–200 ml.

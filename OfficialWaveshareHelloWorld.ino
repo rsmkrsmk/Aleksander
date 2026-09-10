@@ -269,6 +269,11 @@ static int cpuLoadPct = 0;
 // WATCHDOG_TIMEOUT_S, ESP32 wykonuje kontrolowany restart (zamiast wisiec).
 constexpr uint32_t WATCHDOG_TIMEOUT_S = 30;
 bool watchdogReady = false;
+// Prog bezpieczenstwa wolnego RAM WEWNETRZNEGO dla ciezkich zadan HTTP. Serwer WWW
+// dziala na tasku loop/LVGL i wspoldzieli deficytowy heap wewn. z Wi-Fi/TLS/LVGL.
+// Gdy wolny heap wewn. spadnie ponizej progu, ciezkie handlery zwracaja 503 zamiast
+// probowac alokacji, ktora moglaby wywolac panic/restart (obserwowane przy ~20 KB).
+constexpr uint32_t HTTP_MIN_FREE_INTERNAL_B = 24 * 1024;
 // Liczniki przetrwaja miekki restart (RTC slow memory nie jest zerowane przy reboot).
 RTC_NOINIT_ATTR uint32_t bootCount;          // ile razy urzadzenie sie uruchomilo
 RTC_NOINIT_ATTR uint32_t watchdogResetCount; // ile razy zresetowal watchdog (TG*WDT)
@@ -448,6 +453,7 @@ void weightSaveEvent(lv_event_t *event);
 void weightStepEvent(lv_event_t *event);
 
 void startWebServer();
+bool httpBailIfLowMemory();
 void handleWebRoot();
 void handleApiStatus();
 void handleApiEntries();
@@ -750,14 +756,18 @@ bool initialiseNativeRgbPanel() {
   // do niewidocznego bufora, esp_lcd przelacza je bez kopiowania i bez tearingu.
   config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
-  // 80 linii × 480 = 38400 pikseli; 230400 / 38400 = 6 (calkowite).
-  // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × 80 × 480 × 2 = 150 KB.
-  // Zostawiamy 80 linii (a nie wiecej): bounce zajmuje deficytowy RAM wewnetrzny
-  // wspoldzielony z Wi-Fi/TLS/LVGL/stosami zadan, a glownym zabezpieczeniem przed
-  // DRYFEM obrazu jest teraz restart DMA panelu przy kazdym VSYNC (rgbVsyncCallback) —
-  // wiec nie ryzykujemy braku RAM. Liczba linii musi dzielic 230400 bez reszty
-  // (dozwolone m.in. 48/60/80/96/120 linii).
-  config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
+  // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × linie × 480 × 2 B.
+  //   80 linii => 2 × 80 × 480 × 2 = 150 KB (poprzednia wartosc — za duzo)
+  //   40 linii => 2 × 40 × 480 × 2 =  75 KB (obecnie: odzyskujemy ~75 KB RAM wewn.)
+  // POWOD ZMIANY: RAM wewnetrzny jest deficytowy i wspoldzielony z Wi-Fi/TLS/LVGL/
+  // stosami zadan oraz serwerem WWW (dziala na tasku loop/LVGL). Przy 80 liniach po
+  // starcie Wi-Fi zostawalo tylko ~20 KB wolnego heapu wewn., przez co pierwsze
+  // zadanie HTTP (streaming strony + rezerwacje String w API) przepychalo heap za
+  // granice -> panic/restart. Glownym zabezpieczeniem przed DRYFEM obrazu jest i tak
+  // restart DMA panelu przy kazdym VSYNC (rgbVsyncCallback), a NIE rozmiar bounce —
+  // dlatego mozemy bezpiecznie zejsc do 40 linii. Liczba linii musi dzielic 230400
+  // bez reszty (40 dzieli: 230400 / (480×40) = 12; dozwolone tez 48/60/80/96/120).
+  config.bounce_buffer_size_px = SCREEN_WIDTH * 40;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
   // Nie zwiekszamy: glowna bronia przeciw artefaktom jest wiekszy bounce buffer,
@@ -2037,8 +2047,23 @@ void sendJson(int statusCode, const String &payload) {
   webServer.send(statusCode, "application/json; charset=utf-8", payload);
 }
 
+// Zabezpieczenie przed brakiem RAM wewnetrznego przy ciezkich zadaniach HTTP.
+// Zwraca true (i wysyla 503) gdy wolnego heapu wewn. jest za malo, by bezpiecznie
+// zbudowac/wystreamowac odpowiedz — lepiej odmowic obslugi niz zaryzykowac panic.
+bool httpBailIfLowMemory() {
+  const uint32_t freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (freeInt < HTTP_MIN_FREE_INTERNAL_B) {
+    Serial.printf("HTTP: za malo RAM wewn. (%u B < %u B) — odpowiedz 503.\n",
+                  static_cast<unsigned>(freeInt), static_cast<unsigned>(HTTP_MIN_FREE_INTERNAL_B));
+    sendJson(503, "{\"message\":\"Urzadzenie chwilowo zajete (malo pamieci). Sprobuj ponownie.\"}");
+    return true;
+  }
+  return false;
+}
+
 void handleWebRoot() {
   Serial.println("HTTP: obsluga /");
+  if (httpBailIfLowMemory()) return;
   // Wysylamy PROGMEM partiami, aby nie alokowac 32 KB Stringa.
   webServer.sendHeader("Cache-Control", "no-store, max-age=0");
   webServer.setContentLength(strlen_P(WEB_APP_HTML));
@@ -2058,12 +2083,14 @@ void handleWebRoot() {
 }
 
 void handleApiStatus() {
+  if (httpBailIfLowMemory()) return;
   const time_t now = time(nullptr);
   String payload;
   // Realny rozmiar to ~1.8-2.2 KB (5 dni kalendarza + status + sysinfo). Rezerwacja
-  // 2560 B pokrywa go z zapasem bez wczesniejszego blokowania 6.5 KB przy kazdym
-  // pollingu co 10 s. Jedna rezerwacja = brak serii realloc-ow fragmentujacych RAM.
-  payload.reserve(3072);
+  // 2560 B pokrywa go z zapasem bez wczesniejszego blokowania przy kazdym pollingu
+  // co 10 s. Jedna rezerwacja = brak serii realloc-ow fragmentujacych RAM wewn.
+  // (wspoldzielony z Wi-Fi/TLS/LVGL/serwerem WWW — patrz bounce_buffer_size_px).
+  payload.reserve(2560);
   payload = "{";
   payload += "\"now\":\"" + jsonEscape(timeIsValid ? formatDateTime(now) : "Brak potwierdzonego czasu") + "\",";
   payload += "\"nowIso\":\"" + jsonEscape(webDateTime(now)) + "\",";
@@ -2166,6 +2193,7 @@ void handleApiStatus() {
 }
 
 void handleApiEntries() {
+  if (httpBailIfLowMemory()) return;
   if (!webServer.hasArg("date")) {
     sendJson(400, "{\"message\":\"Brakuje daty.\"}");
     return;
@@ -2186,11 +2214,15 @@ void handleApiEntries() {
     return;
   }
   const String targetDate = dateIso(day);
-  String payload;
-  // Rezerwacja z gory: typowy dzien ma kilkanascie wpisow po ~140 B JSON. 4 KB
-  // pokrywa to z zapasem i eliminuje serie realloc-ow fragmentujacych heap wewn.
-  payload.reserve(4096);
-  payload = "{\"date\":\"" + targetDate + "\",\"entries\":[";
+  // Budowa STRUMIENIOWA (jak handleApiWeightSeries): zamiast alokowac jeden duzy
+  // String (dawniej reserve 4 KB) na deficytowym RAM wewnetrznym, wysylamy odpowiedz
+  // partiami. Kazdy wpis to maly, krotkotrwaly String (~140 B), a nie rosnacy bufor —
+  // eliminuje chwilowy skok heapu przy dniu z wieloma wpisami (wspoldzielimy heap
+  // wewn. z Wi-Fi/TLS/LVGL/serwerem WWW, patrz komentarz przy bounce_buffer_size_px).
+  webServer.sendHeader("Cache-Control", "no-store, max-age=0");
+  webServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  webServer.send(200, "application/json; charset=utf-8", "");
+  webServer.sendContent("{\"date\":\"" + targetDate + "\",\"entries\":[");
   bool firstEntry = true;
   int dataIndex = 0;
   file.readStringUntil('\n');
@@ -2201,16 +2233,17 @@ void handleApiEntries() {
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) { ++dataIndex; continue; }
     if (!entry.date.startsWith(targetDate)) { ++dataIndex; continue; }
-    if (!firstEntry) payload += ',';
+    String obj = firstEntry ? "" : ",";
     firstEntry = false;
-    payload += "{\"time\":\"" + jsonEscape(entry.time) + "\",\"type\":\"" + jsonEscape(entry.type) + "\",\"label\":\"" + jsonEscape(isMilkType(entry.type) ? milkTypeLabel(entry.type) : entry.type) + "\",\"ml\":" + String(entry.ml) +
-               ",\"piersLeftMin\":" + String(entry.piersLeft) + ",\"piersRightMin\":" + String(entry.piersRight) +
-               ",\"lineIndex\":" + String(dataIndex) + "}";
+    obj += "{\"time\":\"" + jsonEscape(entry.time) + "\",\"type\":\"" + jsonEscape(entry.type) + "\",\"label\":\"" + jsonEscape(isMilkType(entry.type) ? milkTypeLabel(entry.type) : entry.type) + "\",\"ml\":" + String(entry.ml) +
+           ",\"piersLeftMin\":" + String(entry.piersLeft) + ",\"piersRightMin\":" + String(entry.piersRight) +
+           ",\"lineIndex\":" + String(dataIndex) + "}";
+    webServer.sendContent(obj);
     ++dataIndex;
   }
   file.close();
-  payload += "]}";
-  sendJson(200, payload);
+  webServer.sendContent("]}");
+  webServer.sendContent("");
 }
 
 // Dzien zycia (0 = dzien urodzenia) dla podanej daty CSV "RRRR-MM-DD".
@@ -2236,6 +2269,7 @@ long dayOfLifeForDate(const String &isoDate) {
 // Seria pomiarow wagi do wykresu w panelu WWW: [{day, date, g}] po dniu zycia.
 // Jeden przebieg pliku, budowa strumieniowa (bez trzymania calego CSV w RAM).
 void handleApiWeightSeries() {
+  if (httpBailIfLowMemory()) return;
   if (!storageReady) {
     sendJson(503, "{\"message\":\"Pamiec wewnetrzna jest niedostepna.\"}");
     return;
