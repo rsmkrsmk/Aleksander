@@ -73,6 +73,15 @@ Obsługiwane typy wpisów: `KARMIENIE`, `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `ML
 
 **Butelka — rodzaj i ilość:** w formularzu karmienia (urządzenie i WWW) rodzaj mleka wybiera się dwoma niezależnymi przełącznikami **Matki** / **Modyfikowane**. Można zaznaczyć jeden lub **oba naraz** — zaznaczenie obu zapisuje jeden wpis `MLEKO_MIESZANE`. Ilość podaje wspólny suwak **20–200 ml, skok 10 ml (domyślnie 60)**. W raportach mleko rozbite jest na trzy kategorie: Matki / Mieszane / Modyfikowane; najważniejsza pozostaje łączna ilość ml. (Odciąganie ma osobny, niezmieniony zakres.)
 
+**Edycja wpisu karmienia:** przy każdym karmieniu w dzienniku dnia (panel WWW hostingu oraz strona serwowana przez urządzenie) obok przycisku usuwania jest przycisk edycji (✎). Otwiera on formularz z wypełnionymi wartościami, w którym można:
+
+- **dodać mleko** do karmienia, które go nie miało (rozwiń **SZCZEGÓŁY**, wybierz rodzaj i ilość),
+- **zmienić rodzaj/ilość** już zapisanego mleka (w tym przełączyć na `MLEKO_MIESZANE`, zaznaczając oba rodzaje),
+- **usunąć mleko** z karmienia (przycisk **Usuń mleko**, karmienie pozostaje),
+- **zmienić godzinę** karmienia (przesuwa oba sparowane wiersze).
+
+Edycja jest wykonywana **w miejscu** — wiersze nie zmieniają swojej pozycji w pliku (żaden wpis nie „przeskakuje” na koniec). Minuty karmienia piersią pozostają bez zmian. Karmienie i jego mleko to fizycznie dwa wiersze CSV o tej samej godzinie; przy dodawaniu mleka do karmienia bez mleka nowy wiersz `MLEKO_*` jest wstawiany bezpośrednio za wierszem `KARMIENIE`.
+
 Dane pozostają w wewnętrznej pamięci Flash również po zwykłym wyłączeniu urządzenia. Należy jednak zachować ostrożność przy wgrywaniu nowego szkicu lub zmianie ustawień partycji Flash: operacja wymazania Flash może usunąć historię. Cały plik można wyeksportować z panelu WWW (`/export.csv`) oraz zaimportować z powrotem (import robi najpierw kopię bezpieczeństwa). Gdy plik przekroczy 256 KB, urządzenie tworzy jednorazowo kopię archiwalną i sygnalizuje to w diagnostyce (dane nie są usuwane).
 
 ## Konfiguracja Wi‑Fi i daty urodzenia
@@ -128,6 +137,7 @@ Pełny opis ekranów i formatu danych znajduje się w `PROJECT_DESIGN.md`.
 | Panel WWW | Kopie wszystkich widoków jako popupy (w tym **SEN**); eksport CSV (`/export.csv`); import CSV; polling co 10 s |
 | Motyw nocny | 21:00–7:00 ciemna paleta + przyciemnione podświetlenie (na urządzeniu i w WWW) |
 | Cofnij | Bezpieczne, atomowe usunięcie ostatniego wpisu (urządzenie i WWW) |
+| **Edycja karmienia** | Zmiana mleka (dodanie / rodzaj / ilość / usunięcie) i godziny istniejącego karmienia **w miejscu**, bez zmiany kolejności wierszy w CSV. Dostępna w panelu WWW i na stronie serwowanej przez urządzenie (przycisk ✎ przy karmieniu). Endpoint `POST /api/update-feeding` (`feedLine`, `when`, oraz `milkMother`/`milkModified`/`milkMl` albo `milkRemove=1`). Po zapisie uruchamia synchronizację z hostingiem |
 | Backup | Automatyczna dzienna kopia `/karmienia_backup.csv`; miękka rotacja (archiwum) po przekroczeniu 256 KB |
 | **Synchronizacja z panelem WWW** | Po **każdej zmianie danych** (dodanie/edycja/usunięcie/import) urządzenie wysyła cały plik CSV na hosting: `POST` multipart do `PANEL_UPLOAD_URL` (`/api/upload-data`). Panel robi kopię `RRRR-MM-DD-GG-MM-SS.bakap` i podmienia dane. **Urządzenie pozostaje źródłem prawdy — hosting jest lustrem** (nadpisywanym przy kolejnej zmianie). Wysyłka w tle (rdzeń 0, nie blokuje UI), łączenie serii zmian (min. 15 s odstępu), ponowienie po błędzie. Włącznik `FEATURE_HOST_SYNC` w `config.h`. **Obecnie BEZ tokena (rozwiązanie testowe)** — patrz „Znane długi / TODO” |
 | Telegram | Powiadomienia o wpisach do drugiego rodzica — uzupełnij `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID` w `config.h` (puste = wyłączone). Wysyłka w osobnym zadaniu (nie blokuje UI) |
@@ -158,6 +168,12 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
 ## Historia zmian
 
 Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
+
+### Edycja wpisu karmienia (mleko + godzina)
+- **Dodało:** możliwość **edycji istniejącego karmienia** w panelu WWW hostingu oraz na stronie serwowanej przez urządzenie — przycisk edycji (✎) przy każdym karmieniu w dzienniku dnia. Można dodać mleko do karmienia bez mleka, zmienić rodzaj (w tym `MLEKO_MIESZANE`) i ilość, usunąć mleko oraz zmienić godzinę.
+- **Dodało:** endpoint `POST /api/update-feeding` (firmware urządzenia i silnik panelu) — parametry `feedLine`, `when`, oraz `milkMother`/`milkModified`/`milkMl` albo `milkRemove=1`; zaznaczenie obu rodzajów zapisuje `MLEKO_MIESZANE`; walidacja ilości w zakresie 20–200 ml.
+- **Zmieniło:** edycja jest wykonywana **w miejscu** — wiersze CSV zachowują swoją pozycję (żaden wpis nie przenosi się na koniec pliku). Minuty karmienia piersią pozostają bez zmian. Przy dodawaniu mleka do karmienia bez mleka wiersz `MLEKO_*` trafia bezpośrednio za wierszem `KARMIENIE`. Po zapisie dane są synchronizowane z hostingiem.
+- **Uwaga:** fizyczny ekran LVGL urządzenia nie ma edycji — funkcja jest dostępna wyłącznie w interfejsach WWW (świadoma decyzja).
 
 ### Wygaszacz — przebudowa karty zegara (PR #17)
 - **Zmieniło:** układ karty zegara na wygaszaczu na dwukolumnowy — zegar (mniejsza czcionka) z datą i dniem tygodnia pod spodem po lewej; po prawej dwa wiersze: ostatnie karmienie i osobny wiersz o drzemce.
