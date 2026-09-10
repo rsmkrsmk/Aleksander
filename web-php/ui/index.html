@@ -380,7 +380,7 @@ body.modal-open{overflow:hidden}
 .tl-row.diaper .tl-node{width:12px;height:12px;background:var(--diaper);box-shadow:0 0 0 2px var(--diaper);margin-top:14px}
 .tl-row.other .tl-node{width:12px;height:12px;background:var(--muted);box-shadow:0 0 0 2px var(--muted);margin-top:14px}
 .tl-row.sleep .tl-node{width:12px;height:12px;background:var(--sleep);box-shadow:0 0 0 2px var(--sleep);margin-top:14px}
-.tl-card{margin:5px 0;background:var(--card-2);border:1px solid var(--brd);border-radius:var(--r3);padding:10px 13px;display:flex;align-items:center;gap:10px;min-width:0;transition:transform .14s}
+.tl-card{margin:5px 0;background:var(--card-2);border:1px solid var(--brd);border-radius:var(--r3);padding:10px 11px;display:flex;align-items:center;gap:8px;min-width:0;transition:transform .14s}
 .tl-card:active{transform:scale(.99)}
 .tl-ic{width:30px;height:30px;flex:none;border-radius:9px;display:grid;place-items:center;color:#fff}
 .tl-ic svg{width:16px;height:16px}
@@ -388,9 +388,12 @@ body.modal-open{overflow:hidden}
 .tl-main{flex:1;min-width:0}
 .tl-t{font-weight:800;font-size:.85rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tl-s{font-size:.71rem;color:var(--muted);font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tl-gap{font-size:.64rem;font-weight:700;color:var(--faint);white-space:nowrap;flex:none}
+.tl-gap{font-size:.62rem;font-weight:700;color:var(--faint);white-space:nowrap;flex:none}
+@media(max-width:430px){.tl-gap{display:none}}
 .tl-del{width:28px;height:28px;flex:none;border-radius:8px;border:1px solid var(--brd);background:transparent;color:var(--faint);cursor:pointer;display:grid;place-items:center;transition:.16s}
 .tl-del:hover{background:var(--danger);color:#fff;border-color:var(--danger)} .tl-del svg{width:14px;height:14px}
+.tl-edit{width:28px;height:28px;flex:none;border-radius:8px;border:1px solid var(--brd);background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:.16s;margin-right:4px}
+.tl-edit:hover{background:var(--acc);color:#fff;border-color:var(--acc)} .tl-edit svg{width:15px;height:15px}
 .tl-sleepband{margin:5px 0 5px 74px;padding:9px 13px;border-radius:var(--r3);background:color-mix(in srgb,var(--sleep) 13%,transparent);border:1px dashed color-mix(in srgb,var(--sleep) 40%,transparent);font-size:.76rem;font-weight:700;color:var(--sleep);display:flex;align-items:center;gap:8px}
 .tl-sleepband svg{width:15px;height:15px;flex:none}
 .empty{text-align:center;color:var(--muted);padding:24px;font-weight:600}
@@ -734,6 +737,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
       <div class="field" id="mlField"><div class="range-lbl"><label id="bottleLabel" for="milkMl" style="margin:0">Ilość mleka</label><span class="rv" id="milkAmount">60 ml</span></div>
         <input id="milkMl" type="range" min="20" max="200" step="10" value="60">
       </div>
+      <button type="button" class="btn ghost hidden" id="milkRemoveBtn" data-action="milk-remove" style="margin-top:6px">Usuń mleko z tego karmienia</button>
     </div>
     <div class="btn-row"><button type="submit" class="btn acc" id="saveButton">Zapisz</button><button type="button" class="btn ghost" data-action="cancel-form">Anuluj</button></div>
     <p class="notice" id="formNotice"></p>
@@ -756,6 +760,6 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 </div></div>
 
 <div class="toasts" id="toastWrap"></div>
-<script src="app.js?v=20260909"></script>
+<script src="app.js?v=20260910"></script>
 </body>
 </html>

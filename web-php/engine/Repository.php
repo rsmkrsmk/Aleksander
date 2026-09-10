@@ -21,6 +21,18 @@ interface Repository
     /** Usuwa wpis po lineIndex. Zwraca ['ok'=>bool, 'removed'=>string]. */
     public function deleteByIndex(int $lineIndex): array;
 
+    /**
+     * Edytuje wpis KARMIENIA (i jego sparowane mleko) W MIEJSCU — bez zmiany
+     * kolejnosci wierszy. $feedLineIndex wskazuje wiersz typu KARMIENIE. Nowy czas
+     * $when zapisywany jest na tym wierszu (minuty piersi zachowane). Sparowane
+     * mleko (wiersz MLEKO_* o tym samym starym czasie):
+     *   - $milkType === null  => usun mleko (jesli bylo),
+     *   - $milkType podany     => ustaw/podmien mleko (typ + $milkMl); gdy karmienie
+     *                             nie mialo mleka, wstaw wiersz TUZ ZA KARMIENIEM.
+     * Zwraca ['ok'=>bool, 'message'=>string].
+     */
+    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, ?string $milkType, int $milkMl): array;
+
     /** Import: zastepuje caly zbior danych zawartoscia CSV. Zwraca ['ok','imported','skipped']. */
     public function importCsv(string $rawText): array;
 

@@ -7,7 +7,7 @@
    Obslugiwane sciezki (dowolny prefiks jest obcinany do ostatniego segmentu):
      GET  /api/status | /api/entries?date= | /api/weight-series | /export.csv
      POST /api/entry | /api/delete-entry | /api/event | /api/send-backup
-          /api/import | /api/upload-data | /api/setting
+          /api/import | /api/upload-data | /api/update-feeding | /api/setting
    ============================================================================ */
 declare(strict_types=1);
 
@@ -212,6 +212,27 @@ function handle_api(string $route, string $method, Repository $repo): void
         $result = $repo->deleteByIndex((int)param('line'));
         if (!$result['ok']) sendJson(400, ['message' => 'Nie udalo sie usunac wpisu.']);
         sendJson(200, ['message' => 'Usunieto wpis.', 'removed' => $result['removed'] ?? '']);
+    }
+
+    if ($route === 'update-feeding' && $method === 'POST') {
+        if (param('feedLine') === null || param('when') === null) sendJson(400, ['message' => 'Niepelne dane edycji.']);
+        $when = Domain::parseWebDateTime((string)param('when'));
+        if ($when === null) sendJson(400, ['message' => 'Nieprawidlowy czas karmienia.']);
+        // Docelowe mleko: milkRemove=1 => brak mleka; inaczej flagi rodzaju + ilosc.
+        $milkType = null; $milkMl = 0;
+        if (param('milkRemove') !== '1') {
+            $mother = param('milkMother') === '1';
+            $modified = param('milkModified') === '1';
+            if (!$mother && !$modified) sendJson(400, ['message' => 'Zaznacz rodzaj mleka albo usun mleko.']);
+            $milkMl = (int)param('milkMl', '0');
+            if ($milkMl < Config::MILK_ML_MIN || $milkMl > Config::MILK_ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
+            if ($mother && $modified) $milkType = 'MLEKO_MIESZANE';
+            elseif ($mother) $milkType = 'MLEKO_MATKI';
+            else $milkType = 'MLEKO_MODYFIKOWANE';
+        }
+        $result = $repo->updateFeeding((int)param('feedLine'), $when, $milkType, $milkMl);
+        if (!$result['ok']) sendJson(400, ['message' => $result['message'] ?? 'Nie udalo sie zapisac zmian.']);
+        sendJson(200, ['message' => $result['message'] ?? 'Zapisano zmiany.']);
     }
 
     if ($route === 'event' && $method === 'POST') {

@@ -6,7 +6,8 @@
 
 const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:null,
   milkMother:true, milkModified:false, bottleOpen:false, pumpMode:false, summaryExtra:0,
-  statView:'summary', histPeriod:'week' };
+  statView:'summary', histPeriod:'week',
+  editFeedLine:null, editMilkHad:false };
 const $ = id => document.getElementById(id);
 const MODALS = ['formModal','otherModal','diaperModal'];
 const PAGES = ['start','diary','stats','weight','sleep'];
@@ -358,14 +359,27 @@ function buildTimeline(entries, onChanged){
     let gapHtml='';
     if(e.type==='KARMIENIE'){const m=toMin(e.time);if(prevFeed!=null&&m!=null&&m>prevFeed)gapHtml=`<span class="tl-gap">po ${fmtGap(m-prevFeed)}</span>`;if(m!=null)prevFeed=m}
     const title=e.type==='KARMIENIE'?'Karmienie':((e.type||'').startsWith('MLEKO')?(e.label||'Butelka'):(e.type==='ODCIAGANIE'?'Odciąganie':(e.type==='PIELUCHA_MOKRA'?'Pielucha':(e.type==='PIELUCHA_BRUDNA'?'Pielucha':(e.type==='WITAMINA_D'?'Witamina D':(e.type==='WAGA'?'Waga':(e.label||e.type)))))));
+    const editBtn=(e.type==='KARMIENIE')
+      ? `<button class="tl-edit" title="Edytuj karmienie"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h4l10-10-4-4L4 16v4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" stroke="currentColor" stroke-width="1.8"/></svg></button>`
+      : '';
     row.innerHTML=
       `<span class="tl-time">${e.time}</span>`+
       `<span class="tl-rail"><span class="tl-node"></span></span>`+
       `<div class="tl-card"><span class="tl-ic ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span>`+
         `<div class="tl-main"><div class="tl-t">${title}</div><div class="tl-s">${sub}</div></div>`+
         gapHtml+
+        editBtn+
         `<button class="tl-del" title="Usuń wpis"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>`+
       `</div>`;
+    if(e.type==='KARMIENIE'){
+      const editEl=row.querySelector('.tl-edit');
+      if(editEl)editEl.addEventListener('click',ev=>{
+        ev.stopPropagation();
+        // znajdz sparowane mleko: pierwszy wpis MLEKO_* o TYM SAMYM czasie
+        const milk=(entries||[]).find(x=>x.time===e.time&&(x.type||'').startsWith('MLEKO'))||null;
+        openEditFeeding(e,milk);
+      });
+    }
     row.querySelector('.tl-del').addEventListener('click',async ev=>{
       ev.stopPropagation();
       if(!confirm(`Usunąć wpis?\n${title}, ${e.time}`))return;
@@ -813,7 +827,8 @@ function refreshMilkKindButtons(){
 }
 function updateBottle(){const o=state.bottleOpen;$('extraMilkOptions').classList.toggle('hidden',!o);$('bottleToggle').textContent=o?'− Ukryj butelkę':'＋ Dodaj butelkę'}
 function openForm(date){
-  state.pumpMode=false;
+  state.pumpMode=false;state.editFeedLine=null;state.editMilkHad=false;
+  $('milkRemoveBtn').classList.add('hidden');
   ['timeField','nudgeBox','quickNotice','bottleToggle','nursingBox'].forEach(id=>$(id).classList.remove('hidden'));
   setText('extraTitle','Rodzaj mleka (możesz zaznaczyć oba → Mieszane)');$('kindField').classList.remove('hidden');$('mlField').querySelector('label').innerHTML='Ilość mleka';
   setText('formTitle',date?`Karmienie · ${dateLabel(date)}`:'Nowe karmienie');
@@ -822,6 +837,32 @@ function openForm(date){
   $('milkMl').min=mn;$('milkMl').max=mx;$('milkMl').step=st;$('milkMl').value=dv;
   $('piersL').value=0;$('piersR').value=0;state.bottleOpen=false;
   state.milkMother=true;state.milkModified=false;refreshMilkKindButtons();updateBottle();
+  setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
+}
+/* Edycja istniejacego karmienia: prefill czasem, mlekiem sparowanym (ten sam czas) i iloscia.
+   feed = wpis KARMIENIE (z lineIndex), milk = sparowany wpis MLEKO_* lub null. */
+function openEditFeeding(feed, milk){
+  state.pumpMode=false;state.editFeedLine=feed.lineIndex;state.editMilkHad=!!milk;
+  // Edytujemy mleko + godzine. Minuty piersi zostaja bez zmian — ukrywamy to pole.
+  ['timeField','nudgeBox','bottleToggle'].forEach(id=>$(id).classList.remove('hidden'));
+  $('nursingBox').classList.add('hidden');$('quickNotice').classList.add('hidden');
+  setText('formTitle','Edytuj karmienie');
+  setText('extraTitle','Rodzaj mleka (możesz zaznaczyć oba → Mieszane)');
+  $('kindField').classList.remove('hidden');$('mlField').querySelector('label').innerHTML='Ilość mleka';
+  // czas z wpisu (dzien z activeDay)
+  const day=state.activeDay||isoDaysAgo(0);
+  $('entryTime').value=`${day}T${(feed.time||'12:00')}`;
+  const d=state.data||{};const mn=d.milkMinMl||20,mx=d.milkMaxMl||200,st=d.milkStepMl||10,dv=d.milkDefaultMl||60;
+  $('milkMl').min=mn;$('milkMl').max=mx;$('milkMl').step=st;
+  // Mleko: rozbij typ na checkboxy; ustaw ilosc
+  const t=milk?milk.type:'';
+  state.milkMother=(t==='MLEKO_MATKI'||t==='MLEKO_MIESZANE');
+  state.milkModified=(t==='MLEKO_MODYFIKOWANE'||t==='MLEKO_MIESZANE');
+  if(!milk){state.milkMother=true;state.milkModified=false}
+  $('milkMl').value=milk?(milk.ml||dv):dv;
+  // Butelka rozwinieta gdy mleko istnieje; przycisk "Usun mleko" tylko gdy mleko bylo
+  state.bottleOpen=!!milk;refreshMilkKindButtons();updateBottle();
+  $('milkRemoveBtn').classList.toggle('hidden',!milk);
   setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
 }
 function openPumping(){
@@ -877,6 +918,7 @@ document.addEventListener('click',async ev=>{
     case 'home':clearPanels();break;
     case 'back-calendar':{const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');state.activeDay=null;break;}
     case 'day-feed':if(state.activeDay)openForm(state.activeDay);break;
+    case 'milk-remove':{state.bottleOpen=false;state.milkMother=false;state.milkModified=false;refreshMilkKindButtons();updateBottle();$('milkRemoveBtn').classList.add('hidden');setText('formNotice','Mleko zostanie usunięte po zapisaniu.');break;}
     case 'cancel-form':{const rd=state.activeDay;closeFormModal();rd?openDay(rd,state.detailLabel):clearPanels();break;}
     case 'minus5':nudge(-5);break;
     case 'plus5':nudge(5);break;
@@ -902,18 +944,28 @@ $('milkModified').addEventListener('click',()=>toggleMilkKind('modified'));
 $('entryForm').addEventListener('submit',async ev=>{
   ev.preventDefault();const n=$('formNotice');n.className='notice';n.textContent='Zapisywanie…';
   try{
-    let body;
-    if(state.pumpMode){body=new URLSearchParams({type:'ODCIAGANIE',when:$('entryTime').value,ml:$('milkMl').value})}
+    let url='/api/entry', body;
+    if(state.editFeedLine!=null){
+      // EDYCJA istniejacego karmienia -> /api/update-feeding (in-place)
+      const bottle=state.bottleOpen;
+      if(bottle&&!state.milkMother&&!state.milkModified){n.className='notice error';n.textContent='Zaznacz rodzaj mleka albo zwiń butelkę (bez mleka).';return}
+      url='/api/update-feeding';
+      body=new URLSearchParams({feedLine:String(state.editFeedLine),when:$('entryTime').value});
+      if(bottle){body.set('milkMl',$('milkMl').value);body.set('milkMother',state.milkMother?'1':'0');body.set('milkModified',state.milkModified?'1':'0')}
+      else{body.set('milkRemove','1')} // butelka zwinieta => brak mleka
+    }
+    else if(state.pumpMode){body=new URLSearchParams({type:'ODCIAGANIE',when:$('entryTime').value,ml:$('milkMl').value})}
     else{
       const extra=state.bottleOpen;
       if(extra&&!state.milkMother&&!state.milkModified){n.className='notice error';n.textContent='Zaznacz rodzaj mleka (matki i/lub modyfikowane).';return}
       body=new URLSearchParams({type:'KARMIENIE',when:$('entryTime').value,ml:'0',extraMilk:extra?'1':'0',lewaMin:Number($('piersL').value)||0,prawaMin:Number($('piersR').value)||0});
       if(extra){body.set('milkMl',$('milkMl').value);body.set('milkMother',state.milkMother?'1':'0');body.set('milkModified',state.milkModified?'1':'0')}
     }
-    const r=await request('/api/entry',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
-    n.className='notice ok';n.textContent=r.message||'Zapisano.';toast(state.pumpMode?'Zapisano odciąganie':'Zapisano karmienie');
-    await refresh();
-    setTimeout(()=>{const rd=state.activeDay;closeFormModal();if(rd&&!state.pumpMode)openDay(rd,state.detailLabel);else clearPanels()},550);
+    const r=await request(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    n.className='notice ok';n.textContent=r.message||'Zapisano.';toast(state.editFeedLine!=null?'Zapisano zmiany':(state.pumpMode?'Zapisano odciąganie':'Zapisano karmienie'));
+    const wasPump=state.pumpMode;state.editFeedLine=null;
+    invalidateEntries();await refresh();
+    setTimeout(()=>{const rd=state.activeDay;closeFormModal();if(rd&&!wasPump)openDay(rd,state.detailLabel);else clearPanels()},550);
   }catch(e){n.className='notice error';n.textContent=e.message}
 });
 

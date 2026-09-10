@@ -76,6 +76,56 @@ final class CsvRepository implements Repository
         return ['ok' => true, 'removed' => $removed];
     }
 
+    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, ?string $milkType, int $milkMl): array
+    {
+        if ($feedLineIndex < 0 || !is_file($this->file)) return ['ok' => false, 'message' => 'Brak wpisu.'];
+        $lines = explode("\n", (string)file_get_contents($this->file));
+        $header = array_shift($lines);
+        if (!empty($lines) && end($lines) === '') array_pop($lines); // koncowy pusty po \n
+
+        // 1) Zlokalizuj wiersz KARMIENIA po fizycznym indeksie.
+        if ($feedLineIndex >= count($lines)) return ['ok' => false, 'message' => 'Nie znaleziono wpisu.'];
+        $feedRaw = rtrim((string)$lines[$feedLineIndex], "\r");
+        $feed = Domain::parseCsvLine(trim($feedRaw));
+        if ($feed === null || $feed['type'] !== 'KARMIENIE') {
+            return ['ok' => false, 'message' => 'Wskazany wpis nie jest karmieniem.'];
+        }
+        $oldDate = $feed['date']; $oldTime = $feed['time'];
+
+        // 2) Znajdz sparowany wiersz MLEKO_* o TYM SAMYM starym czasie (pierwszy taki).
+        $milkIdx = -1;
+        foreach ($lines as $idx => $raw) {
+            if ($idx === $feedLineIndex) continue;
+            $e = Domain::parseCsvLine(trim(rtrim((string)$raw, "\r")));
+            if ($e === null) continue;
+            if ($e['date'] === $oldDate && $e['time'] === $oldTime && Domain::isMilkType($e['type'])) { $milkIdx = $idx; break; }
+        }
+
+        // 3) Zbuduj nowe wiersze (zachowujac minuty piersi karmienia).
+        $newFeedRow = rtrim(Domain::toCsvRow('KARMIENIE', $when, 0, $feed['piersLeft'], $feed['piersRight']), "\r\n");
+        $newMilkRow = ($milkType !== null) ? rtrim(Domain::toCsvRow($milkType, $when, $milkMl), "\r\n") : null;
+
+        // 4) Przepisz plik W MIEJSCU — kazdy wiersz zostaje na swojej pozycji.
+        $out = [];
+        foreach ($lines as $idx => $raw) {
+            $raw = rtrim((string)$raw, "\r");
+            if ($idx === $feedLineIndex) {
+                $out[] = $newFeedRow;
+                // Gdy karmienie NIE mialo mleka, a teraz dodajemy — wstaw wiersz mleka TUZ ZA karmieniem.
+                if ($milkIdx === -1 && $newMilkRow !== null) $out[] = $newMilkRow;
+            } elseif ($idx === $milkIdx) {
+                // Istniejacy wiersz mleka: podmien (gdy typ podany) albo pomin (usuniecie mleka).
+                if ($newMilkRow !== null) $out[] = $newMilkRow;
+                // gdy null => nie dodajemy => usuniete
+            } else {
+                $out[] = $raw;
+            }
+        }
+        $body = implode("\n", $out);
+        file_put_contents($this->file, $header . "\n" . $body . ($body !== '' ? "\n" : ''), LOCK_EX);
+        return ['ok' => true, 'message' => 'Zapisano zmiany karmienia.'];
+    }
+
     public function importCsv(string $rawText): array
     {
         $this->ensureFile();
