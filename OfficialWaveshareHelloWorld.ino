@@ -1171,10 +1171,16 @@ void loadLatestEntries() {
     if (!parseCsvLine(line, entry)) continue;
     const time_t stamp = csvDateTimeToEpoch(entry.date, entry.time);
     if (entry.type == "KARMIENIE") {
-      lastFeeding = formatEntryForUi(line);
-      lastFeedingTime = stamp;
-      // Rytm dnia: tylko wpisy KARMIENIE z dzisiejsza data (plik jest append-only
-      // => kolejnosc chronologiczna, wiec przerwy liczymy w locie).
+      // "Ostatnie karmienie" = wpis o NAJPOZNIEJSZYM czasie, a NIE ostatni fizycznie
+      // w pliku. Po dodaniu edycji karmienia W MIEJSCU plik nie jest juz scisle
+      // append-only/chronologiczny (edytowany wiersz zostaje na swojej pozycji), wiec
+      // wybor "ostatniego w pliku" pokazywalby zla godzine. Porownujemy po stamp.
+      if (stamp >= lastFeedingTime) {
+        lastFeeding = formatEntryForUi(line);
+        lastFeedingTime = stamp;
+      }
+      // Rytm dnia: tylko wpisy KARMIENIE z dzisiejsza data. Przerwy liczymy zakladajac
+      // chronologie w obrebie dnia; przy typowym uzyciu wpisy dnia sa uporzadkowane.
       if (entry.date == today) {
         ++todayFeedingCount;
         if (prevFeedingToday > 0) {
@@ -1189,8 +1195,11 @@ void loadLatestEntries() {
       }
     }
     if (isMilkType(entry.type)) {
-      lastMilk = formatEntryForUi(line);
-      lastMilkTime = stamp;
+      // Analogicznie do karmienia: "ostatnia butelka" po NAJPOZNIEJSZYM czasie.
+      if (stamp >= lastMilkTime) {
+        lastMilk = formatEntryForUi(line);
+        lastMilkTime = stamp;
+      }
     }
     if (entry.type == "WAGA") {
       lastWeightG = entry.ml; // gramy zapisane w kolumnie ml
@@ -1666,12 +1675,18 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
   if (saved) {
     const String displayEntry = String(datePart).substring(8, 10) + "." + String(datePart).substring(5, 7) + "." + String(datePart).substring(0, 4) +
                                 "  " + timePart + "\n" + (String(entryType) == "KARMIENIE" && ml == 0 ? "KARMIENIE" : String(ml) + " ml");
+    // Aktualizujemy "ostatnie" tylko gdy nowy wpis jest NAJPOZNIEJSZY (spojnie z
+    // loadLatestEntries). Dzieki temu wpis wstecz-datowany nie nadpisze pozniejszego.
     if (String(entryType) == "KARMIENIE") {
-      lastFeeding = displayEntry;
-      lastFeedingTime = when;
+      if (when >= lastFeedingTime) {
+        lastFeeding = displayEntry;
+        lastFeedingTime = when;
+      }
     } else if (isMilkType(String(entryType))) {
-      lastMilk = formatEntryForUi(String(datePart) + "," + timePart + "," + entryType + "," + String(ml));
-      lastMilkTime = when;
+      if (when >= lastMilkTime) {
+        lastMilk = formatEntryForUi(String(datePart) + "," + timePart + "," + entryType + "," + String(ml));
+        lastMilkTime = when;
+      }
     }
   }
   if (saved) {
@@ -5836,10 +5851,11 @@ void loop() {
     Serial.println("HTTP: serwer zatrzymany — brak Wi-Fi.");
   }
   if (WiFi.status() == WL_CONNECTED && !webServerStarted) startWebServer();
+  bool httpClientActive = false; // czy w tej iteracji obslugujemy aktywnego klienta
   if (webServerStarted) {
     const bool hadClient = webServer.client() && webServer.client().connected();
     webServer.handleClient();
-    if (hadClient) { ++httpRequestCount; lastHttpMillis = millis(); }
+    if (hadClient) { ++httpRequestCount; lastHttpMillis = millis(); httpClientActive = true; }
   }
 
   uint32_t lvglNowMs = millis();
@@ -5864,6 +5880,17 @@ void loop() {
     lv_tick_inc(lvglNowMs - lastLvglTickMs);
     lastLvglTickMs = lvglNowMs;
     if (touchDriver) lv_indev_read(touchDriver); // sam dotyk, bez pelnego renderu
+    // OBSLUGA SERWERA WWW MIEDZY PROBKAMI DOTYKU: serwer Arduino WebServer czesto
+    // potrzebuje KILKU wywolan handleClient() na jedno zadanie (accept -> naglowki ->
+    // wysylka). Przy jednym wywolaniu na iteracje petli (a iteracja to ciezki render
+    // + ~8 ms probkowania) kazde zadanie czekalo na kolejny obieg => serwer byl ospaly.
+    // Tu dokladamy obsluge w oknach probkowania — gdy klient byl aktywny na starcie
+    // iteracji LUB wlasnie sie polaczyl w jej trakcie, by nie marnowac cykli, gdy nikt
+    // nie jest polaczony.
+    if (webServerStarted && (httpClientActive || (webServer.client() && webServer.client().connected()))) {
+      webServer.handleClient();
+      httpClientActive = true;
+    }
     samplingWorkUs += micros() - workStart;
   }
   const uint32_t afterDelayStartUs = micros();

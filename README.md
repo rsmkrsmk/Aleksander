@@ -169,6 +169,10 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
 
 Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
 
+### Poprawki po testach edycji: responsywność serwera WWW i „ostatnie karmienie"
+- **Naprawiło:** błędną godzinę w kartach **OSTATNIE KARMIENIE / OSTATNIA BUTELKA** na ekranie głównym. `loadLatestEntries()` brał ostatni wiersz danego typu **fizycznie w pliku**, zakładając, że plik jest ściśle chronologiczny (append-only). Po dodaniu edycji karmienia **w miejscu** to założenie przestało obowiązywać (edytowany wiersz zostaje na swojej pozycji), więc pokazywana była godzina niewłaściwego wpisu. Teraz wybierany jest wpis o **najpóźniejszym czasie** (porównanie po znaczniku czasu), także w szybkiej ścieżce `appendEntry()`.
+- **Naprawiło:** „ospały" serwer WWW serwowany z urządzenia. `webServer.handleClient()` był wołany raz na iterację pętli (a iteracja to ciężki render LVGL + ~8 ms próbkowania dotyku), przez co żądanie HTTP czekało na kolejne obiegi (serwer Arduino potrzebuje kilku wywołań na jedno żądanie). Teraz — **gdy klient jest połączony** — serwer jest obsługiwany także pomiędzy próbkami dotyku (kilkukrotnie w iteracji), co znacząco przyspiesza odpowiedzi bez zmiany płynności renderu.
+
 ### Stabilność: odzyskanie RAM wewnętrznego (restart przy ładowaniu strony WWW)
 - **Naprawiło:** restart urządzenia przy pierwszym wejściu na stronę WWW serwowaną z urządzenia. Przyczyną był skrajnie niski wolny **RAM wewnętrzny** (~20 KB) — serwer WWW działa na tym samym zadaniu co LVGL i współdzieli deficytowy heap z Wi‑Fi/TLS/LVGL, więc obsługa żądania (streaming strony + budowa odpowiedzi API) przepychała pamięć za granicę → panic.
 - **Zmieniło:** `bounce_buffer_size_px` panelu RGB z 80 na **40 linii** — bufory bounce DMA żyją w RAM wewnętrznym, więc odzyskuje to ~**75 KB** (ze 150 KB do 75 KB). Ochroną przed dryfem obrazu pozostaje restart DMA panelu przy każdym VSYNC, więc mniejszy bounce jest bezpieczny.
