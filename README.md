@@ -71,7 +71,7 @@ Program podczas pierwszego uruchomienia tworzy w LittleFS plik `/karmienia.csv` 
 
 Obsługiwane typy wpisów: `KARMIENIE`, `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `MLEKO_MIESZANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `ODCIAGANIE`, `WITAMINA_D`, `WAGA`, `SEN_START`, `SEN_STOP`.
 
-**Butelka — rodzaj i ilość:** w formularzu karmienia (urządzenie i WWW) rodzaj mleka wybiera się dwoma niezależnymi przełącznikami **Matki** / **Modyfikowane**. Można zaznaczyć jeden lub **oba naraz** — zaznaczenie obu zapisuje jeden wpis `MLEKO_MIESZANE`. Ilość podaje wspólny suwak **20–200 ml, skok 10 ml (domyślnie 60)**. W raportach mleko rozbite jest na trzy kategorie: Matki / Mieszane / Modyfikowane; najważniejsza pozostaje łączna ilość ml. (Odciąganie ma osobny, niezmieniony zakres.)
+**Butelka — rodzaj i ilość:** w formularzu karmienia (panel WWW i strona serwowana przez urządzenie) rodzaj mleka wybiera się dwoma niezależnymi przełącznikami **Matki** / **Modyfikowane**. Można zaznaczyć jeden rodzaj (wtedy jeden suwak ilości) lub **oba naraz** — wtedy zamiast wspólnej ilości pojawiają się **dwa osobne pola** (Matki / Modyfikowane), każde otwiera po kliknięciu małe okno wyboru ilości. Mleko mieszane zapisywane jest jako **dwa osobne wiersze CSV** (`MLEKO_MATKI` + `MLEKO_MODYFIKOWANE`) o tej samej godzinie co karmienie, dzięki czemu można podać różne ilości każdego rodzaju. Zakres ilości: **20–200 ml, skok 10 ml (domyślnie 60)**. W raportach mleko rozbite jest na kategorie Matki / Modyfikowane (oraz historyczne Mieszane dla starych wpisów jednowierszowych `MLEKO_MIESZANE`, które nadal są odczytywane i liczone). (Odciąganie ma osobny, niezmieniony zakres.) *Ekran dotykowy LVGL urządzenia pozostaje bez zmian — tam mieszane zapisuje się jak dotąd.*
 
 **Edycja wpisu karmienia:** przy każdym karmieniu w dzienniku dnia (panel WWW hostingu oraz strona serwowana przez urządzenie) obok przycisku usuwania jest przycisk edycji (✎). Otwiera on formularz z wypełnionymi wartościami, w którym można:
 
@@ -168,6 +168,13 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
 ## Historia zmian
 
 Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
+
+### Mleko mieszane — dwie osobne ilości (matki + modyfikowane)
+- **Zmieniło:** koncepcję mleka mieszanego. Gdy w formularzu karmienia zaznaczone są **oba** rodzaje (Matki + Modyfikowane), zamiast jednej wspólnej ilości pojawiają się **dwa osobne pola** — każde otwiera po kliknięciu małe okno wyboru ilości (jak przy wyborze daty). Dzięki temu można podać różne ilości mleka matki i modyfikowanego.
+- **Zmieniło:** model danych. Mleko mieszane zapisywane jest teraz jako **dwa osobne wiersze CSV** `MLEKO_MATKI,X` + `MLEKO_MODYFIKOWANE,Y` o tej samej godzinie co karmienie (zamiast jednego wiersza `MLEKO_MIESZANE`). Statystyki i wykresy liczą je poprawnie w kategoriach Matki/Modyfikowane.
+- **Dodało:** kontrakt API `milkMotherMl` + `milkModifiedMl` (osobne ilości) w `POST /api/entry` i `POST /api/update-feeding`. Zachowano **wsteczną zgodność** ze starym formatem (`milkMother`/`milkModified` + wspólne `milkMl`; przy obu rodzajach `milkMl` dzielone równo). Edycja karmienia (`updateFeeding`) usuwa wszystkie sparowane wiersze mleka o starym czasie i wstawia nowe wg wybranych ilości — in‑place, z zachowaniem kolejności i minut piersi.
+- **Zachowało:** pełną obsługę **historycznych** wpisów jednowierszowych `MLEKO_MIESZANE` przy odczycie, statystykach i wykresach (przy edycji takiego wpisu ilość jest rozbijana na oba rodzaje).
+- **Zakres:** panel WWW hostingu, strona WWW serwowana przez urządzenie oraz logika API firmware. **Ekran dotykowy LVGL urządzenia pozostał bez zmian** (świadoma decyzja).
 
 ### Poprawki po testach edycji: responsywność serwera WWW i „ostatnie karmienie"
 - **Naprawiło:** błędną godzinę w kartach **OSTATNIE KARMIENIE / OSTATNIA BUTELKA** na ekranie głównym. `loadLatestEntries()` brał ostatni wiersz danego typu **fizycznie w pliku**, zakładając, że plik jest ściśle chronologiczny (append-only). Po dodaniu edycji karmienia **w miejscu** to założenie przestało obowiązywać (edytowany wiersz zostaje na swojej pozycji), więc pokazywana była godzina niewłaściwego wpisu. Teraz wybierany jest wpis o **najpóźniejszym czasie** (porównanie po znaczniku czasu), także w szybkiej ścieżce `appendEntry()`.

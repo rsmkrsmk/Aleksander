@@ -88,7 +88,7 @@ final class MysqlRepository implements Repository
         return ['ok' => true, 'removed' => $removed];
     }
 
-    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, ?string $milkType, int $milkMl): array
+    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array
     {
         // 1) Wiersz KARMIENIA po id.
         $sel = $this->db->prepare("SELECT * FROM `{$this->tEntries()}` WHERE id = :id");
@@ -97,34 +97,22 @@ final class MysqlRepository implements Repository
         if (!$feed || $feed['type'] !== 'KARMIENIE') return ['ok' => false, 'message' => 'Wskazany wpis nie jest karmieniem.'];
         $oldDate = $feed['entry_date']; $oldTime = $feed['entry_time'];
 
-        // 2) Sparowany wiersz mleka o TYM SAMYM starym czasie (najstarszy id).
-        $milkSel = $this->db->prepare(
-            "SELECT * FROM `{$this->tEntries()}`
-             WHERE entry_date = :d AND entry_time = :t AND type LIKE 'MLEKO%'
-             ORDER BY id LIMIT 1"
-        );
-        $milkSel->execute([':d' => $oldDate, ':t' => $oldTime]);
-        $milk = $milkSel->fetch();
-
         $this->db->beginTransaction();
         try {
             // KARMIENIE — nowy czas (minuty piersi bez zmian).
             $this->db->prepare("UPDATE `{$this->tEntries()}` SET entry_date=:d, entry_time=:t WHERE id=:id")
                      ->execute([':d' => $when->format('Y-m-d'), ':t' => $when->format('H:i:s'), ':id' => $feedLineIndex]);
-            if ($milkType === null) {
-                // Usun mleko (jesli bylo).
-                if ($milk) $this->db->prepare("DELETE FROM `{$this->tEntries()}` WHERE id=:id")->execute([':id' => $milk['id']]);
-            } elseif ($milk) {
-                // Podmien istniejacy wiersz mleka (typ, ml, nowy czas).
-                $this->db->prepare("UPDATE `{$this->tEntries()}` SET entry_date=:d, entry_time=:t, type=:ty, ml=:ml WHERE id=:id")
-                         ->execute([':d' => $when->format('Y-m-d'), ':t' => $when->format('H:i:s'), ':ty' => $milkType, ':ml' => $milkMl, ':id' => $milk['id']]);
-            } else {
-                // Dodaj mleko do karmienia, ktore go nie mialo.
-                $this->db->prepare(
-                    "INSERT INTO `{$this->tEntries()}` (entry_date, entry_time, type, ml, piers_left, piers_right)
-                     VALUES (:d,:t,:ty,:ml,0,0)"
-                )->execute([':d' => $when->format('Y-m-d'), ':t' => $when->format('H:i:s'), ':ty' => $milkType, ':ml' => $milkMl]);
-            }
+            // Usun WSZYSTKIE sparowane wiersze mleka o starym czasie (w tym stare MLEKO_MIESZANE).
+            $this->db->prepare(
+                "DELETE FROM `{$this->tEntries()}` WHERE entry_date=:d AND entry_time=:t AND type LIKE 'MLEKO%'"
+            )->execute([':d' => $oldDate, ':t' => $oldTime]);
+            // Wstaw nowe wiersze mleka wg osobnych ilosci (mieszane = obie > 0).
+            $ins = $this->db->prepare(
+                "INSERT INTO `{$this->tEntries()}` (entry_date, entry_time, type, ml, piers_left, piers_right)
+                 VALUES (:d,:t,:ty,:ml,0,0)"
+            );
+            if ($motherMl > 0)   $ins->execute([':d' => $when->format('Y-m-d'), ':t' => $when->format('H:i:s'), ':ty' => 'MLEKO_MATKI', ':ml' => $motherMl]);
+            if ($modifiedMl > 0) $ins->execute([':d' => $when->format('Y-m-d'), ':t' => $when->format('H:i:s'), ':ty' => 'MLEKO_MODYFIKOWANE', ':ml' => $modifiedMl]);
             $this->db->commit();
         } catch (Throwable $ex) {
             $this->db->rollBack();

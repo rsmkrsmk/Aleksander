@@ -76,7 +76,7 @@ final class CsvRepository implements Repository
         return ['ok' => true, 'removed' => $removed];
     }
 
-    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, ?string $milkType, int $milkMl): array
+    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array
     {
         if ($feedLineIndex < 0 || !is_file($this->file)) return ['ok' => false, 'message' => 'Brak wpisu.'];
         $lines = explode("\n", (string)file_get_contents($this->file));
@@ -92,31 +92,35 @@ final class CsvRepository implements Repository
         }
         $oldDate = $feed['date']; $oldTime = $feed['time'];
 
-        // 2) Znajdz sparowany wiersz MLEKO_* o TYM SAMYM starym czasie (pierwszy taki).
-        $milkIdx = -1;
+        // 2) Zaznacz WSZYSTKIE sparowane wiersze mleka o TYM SAMYM starym czasie do usuniecia.
+        //    Model mleka mieszanego = DWA wiersze (MLEKO_MATKI + MLEKO_MODYFIKOWANE), a stare
+        //    dane moga miec jednowierszowe MLEKO_MIESZANE — kazde takie mleko pary usuwamy i
+        //    odtwarzamy z nowych ilosci ponizej.
+        $milkIdxToDrop = [];
         foreach ($lines as $idx => $raw) {
             if ($idx === $feedLineIndex) continue;
             $e = Domain::parseCsvLine(trim(rtrim((string)$raw, "\r")));
             if ($e === null) continue;
-            if ($e['date'] === $oldDate && $e['time'] === $oldTime && Domain::isMilkType($e['type'])) { $milkIdx = $idx; break; }
+            if ($e['date'] === $oldDate && $e['time'] === $oldTime && Domain::isMilkType($e['type'])) $milkIdxToDrop[$idx] = true;
         }
 
-        // 3) Zbuduj nowe wiersze (zachowujac minuty piersi karmienia).
+        // 3) Zbuduj nowe wiersze (zachowujac minuty piersi karmienia). Mleko rozbite na
+        //    osobne ilosci: >0 => wiersz danego rodzaju. Oba 0 => brak mleka.
         $newFeedRow = rtrim(Domain::toCsvRow('KARMIENIE', $when, 0, $feed['piersLeft'], $feed['piersRight']), "\r\n");
-        $newMilkRow = ($milkType !== null) ? rtrim(Domain::toCsvRow($milkType, $when, $milkMl), "\r\n") : null;
+        $newMilkRows = [];
+        if ($motherMl > 0)   $newMilkRows[] = rtrim(Domain::toCsvRow('MLEKO_MATKI', $when, $motherMl), "\r\n");
+        if ($modifiedMl > 0) $newMilkRows[] = rtrim(Domain::toCsvRow('MLEKO_MODYFIKOWANE', $when, $modifiedMl), "\r\n");
 
-        // 4) Przepisz plik W MIEJSCU — kazdy wiersz zostaje na swojej pozycji.
+        // 4) Przepisz plik W MIEJSCU — karmienie zostaje na swojej pozycji, stare mleko pary
+        //    znika, nowe wiersze mleka wstawiamy TUZ ZA karmieniem.
         $out = [];
         foreach ($lines as $idx => $raw) {
             $raw = rtrim((string)$raw, "\r");
             if ($idx === $feedLineIndex) {
                 $out[] = $newFeedRow;
-                // Gdy karmienie NIE mialo mleka, a teraz dodajemy — wstaw wiersz mleka TUZ ZA karmieniem.
-                if ($milkIdx === -1 && $newMilkRow !== null) $out[] = $newMilkRow;
-            } elseif ($idx === $milkIdx) {
-                // Istniejacy wiersz mleka: podmien (gdy typ podany) albo pomin (usuniecie mleka).
-                if ($newMilkRow !== null) $out[] = $newMilkRow;
-                // gdy null => nie dodajemy => usuniete
+                foreach ($newMilkRows as $r) $out[] = $r;
+            } elseif (isset($milkIdxToDrop[$idx])) {
+                // stary wiersz mleka pary — pomijamy (odtworzony powyzej)
             } else {
                 $out[] = $raw;
             }

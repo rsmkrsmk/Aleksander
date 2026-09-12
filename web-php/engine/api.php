@@ -39,6 +39,44 @@ function param(string $key, ?string $default = null): ?string
 }
 
 /**
+ * Zwraca [motherMl, modifiedMl] — ilosci mleka matki i modyfikowanego. Mleko mieszane
+ * to obie wartosci > 0 (zapisywane jako dwa osobne wiersze). Zerowa ilosc = brak rodzaju.
+ *
+ * NOWY format (osobne ilosci): milkMotherMl, milkModifiedMl.
+ * WSTECZNA ZGODNOSC (jedna ilosc milkMl + flagi milkMother/milkModified albo milkType):
+ *   - jeden rodzaj => cala ilosc idzie do niego,
+ *   - oba rodzaje (dawne "mieszane" bez osobnych ilosci) => milkMl dzielone rowno
+ *     (reszta do matki), aby suma sie zgadzala.
+ * Kazda ilosc > 0 jest ograniczana do zakresu MILK_ML_MIN..MILK_ML_MAX (clamp).
+ */
+function milkAmountsFromParams(): array
+{
+    $clampMl = static function (int $v): int {
+        if ($v <= 0) return 0;
+        return max(Config::MILK_ML_MIN, min($v, Config::MILK_ML_MAX));
+    };
+    // Preferuj nowy format z osobnymi ilosciami.
+    if (param('milkMotherMl') !== null || param('milkModifiedMl') !== null) {
+        return [$clampMl((int)param('milkMotherMl', '0')), $clampMl((int)param('milkModifiedMl', '0'))];
+    }
+    // Wsteczna zgodnosc: jedna ilosc + wybor rodzaju.
+    $mother = param('milkMother') === '1';
+    $modified = param('milkModified') === '1';
+    if (!$mother && !$modified && param('milkType') !== null) {
+        $mt = (string)param('milkType');
+        $mother = ($mt === 'MLEKO_MATKI' || $mt === 'MLEKO_MIESZANE');
+        $modified = ($mt === 'MLEKO_MODYFIKOWANE' || $mt === 'MLEKO_MIESZANE');
+    }
+    $ml = (int)param('milkMl', '0');
+    if ($ml <= 0 || (!$mother && !$modified)) return [0, 0];
+    if ($mother && $modified) {
+        $half = intdiv($ml, 2);
+        return [$clampMl($ml - $half), $clampMl($half)]; // reszta do matki
+    }
+    return $mother ? [$clampMl($ml), 0] : [0, $clampMl($ml)];
+}
+
+/**
  * Obsluguje jedno zadanie API. $route to logiczna nazwa endpointu, np.
  * 'status','entries','weight-series','entry','delete-entry','event',
  * 'send-backup','import','setting','export.csv'. Router (ui/index.php lub
@@ -182,28 +220,16 @@ function handle_api(string $route, string $method, Repository $repo): void
             sendJson(201, ['message' => 'Zapisano zdarzenie.']);
         }
         if ($type !== 'KARMIENIE' || $ml !== 0) sendJson(400, ['message' => 'Karmienie nie wymaga ilosci ml; podaj ja tylko dla Butelki.']);
-        $extraMilk = param('extraMilk') === '1'; $milkType = ''; $milkMl = 0;
-        if ($extraMilk) {
-            if (param('milkMl') === null) sendJson(400, ['message' => 'Brakuje ilosci mleka.']);
-            $milkMl = (int)param('milkMl', '0');
-            if ($milkMl < Config::MILK_ML_MIN || $milkMl > Config::MILK_ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
-            // Nowy format: flagi milkMother/milkModified (mozna obie => MLEKO_MIESZANE).
-            // Wsteczna zgodnosc: gdy brak flag, uzyj milkType (MLEKO_MATKI/MLEKO_MODYFIKOWANE).
-            $mother = param('milkMother') === '1';
-            $modified = param('milkModified') === '1';
-            if (!$mother && !$modified && param('milkType') !== null) {
-                $mt = (string)param('milkType');
-                $mother = ($mt === 'MLEKO_MATKI');
-                $modified = ($mt === 'MLEKO_MODYFIKOWANE');
-            }
-            if (!$mother && !$modified) sendJson(400, ['message' => 'Zaznacz rodzaj mleka (matki i/lub modyfikowane).']);
-            if ($mother && $modified) $milkType = 'MLEKO_MIESZANE';
-            elseif ($mother) $milkType = 'MLEKO_MATKI';
-            else $milkType = 'MLEKO_MODYFIKOWANE';
+        $extraMilk = param('extraMilk') === '1';
+        // Mleko rozbite na DWIE osobne ilosci (mleko mieszane = obie > 0 => dwa wiersze).
+        [$motherMl, $modifiedMl] = $extraMilk ? milkAmountsFromParams() : [0, 0];
+        if ($extraMilk && $motherMl === 0 && $modifiedMl === 0) {
+            sendJson(400, ['message' => 'Zaznacz rodzaj mleka (matki i/lub modyfikowane) i podaj ilosc.']);
         }
         $clamp = static fn($v, $lo, $hi) => max($lo, min((int)$v, $hi));
         $repo->append('KARMIENIE', $when, $ml, $clamp(param('lewaMin', '0'), 0, 120), $clamp(param('prawaMin', '0'), 0, 120));
-        if ($extraMilk) $repo->append($milkType, $when, $milkMl);
+        if ($motherMl > 0)   $repo->append('MLEKO_MATKI', $when, $motherMl);
+        if ($modifiedMl > 0) $repo->append('MLEKO_MODYFIKOWANE', $when, $modifiedMl);
         sendJson(201, $extraMilk ? ['message' => 'Zapisano karmienie i mleko.'] : ['message' => 'Karmienie zapisane w pamieci urzadzenia.']);
     }
 
@@ -218,19 +244,14 @@ function handle_api(string $route, string $method, Repository $repo): void
         if (param('feedLine') === null || param('when') === null) sendJson(400, ['message' => 'Niepelne dane edycji.']);
         $when = Domain::parseWebDateTime((string)param('when'));
         if ($when === null) sendJson(400, ['message' => 'Nieprawidlowy czas karmienia.']);
-        // Docelowe mleko: milkRemove=1 => brak mleka; inaczej flagi rodzaju + ilosc.
-        $milkType = null; $milkMl = 0;
+        // Docelowe mleko: milkRemove=1 => brak mleka; inaczej DWIE osobne ilosci
+        // (mleko mieszane = obie > 0 => dwa wiersze MLEKO_MATKI + MLEKO_MODYFIKOWANE).
+        $motherMl = 0; $modifiedMl = 0;
         if (param('milkRemove') !== '1') {
-            $mother = param('milkMother') === '1';
-            $modified = param('milkModified') === '1';
-            if (!$mother && !$modified) sendJson(400, ['message' => 'Zaznacz rodzaj mleka albo usun mleko.']);
-            $milkMl = (int)param('milkMl', '0');
-            if ($milkMl < Config::MILK_ML_MIN || $milkMl > Config::MILK_ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
-            if ($mother && $modified) $milkType = 'MLEKO_MIESZANE';
-            elseif ($mother) $milkType = 'MLEKO_MATKI';
-            else $milkType = 'MLEKO_MODYFIKOWANE';
+            [$motherMl, $modifiedMl] = milkAmountsFromParams();
+            if ($motherMl === 0 && $modifiedMl === 0) sendJson(400, ['message' => 'Zaznacz rodzaj mleka i podaj ilosc albo usun mleko.']);
         }
-        $result = $repo->updateFeeding((int)param('feedLine'), $when, $milkType, $milkMl);
+        $result = $repo->updateFeeding((int)param('feedLine'), $when, $motherMl, $modifiedMl);
         if (!$result['ok']) sendJson(400, ['message' => $result['message'] ?? 'Nie udalo sie zapisac zmian.']);
         sendJson(200, ['message' => $result['message'] ?? 'Zapisano zmiany.']);
     }

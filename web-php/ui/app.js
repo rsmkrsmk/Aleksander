@@ -7,7 +7,10 @@
 const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:null,
   milkMother:true, milkModified:false, bottleOpen:false, pumpMode:false, summaryExtra:0,
   statView:'summary', histPeriod:'week',
-  editFeedLine:null, editMilkHad:false };
+  editFeedLine:null, editMilkHad:false,
+  // Osobne ilosci mleka (mieszane = oba rodzaje > 0 => dwa wiersze). milkMl (suwak)
+  // uzywany gdy tylko JEDEN rodzaj; przy obu rodzajach uzywamy tych dwoch pol.
+  milkMotherMl:60, milkModifiedMl:60, mlPopKind:null };
 const $ = id => document.getElementById(id);
 const MODALS = ['formModal','otherModal','diaperModal'];
 const PAGES = ['start','diary','stats','weight','sleep'];
@@ -102,7 +105,7 @@ function show(view){
   document.body.classList.toggle('modal-open',MODALS.some(m=>{const el=$(m);return el&&el.classList.contains('open')}));
 }
 function openFormModal(){$('formModal').classList.add('open');$('formModal').setAttribute('aria-hidden','false');document.body.classList.add('modal-open')}
-function closeFormModal(){$('formModal').classList.remove('open');$('formModal').setAttribute('aria-hidden','true');document.body.classList.remove('modal-open');state.pumpMode=false}
+function closeFormModal(){const p=$('mlPop');if(p)p.classList.add('hidden');state.mlPopKind=null;$('formModal').classList.remove('open');$('formModal').setAttribute('aria-hidden','true');document.body.classList.remove('modal-open');state.pumpMode=false}
 /* Zamyka otwarte modale-formularze (nie zmienia aktywnej podstrony). */
 function clearPanels(){MODALS.forEach(m=>{const el=$(m);if(el){el.classList.remove('open');el.setAttribute('aria-hidden','true')}});document.body.classList.remove('modal-open')}
 
@@ -375,9 +378,10 @@ function buildTimeline(entries, onChanged){
       const editEl=row.querySelector('.tl-edit');
       if(editEl)editEl.addEventListener('click',ev=>{
         ev.stopPropagation();
-        // znajdz sparowane mleko: pierwszy wpis MLEKO_* o TYM SAMYM czasie
-        const milk=(entries||[]).find(x=>x.time===e.time&&(x.type||'').startsWith('MLEKO'))||null;
-        openEditFeeding(e,milk);
+        // znajdz WSZYSTKIE sparowane wiersze mleka o TYM SAMYM czasie (matki+modyfikowane
+        // = mleko mieszane, lub stary jednowierszowy MLEKO_MIESZANE)
+        const milks=(entries||[]).filter(x=>x.time===e.time&&(x.type||'').startsWith('MLEKO'));
+        openEditFeeding(e,milks);
       });
     }
     row.querySelector('.tl-del').addEventListener('click',async ev=>{
@@ -824,8 +828,27 @@ function refreshMilkKindButtons(){
   const bm=$('milkMother'),bx=$('milkModified');
   if(bm){bm.classList.toggle('sel',!!state.milkMother);bm.setAttribute('aria-pressed',state.milkMother?'true':'false')}
   if(bx){bx.classList.toggle('sel',!!state.milkModified);bx.setAttribute('aria-pressed',state.milkModified?'true':'false')}
+  refreshMilkAmountUi();
 }
-function updateBottle(){const o=state.bottleOpen;$('extraMilkOptions').classList.toggle('hidden',!o);$('bottleToggle').textContent=o?'− Ukryj butelkę':'＋ Dodaj butelkę'}
+/* Przelacza tryb wyboru ilosci:
+   - oba rodzaje zaznaczone (mieszane) => dwa male pola (matki/modyfikowane) + popover,
+   - jeden rodzaj => pojedynczy suwak (#mlField),
+   - brak rodzaju => oba pola ukryte. */
+function refreshMilkAmountUi(){
+  const both=state.milkMother&&state.milkModified;
+  const one=(state.milkMother||state.milkModified)&&!both;
+  const mlField=$('mlField'),dual=$('dualMlField');
+  if(mlField)mlField.classList.toggle('hidden',!one);
+  if(dual)dual.classList.toggle('hidden',!both);
+  if(both)syncDualLabels();
+}
+/* Aktualizuje etykiety dwoch pol + sume dla trybu mieszanego. */
+function syncDualLabels(){
+  setText('mlMotherVal',`${state.milkMotherMl} ml`);
+  setText('mlModifiedVal',`${state.milkModifiedMl} ml`);
+  setText('dualMlSum',`Razem ${(+state.milkMotherMl||0)+(+state.milkModifiedMl||0)} ml`);
+}
+function updateBottle(){const o=state.bottleOpen;$('extraMilkOptions').classList.toggle('hidden',!o);$('bottleToggle').textContent=o?'− Ukryj butelkę':'＋ Dodaj butelkę';if(o)refreshMilkAmountUi()}
 function openForm(date){
   state.pumpMode=false;state.editFeedLine=null;state.editMilkHad=false;
   $('milkRemoveBtn').classList.add('hidden');
@@ -836,13 +859,18 @@ function openForm(date){
   const d=state.data||{};const mn=d.milkMinMl||20,mx=d.milkMaxMl||200,st=d.milkStepMl||10,dv=d.milkDefaultMl||60;
   $('milkMl').min=mn;$('milkMl').max=mx;$('milkMl').step=st;$('milkMl').value=dv;
   $('piersL').value=0;$('piersR').value=0;state.bottleOpen=false;
-  state.milkMother=true;state.milkModified=false;refreshMilkKindButtons();updateBottle();
+  state.milkMother=true;state.milkModified=false;
+  state.milkMotherMl=dv;state.milkModifiedMl=dv;
+  refreshMilkKindButtons();updateBottle();
   setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
 }
-/* Edycja istniejacego karmienia: prefill czasem, mlekiem sparowanym (ten sam czas) i iloscia.
-   feed = wpis KARMIENIE (z lineIndex), milk = sparowany wpis MLEKO_* lub null. */
-function openEditFeeding(feed, milk){
-  state.pumpMode=false;state.editFeedLine=feed.lineIndex;state.editMilkHad=!!milk;
+/* Edycja istniejacego karmienia: prefill czasem i mlekiem sparowanym (ten sam czas).
+   feed = wpis KARMIENIE (z lineIndex), milks = TABLICA sparowanych wierszy MLEKO_* (0..2).
+   Mleko mieszane = dwa wiersze (MLEKO_MATKI + MLEKO_MODYFIKOWANE); stare MLEKO_MIESZANE
+   (jeden wiersz) mapujemy na oba rodzaje z ta sama iloscia (podpowiedz do rozbicia). */
+function openEditFeeding(feed, milks){
+  milks=Array.isArray(milks)?milks:(milks?[milks]:[]);
+  state.pumpMode=false;state.editFeedLine=feed.lineIndex;state.editMilkHad=milks.length>0;
   // Edytujemy mleko + godzine. Minuty piersi zostaja bez zmian — ukrywamy to pole.
   ['timeField','nudgeBox','bottleToggle'].forEach(id=>$(id).classList.remove('hidden'));
   $('nursingBox').classList.add('hidden');$('quickNotice').classList.add('hidden');
@@ -854,21 +882,31 @@ function openEditFeeding(feed, milk){
   $('entryTime').value=`${day}T${(feed.time||'12:00')}`;
   const d=state.data||{};const mn=d.milkMinMl||20,mx=d.milkMaxMl||200,st=d.milkStepMl||10,dv=d.milkDefaultMl||60;
   $('milkMl').min=mn;$('milkMl').max=mx;$('milkMl').step=st;
-  // Mleko: rozbij typ na checkboxy; ustaw ilosc
-  const t=milk?milk.type:'';
-  state.milkMother=(t==='MLEKO_MATKI'||t==='MLEKO_MIESZANE');
-  state.milkModified=(t==='MLEKO_MODYFIKOWANE'||t==='MLEKO_MIESZANE');
-  if(!milk){state.milkMother=true;state.milkModified=false}
-  $('milkMl').value=milk?(milk.ml||dv):dv;
+  // Rozbij wiersze mleka na dwie ilosci.
+  let motherMl=0,modifiedMl=0,mixedMl=0;
+  milks.forEach(m=>{const t=m.type;const v=+m.ml||0;
+    if(t==='MLEKO_MATKI')motherMl+=v;else if(t==='MLEKO_MODYFIKOWANE')modifiedMl+=v;else if(t==='MLEKO_MIESZANE')mixedMl+=v;else motherMl+=v;});
+  if(mixedMl>0){ // stary jednowierszowy zapis: pokaz jako oba rodzaje z ta sama iloscia
+    if(motherMl===0)motherMl=mixedMl; if(modifiedMl===0)modifiedMl=mixedMl;
+  }
+  state.milkMother=motherMl>0;state.milkModified=modifiedMl>0;
+  if(!milks.length){state.milkMother=true;state.milkModified=false}
+  state.milkMotherMl=motherMl>0?motherMl:dv;
+  state.milkModifiedMl=modifiedMl>0?modifiedMl:dv;
+  // Suwak pojedynczego rodzaju pokazuje ilosc aktywnego rodzaju.
+  $('milkMl').value=state.milkModified&&!state.milkMother?state.milkModifiedMl:state.milkMotherMl;
   // Butelka rozwinieta gdy mleko istnieje; przycisk "Usun mleko" tylko gdy mleko bylo
-  state.bottleOpen=!!milk;refreshMilkKindButtons();updateBottle();
-  $('milkRemoveBtn').classList.toggle('hidden',!milk);
+  state.bottleOpen=milks.length>0;refreshMilkKindButtons();updateBottle();
+  $('milkRemoveBtn').classList.toggle('hidden',!milks.length);
   setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
 }
 function openPumping(){
   state.pumpMode=true;
   ['timeField','nudgeBox','quickNotice','bottleToggle','nursingBox'].forEach(id=>$(id).classList.add('hidden'));
   $('extraMilkOptions').classList.remove('hidden');$('kindField').classList.add('hidden');
+  $('milkRemoveBtn').classList.add('hidden');
+  // Odciaganie uzywa pojedynczego suwaka (bez trybu mieszanego).
+  $('mlField').classList.remove('hidden');$('dualMlField').classList.add('hidden');
   setText('formTitle','Odciąganie mleka');
   $('mlField').querySelector('label').innerHTML='Ilość';
   // Odciaganie NIE zmienia sie — uzywa starego zakresu ml (10..120 z minMl/maxMl/defaultMl).
@@ -918,7 +956,7 @@ document.addEventListener('click',async ev=>{
     case 'home':clearPanels();break;
     case 'back-calendar':{const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');state.activeDay=null;break;}
     case 'day-feed':if(state.activeDay)openForm(state.activeDay);break;
-    case 'milk-remove':{state.bottleOpen=false;state.milkMother=false;state.milkModified=false;refreshMilkKindButtons();updateBottle();$('milkRemoveBtn').classList.add('hidden');setText('formNotice','Mleko zostanie usunięte po zapisaniu.');break;}
+    case 'milk-remove':{state.bottleOpen=false;state.milkMother=false;state.milkModified=false;closeMlPop();refreshMilkKindButtons();updateBottle();$('milkRemoveBtn').classList.add('hidden');setText('formNotice','Mleko zostanie usunięte po zapisaniu.');break;}
     case 'cancel-form':{const rd=state.activeDay;closeFormModal();rd?openDay(rd,state.detailLabel):clearPanels();break;}
     case 'minus5':nudge(-5);break;
     case 'plus5':nudge(5);break;
@@ -937,13 +975,47 @@ document.addEventListener('click',async ev=>{
 });
 
 /* ---------- Formularz submit ---------- */
-$('milkMl').addEventListener('input',()=>setText('milkAmount',`${$('milkMl').value} ml`));
+$('milkMl').addEventListener('input',()=>{
+  const v=+$('milkMl').value||0;setText('milkAmount',`${v} ml`);
+  // Suwak (tryb pojedynczego rodzaju / odciaganie) ustawia ilosc aktywnego rodzaju.
+  if(!state.pumpMode){ if(state.milkMother&&!state.milkModified)state.milkMotherMl=v; else if(state.milkModified&&!state.milkMother)state.milkModifiedMl=v; }
+});
 $('bottleToggle').addEventListener('click',()=>{state.bottleOpen=!state.bottleOpen;updateBottle()});
 $('milkMother').addEventListener('click',()=>toggleMilkKind('mother'));
 $('milkModified').addEventListener('click',()=>toggleMilkKind('modified'));
+
+/* ---------- Mleko mieszane: pola + popover wyboru ilosci ---------- */
+function openMlPop(kind){
+  state.mlPopKind=kind;
+  const d=state.data||{};const mn=d.milkMinMl||20,mx=d.milkMaxMl||200,st=d.milkStepMl||10;
+  const cur=kind==='mother'?state.milkMotherMl:state.milkModifiedMl;
+  setText('mlPopTitle',kind==='mother'?'Ilość mleka matki':'Ilość mleka modyfikowanego');
+  const r=$('mlPopRange');r.min=mn;r.max=mx;r.step=st;r.value=cur;
+  setText('mlPopVal',`${cur} ml`);
+  $('mlPop').classList.remove('hidden');
+}
+function closeMlPop(){$('mlPop').classList.add('hidden');state.mlPopKind=null}
+function mlPopApply(){
+  const v=+$('mlPopRange').value||0;
+  if(state.mlPopKind==='mother')state.milkMotherMl=v; else if(state.mlPopKind==='modified')state.milkModifiedMl=v;
+  syncDualLabels();
+}
+$('mlPickMother').addEventListener('click',()=>openMlPop('mother'));
+$('mlPickModified').addEventListener('click',()=>openMlPop('modified'));
+$('mlPopRange').addEventListener('input',()=>{setText('mlPopVal',`${$('mlPopRange').value} ml`);mlPopApply()});
+$('mlPopMinus').addEventListener('click',()=>{const r=$('mlPopRange');r.value=Math.max(+r.min,(+r.value||0)-(+r.step||10));setText('mlPopVal',`${r.value} ml`);mlPopApply()});
+$('mlPopPlus').addEventListener('click',()=>{const r=$('mlPopRange');r.value=Math.min(+r.max,(+r.value||0)+(+r.step||10));setText('mlPopVal',`${r.value} ml`);mlPopApply()});
+$('mlPopOk').addEventListener('click',()=>{mlPopApply();closeMlPop()});
+$('mlPopClose').addEventListener('click',closeMlPop);
 $('entryForm').addEventListener('submit',async ev=>{
   ev.preventDefault();const n=$('formNotice');n.className='notice';n.textContent='Zapisywanie…';
   try{
+    // Wylicz osobne ilosci mleka wg zaznaczonych rodzajow (mieszane = obie > 0).
+    // Przy jednym rodzaju bierzemy jego pole; suwak juz zsynchronizowal to pole.
+    const milkAmounts=()=>({
+      mother: state.milkMother ? (+state.milkMotherMl||0) : 0,
+      modified: state.milkModified ? (+state.milkModifiedMl||0) : 0,
+    });
     let url='/api/entry', body;
     if(state.editFeedLine!=null){
       // EDYCJA istniejacego karmienia -> /api/update-feeding (in-place)
@@ -951,7 +1023,7 @@ $('entryForm').addEventListener('submit',async ev=>{
       if(bottle&&!state.milkMother&&!state.milkModified){n.className='notice error';n.textContent='Zaznacz rodzaj mleka albo zwiń butelkę (bez mleka).';return}
       url='/api/update-feeding';
       body=new URLSearchParams({feedLine:String(state.editFeedLine),when:$('entryTime').value});
-      if(bottle){body.set('milkMl',$('milkMl').value);body.set('milkMother',state.milkMother?'1':'0');body.set('milkModified',state.milkModified?'1':'0')}
+      if(bottle){const a=milkAmounts();body.set('milkMotherMl',String(a.mother));body.set('milkModifiedMl',String(a.modified))}
       else{body.set('milkRemove','1')} // butelka zwinieta => brak mleka
     }
     else if(state.pumpMode){body=new URLSearchParams({type:'ODCIAGANIE',when:$('entryTime').value,ml:$('milkMl').value})}
@@ -959,7 +1031,7 @@ $('entryForm').addEventListener('submit',async ev=>{
       const extra=state.bottleOpen;
       if(extra&&!state.milkMother&&!state.milkModified){n.className='notice error';n.textContent='Zaznacz rodzaj mleka (matki i/lub modyfikowane).';return}
       body=new URLSearchParams({type:'KARMIENIE',when:$('entryTime').value,ml:'0',extraMilk:extra?'1':'0',lewaMin:Number($('piersL').value)||0,prawaMin:Number($('piersR').value)||0});
-      if(extra){body.set('milkMl',$('milkMl').value);body.set('milkMother',state.milkMother?'1':'0');body.set('milkModified',state.milkModified?'1':'0')}
+      if(extra){const a=milkAmounts();body.set('milkMotherMl',String(a.mother));body.set('milkModifiedMl',String(a.modified))}
     }
     const r=await request(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
     n.className='notice ok';n.textContent=r.message||'Zapisano.';toast(state.editFeedLine!=null?'Zapisano zmiany':(state.pumpMode?'Zapisano odciąganie':'Zapisano karmienie'));

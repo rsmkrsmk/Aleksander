@@ -94,17 +94,29 @@ data,godzina,typ,ml,piers_lewa_min,piers_prawa_min
 
 ### 2.2. KLUCZOWA RELACJA: karmienie ↔ mleko (dwa wiersze o tej samej godzinie)
 
-Karmienie z butelką to **fizycznie DWA wiersze CSV o identycznej dacie i godzinie**:
+Karmienie z butelką to **fizycznie wiersz KARMIENIE + wiersz(e) mleka o identycznej dacie i godzinie**:
 ```
-2026-09-02,08:00,KARMIENIE,0,10,5      ← karmienie (piersi 10/5 min)
-2026-09-02,08:00,MLEKO_MIESZANE,120    ← sparowane mleko (ta sama godzina)
+2026-09-02,08:00,KARMIENIE,0,10,5           ← karmienie (piersi 10/5 min)
+2026-09-02,08:00,MLEKO_MATKI,90             ← mleko matki
+2026-09-02,08:00,MLEKO_MODYFIKOWANE,50      ← mleko modyfikowane (mieszane = dwa wiersze)
 ```
-- **Parowanie odbywa się WYŁĄCZNIE po zgodności `data`+`godzina`** (nie ma żadnego ID relacji).
-- `appendEntry` zapisuje je **parami** (mleko tuż za karmieniem), ale logika edycji/parowania nie może
-  zakładać sąsiedztwa — szuka pary po czasie.
-- Wyliczanie typu mleka z dwóch checkboxów: `mother && modified ⇒ MLEKO_MIESZANE`; sam `mother ⇒ MLEKO_MATKI`;
-  sam `modified ⇒ MLEKO_MODYFIKOWANE`. Ta reguła jest **identyczna** w firmware (`handleApiEntry`,
-  `handleApiUpdateFeeding`) i PHP (`api.php`).
+- **Parowanie odbywa się WYŁĄCZNIE po zgodności `data`+`godzina`** (nie ma żadnego ID relacji). Do jednego
+  karmienia może należeć **0, 1 lub 2 wiersze mleka** — dlatego logika parowania/edycji zbiera WSZYSTKIE
+  wiersze `MLEKO_*` o danym czasie (`.filter`, nie `.find`).
+- **MLEKO MIESZANE = DWA osobne wiersze** `MLEKO_MATKI,X` + `MLEKO_MODYFIKOWANE,Y` (osobne ilości) o tej samej
+  godzinie co karmienie. To pozwala podać różne ilości mleka matki i modyfikowanego. Zapis pojedynczego rodzaju
+  = jeden wiersz `MLEKO_MATKI` LUB `MLEKO_MODYFIKOWANE`.
+- **`MLEKO_MIESZANE` (stary, jednowierszowy typ)** NIE jest już zapisywany przez API HTTP (panel + strona WWW
+  urządzenia), ale POZOSTAJE w pełni obsługiwany przy **odczycie/statystykach/wykresach** dla danych
+  historycznych (`isMilkType`, `milkTypeLabel`, `buildDayStats`→`mixedMilkMl`). Przy edycji karmienia ze starym
+  `MLEKO_MIESZANE` prefill rozbija tę wartość na oba rodzaje. **Ekran LVGL urządzenia** (poza zakresem tej zmiany)
+  nadal może zapisać `MLEKO_MIESZANE` jednowierszowo — statystyki to poprawnie liczą.
+- `appendEntry`/zapis przez API dodaje wiersze mleka **tuż za** wierszem KARMIENIE, ale logika parowania nie
+  zakłada sąsiedztwa — dopasowuje po czasie.
+- **Kontrakt przewodowy (wire)** wyboru mleka: `milkMotherMl` + `milkModifiedMl` (osobne ilości; 0 = brak danego
+  rodzaju; obie >0 = mieszane). Wsteczna zgodność: starsze `milkMother`/`milkModified`(+`milkType`) + pojedyncze
+  `milkMl` — przy obu zaznaczonych `milkMl` dzielone równo (reszta do matki). Reguła identyczna w firmware
+  (`milkAmountsFromArgs` w `handleApiEntry`/`handleApiUpdateFeeding`) i PHP (`milkAmountsFromParams` w `api.php`).
 
 ### 2.3. `lineIndex` — identyfikator wiersza (uwaga na stabilność!)
 
@@ -212,13 +224,16 @@ Kolejność w każdej iteracji:
   `archiveDataFileIfHuge()`, `queueTelegram(telegramTextFor(...))`, `requestHostSync()`.
 - **`deleteEntryByIndex(entryIndex, &removed)`** — STRUMIENIOWE przepisanie `src → /karmienia.tmp` z pominięciem
   wiersza o danym indeksie (fizyczna pozycja licząca KAŻDĄ linię), `rename`, `invalidateDayStats()` + `loadLatestEntries()`.
-- **`updateFeeding(feedLineIndex, when, milkType /*nullptr=usuń*/, milkMl, &err)`** — edycja karmienia **W MIEJSCU**:
-  1. Wiersz KARMIENIE pod `feedLineIndex`: podmiana czasu, **minuty piersi zachowane**.
-  2. Sparowane `MLEKO_*` rozpoznane po **STARYM** czasie karmienia: `nullptr`⇒pomiń (usuń), inaczej podmień typ/ml
-     i przepisz na NOWY czas.
-  3. Gdy karmienie NIE miało mleka, a dodajemy — **drugi przebieg** (`tmp → tmp2`) wstawia `MLEKO_*` **tuż za**
-     wierszem KARMIENIE (match `startsWith("newDate,newTime,KARMIENIE,0,")`).
-  4. `rename`, `invalidateDayStats()` + `loadLatestEntries()`. **Kolejność wierszy zachowana.**
+- **`updateFeeding(feedLineIndex, when, motherMl, modifiedMl, &err)`** — edycja karmienia **W MIEJSCU** (JEDEN
+  przebieg `src → /karmienia.tmp`, bez drugiego pliku tymczasowego):
+  1. Wiersz KARMIENIE pod `feedLineIndex`: podmiana czasu, **minuty piersi zachowane**; TUŻ ZA nim wstawia nowe
+     wiersze mleka: `MLEKO_MATKI` (gdy `motherMl>0`) i `MLEKO_MODYFIKOWANE` (gdy `modifiedMl>0`) — mieszane = oba,
+     brak mleka = obie 0.
+  2. WSZYSTKIE dotychczasowe wiersze `MLEKO_*` o **STARYM** czasie karmienia (w tym stare jednowierszowe
+     `MLEKO_MIESZANE`) są **pomijane** (usuwane) — odtwarzane z powyższych ilości.
+  3. `rename`, `invalidateDayStats()` + `loadLatestEntries()`. **Kolejność wierszy zachowana.**
+  Argumenty `motherMl`/`modifiedMl` pochodzą z `milkAmountsFromArgs()` (parsuje `milkMotherMl`/`milkModifiedMl`
+  albo wstecznie `milkMother`/`milkModified`+`milkMl`).
 - **`refreshDayStats()`** — jeden skan całego pliku do `statsData[0..7]` (`STATS_DAY_COUNT=8`). Sen parowany
   `SEN_START→SEN_STOP`: `accrueNapCount` (drzemka tylko gdy start NIE w porze nocnej), `accrueSleepInterval`
   (dzieli sen na segmenty noc/dzień krokami do granicy godzinowej, guard 4000; otwarty sen bez STOP doliczany do
@@ -368,7 +383,7 @@ Architektura warstwowa: **UI (`ui/`) → API JSON (`engine/api.php`) → Reposit
 allEntries(): array                       // [{date,time,type,ml,piersLeft,piersRight,lineIndex}, ...] chronologicznie
 append(type, DateTimeImmutable $when, ml, piersLeft=-1, piersRight=-1): bool
 deleteByIndex(int $lineIndex): array       // ['ok'=>bool, 'removed'=>string]
-updateFeeding(int $feedLineIndex, DateTimeImmutable $when, ?string $milkType, int $milkMl): array // ['ok','message']
+updateFeeding(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array // ['ok','message'] — mieszane = obie >0 (dwa wiersze); obie 0 = usuń mleko
 importCsv(string $rawText): array          // ['ok','imported','skipped']
 replaceRawCsv(string $rawText): array      // ['ok','backup','lines','message']
 rawCsv(): string
@@ -381,7 +396,11 @@ loadSettings(): array; saveSettings(array): void
 - `allEntries()` — czyta plik, zdejmuje nagłówek, `lineIndex=$idx` (fizyczny, dla KAŻDEJ linii).
 - `append()` — `Domain::toCsvRow(...)` z `FILE_APPEND|LOCK_EX`.
 - `deleteByIndex()` — przepisuje plik pomijając wiersz o indeksie; zwraca opis (`describeCsvEntry`).
-- **`updateFeeding()`** (edycja **W MIEJSCU**): lokalizuje KARMIENIE po `feedLineIndex`; znajduje sparowane
+- **`updateFeeding($feedLineIndex,$when,$motherMl,$modifiedMl)`** (edycja **W MIEJSCU**): usuwa WSZYSTKIE sparowane
+  wiersze `MLEKO_*` o starym czasie (w tym stare `MLEKO_MIESZANE`), przepisuje KARMIENIE na nowy czas (piersi
+  zachowane) i wstawia nowe wiersze `MLEKO_MATKI`/`MLEKO_MODYFIKOWANE` (wg ilości >0) tuż za karmieniem. Poniższy
+  akapit opisuje starszą (jednowierszową) wersję — obecnie zastąpioną modelem dwóch wierszy:
+- (hist.) dawniej `updateFeeding()` lokalizowało KARMIENIE po `feedLineIndex`; znajdowało sparowane
   `MLEKO_*` po **starym** `date`+`time`; buduje nowy wiersz karmienia (piersi zachowane) i mleka; przepisuje plik
   zachowując pozycje — mleko podmienione/usunięte, a przy braku pary wstawione **tuż za** karmieniem.
 - `replaceRawCsv()` — waliduje (nagłówek + ≥1 poprawny wiersz), robi kopię `.bakap`, podmienia dane (znormalizowane).
@@ -476,9 +495,9 @@ Obie warstwy (serwer urządzenia i `engine/api.php`) implementują ten sam zesta
 | `/api/entries?date=YYYY-MM-DD` | GET | `date` | `{date, entries:[{time,type,label,ml,piersLeftMin,piersRightMin,lineIndex}]}`. |
 | `/api/weight-series` | GET | – | `{birthWeightG, points:[{day,date,g}]}`. |
 | `/export.csv` | GET | – | surowy CSV (`attachment`). |
-| `/api/entry` | POST | `type,when,ml` (+`extraMilk,milkMl,milkMother,milkModified,milkType,lewaMin,prawaMin`) | dodanie wpisu; walidacja zakresów; `KARMIENIE` musi mieć `ml=0`, opcjonalne mleko (oba rodzaje ⇒ `MLEKO_MIESZANE`). 201/400/409/500/503. |
+| `/api/entry` | POST | `type,when,ml` (+`extraMilk`, `milkMotherMl`,`milkModifiedMl`; wstecznie `milkMl,milkMother,milkModified,milkType`; `lewaMin,prawaMin`) | dodanie wpisu; walidacja zakresów; `KARMIENIE` musi mieć `ml=0`, opcjonalne mleko: `milkMotherMl>0`⇒wiersz `MLEKO_MATKI`, `milkModifiedMl>0`⇒`MLEKO_MODYFIKOWANE` (oba ⇒ dwa wiersze = mieszane). 201/400/409/500/503. |
 | `/api/delete-entry` | POST | `line` (=lineIndex) | `{message, removed}` / 400. |
-| `/api/update-feeding` | POST | `feedLine, when`, oraz `milkMother/milkModified/milkMl` **albo** `milkRemove=1` | edycja karmienia in‑place (mleko + godzina; piersi bez zmian). Brak rodzaju i brak `milkRemove` ⇒ 400 „Zaznacz rodzaj mleka albo usuń mleko”. 200/400. |
+| `/api/update-feeding` | POST | `feedLine, when`, oraz `milkMotherMl`+`milkModifiedMl` (osobne ilości; wstecznie `milkMother/milkModified/milkMl`) **albo** `milkRemove=1` | edycja karmienia in‑place (mleko + godzina; piersi bez zmian). Mieszane = obie ilości >0 (dwa wiersze). Obie 0 i brak `milkRemove` ⇒ 400. 200/400. |
 | `/api/event` | POST | `type`∈`{PIELUCHA_MOKRA,PIELUCHA_BRUDNA,WITAMINA_D,ODCIAGANIE,WAGA,SEN_START,SEN_STOP}`, opc. `when,ml` | szybkie zdarzenia; WAGA/ODCIAGANIE walidowane; WITAMINA_D idempotentna w dniu. 201. |
 | `/api/import` | POST | body `text/csv` ≤512 KB | zastąpienie danych + backup. `{message}` z liczbą imported/skipped. |
 | `/api/upload-data` | POST | multipart `file` (lub raw), opc. `X-Upload-Token` | (hosting) kopia `.bakap` + podmiana; token wymagany tylko gdy `UPLOAD_TOKEN` niepusty. |
@@ -490,13 +509,15 @@ Obie warstwy (serwer urządzenia i `engine/api.php`) implementują ten sam zesta
 ## 7. Przepływy end‑to‑end (najważniejsze scenariusze)
 
 1. **Dodanie karmienia z butelką (na urządzeniu):** UI → `POST /api/entry` (`KARMIENIE`, `ml=0`, `extraMilk=1`,
-   `milkMl`, `milkMother/milkModified`, `lewaMin/prawaMin`) → `appendEntry(KARMIENIE...)` + `appendEntry(MLEKO_*...)`
-   (dwa wiersze, ta sama godzina) → `invalidateDayStats` + `loadLatestEntries` + `queueTelegram` + `requestHostSync`
-   → `telegramTask` wysyła CSV na hosting (`/api/upload-data`) → hosting robi `.bakap` i podmienia dane.
-2. **Edycja karmienia (mleko + godzina):** UI (strona urządzenia lub panel) → `openEditFeeding(feed,milk)` (prefill) →
-   submit `POST /api/update-feeding` → `updateFeeding()` (in‑place: karmienie + sparowane mleko po starym czasie;
-   dodanie mleka wstawia wiersz tuż za karmieniem) → `loadLatestEntries` → `requestHostSync`. UI odświeża `openDay`
-   (świeże `lineIndex`).
+   `milkMotherMl`/`milkModifiedMl`, `lewaMin/prawaMin`) → `appendEntry(KARMIENIE...)` + `appendEntry(MLEKO_MATKI...)`
+   i/lub `appendEntry(MLEKO_MODYFIKOWANE...)` (mleko mieszane = dwa wiersze mleka, ta sama godzina) →
+   `invalidateDayStats` + `loadLatestEntries` + `queueTelegram` + `requestHostSync` → `telegramTask` wysyła CSV na
+   hosting (`/api/upload-data`) → hosting robi `.bakap` i podmienia dane.
+2. **Edycja karmienia (mleko + godzina):** UI (strona urządzenia lub panel) → `openEditFeeding(feed, milks[])`
+   (prefill z WSZYSTKICH sparowanych wierszy mleka; mieszane → dwa pola ilości z popoverem) → submit
+   `POST /api/update-feeding` (`milkMotherMl`/`milkModifiedMl` albo `milkRemove=1`) → `updateFeeding()` (in‑place:
+   usuwa wszystkie stare wiersze mleka po starym czasie, wstawia nowe wg ilości tuż za karmieniem) →
+   `loadLatestEntries` → `requestHostSync`. UI odświeża `openDay` (świeże `lineIndex`).
 3. **Sen:** przycisk „Zasnął/Obudził się” → `POST /api/event` `SEN_START`/`SEN_STOP`. `refreshDayStats`/`buildDayStats`
    parują interwały, `handleApiStatus` liczy stan (`spi/czuwa/okno/przekroczone`) z okna czuwania Napper.
 4. **Waga:** `POST /api/event` `WAGA` (gramy) → wykres z `GET /api/weight-series` na tle WHO + pasmo przyrostu od wagi wypisowej.
@@ -521,7 +542,10 @@ Obie warstwy (serwer urządzenia i `engine/api.php`) implementują ten sam zesta
 
 - **Gałąź robocza:** `v3`. **Nie mergować** do `main` bez wyraźnego polecenia.
 - **Zmiany tylko warstwy wizualnej** wykonuj wyłącznie, gdy tak ustalono; nie ruszaj logiki „przy okazji”.
-- **`MLEKO_MIESZANE`** to pełnoprawna trzecia kategoria (matki + modyfikowane).
+- **Mleko mieszane = DWA osobne wiersze** `MLEKO_MATKI` + `MLEKO_MODYFIKOWANE` (osobne ilości), wybierane w UI przez
+  dwa pola z popoverem gdy zaznaczono oba rodzaje. Stary jednowierszowy typ `MLEKO_MIESZANE` NIE jest już
+  zapisywany przez API, ale MUSI pozostać obsługiwany przy odczycie/statystykach/wykresach (dane historyczne) —
+  nie usuwać go z `isMilkType`/`milkTypeLabel`/agregacji (`mixedMilkMl`). Ekran LVGL urządzenia pozostaje bez zmian.
 - **Zakres mleka (butelka):** suwak 20–200, krok 10, domyślnie 60. **Odciąganie** ma osobny, niezmienny zakres (10–120, dom. 30).
 - **Edycja karmienia:** in‑place (bez zmiany kolejności wierszy CSV); minuty piersi zachowane; edycji **nie ma** na
   fizycznym ekranie LVGL (świadomie) — tylko strona WWW urządzenia + panel hostingu.

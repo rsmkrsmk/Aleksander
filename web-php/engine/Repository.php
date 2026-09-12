@@ -24,14 +24,19 @@ interface Repository
     /**
      * Edytuje wpis KARMIENIA (i jego sparowane mleko) W MIEJSCU — bez zmiany
      * kolejnosci wierszy. $feedLineIndex wskazuje wiersz typu KARMIENIE. Nowy czas
-     * $when zapisywany jest na tym wierszu (minuty piersi zachowane). Sparowane
-     * mleko (wiersz MLEKO_* o tym samym starym czasie):
-     *   - $milkType === null  => usun mleko (jesli bylo),
-     *   - $milkType podany     => ustaw/podmien mleko (typ + $milkMl); gdy karmienie
-     *                             nie mialo mleka, wstaw wiersz TUZ ZA KARMIENIEM.
+     * $when zapisywany jest na tym wierszu (minuty piersi zachowane).
+     *
+     * Mleko opisuja DWIE osobne ilosci (mleko mieszane = obie > 0, zapisywane jako
+     * DWA wiersze MLEKO_MATKI + MLEKO_MODYFIKOWANE o tej samej godzinie):
+     *   - $motherMl   > 0 => wiersz MLEKO_MATKI z ta iloscia,
+     *   - $modifiedMl > 0 => wiersz MLEKO_MODYFIKOWANE z ta iloscia,
+     *   - obie == 0       => brak mleka (usun WSZYSTKIE sparowane wiersze mleka).
+     * Wszystkie dotychczasowe wiersze mleka o starym czasie karmienia sa usuwane,
+     * a nowe (wg powyzszych ilosci) wstawiane TUZ ZA wierszem KARMIENIE. Obsluguje
+     * takze STARE wpisy jednowierszowe MLEKO_MIESZANE (są usuwane jak kazde mleko pary).
      * Zwraca ['ok'=>bool, 'message'=>string].
      */
-    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, ?string $milkType, int $milkMl): array;
+    public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array;
 
     /** Import: zastepuje caly zbior danych zawartoscia CSV. Zwraca ['ok','imported','skipped']. */
     public function importCsv(string $rawText): array;

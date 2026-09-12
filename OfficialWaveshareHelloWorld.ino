@@ -398,7 +398,7 @@ void dayStats(time_t day, DaySummary &out);
 String formatDaySummaryLine(const DaySummary &s);
 String formatDayExtraLine(const DaySummary &s);
 bool deleteEntryByIndex(int entryIndex, String &removedDescription);
-bool updateFeeding(int feedLineIndex, time_t when, const char *milkType, int milkMl, String &err);
+bool updateFeeding(int feedLineIndex, time_t when, int motherMl, int modifiedMl, String &err);
 time_t dayOffsetFromToday(uint8_t daysBack);
 time_t beginningOfDay(time_t value);
 String dateIso(time_t value);
@@ -459,6 +459,7 @@ void handleApiStatus();
 void handleApiEntries();
 void handleApiWeightSeries();
 void handleApiEntry();
+void milkAmountsFromArgs(int &motherMl, int &modifiedMl);
 void handleApiDeleteEntry();
 void handleApiSendBackup();
 void handleApiEvent();
@@ -1456,14 +1457,14 @@ bool deleteEntryByIndex(int entryIndex, String &removedDescription) {
 // KARMIENIE po naglowku (liczona jak w handleApiEntries/deleteEntryByIndex — dla KAZDEJ
 // linii). Przebieg strumieniowy zrodlo -> /karmienia.tmp:
 //   1) wiersz KARMIENIE pod feedLineIndex: podmiana czasu na `when`, minuty piersi
-//      zachowane bez zmian (edycja godziny nie rusza karmienia piersia);
-//   2) sparowany wiersz MLEKO_* rozpoznajemy po STARYM czasie karmienia (ta sama
-//      data+godzina co oryginalny wiersz KARMIENIE): milkType==nullptr => usuwamy,
-//      podany => podmieniamy typ/ilosc i przepisujemy na NOWY czas;
-//   3) gdy karmienie nie mialo mleka, a dodajemy (milkType!=nullptr) => wstawiamy nowy
-//      wiersz MLEKO_* TUZ ZA wierszem KARMIENIE (nie na koncu pliku).
-// milkMl jest istotne tylko gdy milkType!=nullptr.
-bool updateFeeding(int feedLineIndex, time_t when, const char *milkType, int milkMl, String &err) {
+//      zachowane bez zmian; TUZ ZA nim wstawiamy nowe wiersze mleka wg ilosci:
+//        motherMl   > 0 => MLEKO_MATKI,
+//        modifiedMl > 0 => MLEKO_MODYFIKOWANE,
+//      (mleko mieszane = obie > 0 => dwa wiersze; obie == 0 => brak mleka);
+//   2) WSZYSTKIE dotychczasowe wiersze mleka o STARYM czasie karmienia (w tym stare
+//      jednowierszowe MLEKO_MIESZANE) sa POMIJANE (usuwane) — odtwarzamy je z ilosci.
+// Jeden przebieg, bez drugiego pliku tymczasowego.
+bool updateFeeding(int feedLineIndex, time_t when, int motherMl, int modifiedMl, String &err) {
   err = "";
   if (!storageReady) { err = "Pamiec niedostepna."; return false; }
   if (feedLineIndex < 0) { err = "Nieprawidlowy indeks."; return false; }
@@ -1485,7 +1486,6 @@ bool updateFeeding(int feedLineIndex, time_t when, const char *milkType, int mil
   src.readStringUntil('\n'); // pomijamy naglowek zrodla
   int dataIndex = 0;
   bool feedFound = false;
-  bool milkHandled = false;      // podmieniono/usunieto istniejacy wiersz mleka pary
   String oldFeedDate = "";       // stary czas karmienia — po nim rozpoznajemy sparowane mleko
   String oldFeedTime = "";
   while (src.available()) {
@@ -1513,26 +1513,28 @@ bool updateFeeding(int feedLineIndex, time_t when, const char *milkType, int mil
       snprintf(row, sizeof(row), "%s,%s,KARMIENIE,0,%d,%d",
                newDate, newTime, max(feed.piersLeft, 0), max(feed.piersRight, 0));
       dst.println(row);
-      // Jesli dodajemy mleko do karmienia BEZ mleka, wstaw je zaraz za karmieniem.
-      // (Gdyby para juz istniala, zostanie zignorowana ponizej — obsluzymy ja przy
-      //  napotkaniu jej wiersza. By nie wstawic dwa razy, znacznik ustawiamy dopiero
-      //  wtedy, gdy faktycznie natrafimy na istniejacy wiersz mleka.)
+      // TUZ ZA karmieniem wstawiamy nowe wiersze mleka (matki/modyfikowane) wg ilosci.
+      if (motherMl > 0) {
+        char m[96];
+        snprintf(m, sizeof(m), "%s,%s,MLEKO_MATKI,%d", newDate, newTime, motherMl);
+        dst.println(m);
+      }
+      if (modifiedMl > 0) {
+        char m[96];
+        snprintf(m, sizeof(m), "%s,%s,MLEKO_MODYFIKOWANE,%d", newDate, newTime, modifiedMl);
+        dst.println(m);
+      }
     } else {
       String trimmed = line;
       trimmed.trim();
       CsvEntry cur;
       const bool parsed = parseCsvLine(trimmed, cur);
-      // Sparowane mleko: ten sam STARY czas co karmienie + typ MLEKO_*.
-      if (parsed && feedFound && !milkHandled && isMilkType(cur.type) &&
+      // Stare sparowane mleko (ten sam STARY czas co karmienie + typ MLEKO_*): pomijamy
+      // — zostalo juz odtworzone z nowych ilosci tuz za karmieniem. Dotyczy WSZYSTKICH
+      // takich wierszy (matki + modyfikowane + ewentualne stare MLEKO_MIESZANE).
+      if (parsed && feedFound && isMilkType(cur.type) &&
           cur.date == oldFeedDate && cur.time == oldFeedTime) {
-        milkHandled = true;
-        if (milkType == nullptr) {
-          // Usuwamy mleko — pomijamy wiersz.
-        } else {
-          char row[96];
-          snprintf(row, sizeof(row), "%s,%s,%s,%d", newDate, newTime, milkType, milkMl);
-          dst.println(row);
-        }
+        // pomijamy
       } else {
         dst.println(line);
       }
@@ -1540,56 +1542,12 @@ bool updateFeeding(int feedLineIndex, time_t when, const char *milkType, int mil
     ++dataIndex;
   }
   src.close();
+  dst.close();
 
   if (!feedFound) {
-    dst.close();
     LittleFS.remove("/karmienia.tmp");
     err = "Nie znaleziono karmienia pod wskazanym indeksem.";
     return false;
-  }
-  // Dodanie mleka do karmienia, ktore go nie mialo: nie napotkalismy pary,
-  // a mamy typ mleka -> dopisz wiersz. UWAGA: powinien stac zaraz za karmieniem,
-  // ale przy przepisaniu strumieniowym nie mozemy juz cofnac zapisu. W praktyce
-  // wiersz MLEKO_* zawsze bezposrednio nastepuje po KARMIENIU (appendEntry pisze je
-  // parami), a przy braku pary dopisujemy na koniec — panel WWW i tak laczy wpisy po
-  // czasie, wiec spojnosc danych jest zachowana. Aby jednak zagwarantowac sasiedztwo
-  // takze przy edycji karmienia bez mleka, wykonujemy drugi, krotki przebieg ponizej.
-  dst.close();
-
-  if (!milkHandled && milkType != nullptr) {
-    // Drugi przebieg: przepisz tmp -> tmp2, wstawiajac MLEKO_* tuz za wierszem KARMIENIE
-    // o NOWYM czasie (feedLineIndex mogl sie przesunac, wiec dopasowujemy po tresci).
-    File s2 = LittleFS.open("/karmienia.tmp", FILE_READ);
-    if (!s2) { LittleFS.remove("/karmienia.tmp"); err = "Blad zapisu mleka."; return false; }
-    File d2 = LittleFS.open("/karmienia2.tmp", FILE_WRITE);
-    if (!d2) { s2.close(); LittleFS.remove("/karmienia.tmp"); err = "Blad zapisu mleka."; return false; }
-    char feedRow[96];
-    snprintf(feedRow, sizeof(feedRow), "%s,%s,KARMIENIE,0,", newDate, newTime);
-    char milkRow[96];
-    snprintf(milkRow, sizeof(milkRow), "%s,%s,%s,%d", newDate, newTime, milkType, milkMl);
-    bool inserted = false;
-    while (s2.available()) {
-      String line = s2.readStringUntil('\n');
-      while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
-        line.remove(line.length() - 1);
-      }
-      d2.println(line);
-      if (!inserted && line.startsWith(feedRow)) {
-        d2.println(milkRow);
-        inserted = true;
-      }
-    }
-    s2.close();
-    d2.close();
-    LittleFS.remove("/karmienia.tmp");
-    if (!LittleFS.rename("/karmienia2.tmp", DATA_FILE_PATH)) {
-      LittleFS.remove("/karmienia2.tmp");
-      err = "Nie udalo sie zapisac danych.";
-      return false;
-    }
-    invalidateDayStats();
-    loadLatestEntries();
-    return true;
   }
 
   if (!LittleFS.rename("/karmienia.tmp", DATA_FILE_PATH)) {
@@ -2321,6 +2279,42 @@ void handleApiWeightSeries() {
   webServer.sendContent("");
 }
 
+// Zwraca przez referencje ilosci mleka matki i modyfikowanego z argumentow HTTP.
+// Mleko mieszane = obie > 0 (zapisywane jako dwa osobne wiersze). Zerowa ilosc = brak rodzaju.
+//   NOWY format (osobne ilosci): milkMotherMl, milkModifiedMl.
+//   WSTECZNA ZGODNOSC (jedna ilosc milkMl + flagi milkMother/milkModified albo milkType):
+//     jeden rodzaj => cala ilosc; oba rodzaje => milkMl dzielone rowno (reszta do matki).
+// Kazda ilosc > 0 ograniczana do zakresu MILK_ML_MIN..MILK_ML_MAX.
+static int clampMilkMl(int v) { return v <= 0 ? 0 : constrain(v, MILK_ML_MIN, MILK_ML_MAX); }
+void milkAmountsFromArgs(int &motherMl, int &modifiedMl) {
+  motherMl = 0; modifiedMl = 0;
+  // Preferuj nowy format z osobnymi ilosciami.
+  if (webServer.hasArg("milkMotherMl") || webServer.hasArg("milkModifiedMl")) {
+    motherMl = clampMilkMl(webServer.arg("milkMotherMl").toInt());
+    modifiedMl = clampMilkMl(webServer.arg("milkModifiedMl").toInt());
+    return;
+  }
+  // Wsteczna zgodnosc: jedna ilosc + wybor rodzaju.
+  bool mother = webServer.hasArg("milkMother") && webServer.arg("milkMother") == "1";
+  bool modified = webServer.hasArg("milkModified") && webServer.arg("milkModified") == "1";
+  if (!mother && !modified && webServer.hasArg("milkType")) {
+    const String mt = webServer.arg("milkType");
+    mother = (mt == "MLEKO_MATKI" || mt == "MLEKO_MIESZANE");
+    modified = (mt == "MLEKO_MODYFIKOWANE" || mt == "MLEKO_MIESZANE");
+  }
+  const int ml = webServer.arg("milkMl").toInt();
+  if (ml <= 0 || (!mother && !modified)) return;
+  if (mother && modified) {
+    const int half = ml / 2;
+    motherMl = clampMilkMl(ml - half); // reszta do matki
+    modifiedMl = clampMilkMl(half);
+  } else if (mother) {
+    motherMl = clampMilkMl(ml);
+  } else {
+    modifiedMl = clampMilkMl(ml);
+  }
+}
+
 void handleApiEntry() {
   struct tm currentTime;
   if (!currentLocalTime(currentTime)) {
@@ -2401,34 +2395,14 @@ void handleApiEntry() {
   }
 
   const bool extraMilk = webServer.hasArg("extraMilk") && webServer.arg("extraMilk") == "1";
-  String milkType;
-  int milkMl = 0;
+  // Mleko rozbite na DWIE osobne ilosci (mieszane = obie > 0 => dwa wiersze MLEKO_*).
+  int motherMl = 0, modifiedMl = 0;
   if (extraMilk) {
-    if (!webServer.hasArg("milkMl")) {
-      sendJson(400, "{\"message\":\"Brakuje ilosci mleka.\"}");
+    milkAmountsFromArgs(motherMl, modifiedMl);
+    if (motherMl == 0 && modifiedMl == 0) {
+      sendJson(400, "{\"message\":\"Zaznacz rodzaj mleka (matki i/lub modyfikowane) i podaj ilosc.\"}");
       return;
     }
-    milkMl = webServer.arg("milkMl").toInt();
-    if (milkMl < MILK_ML_MIN || milkMl > MILK_ML_MAX) {
-      sendJson(400, "{\"message\":\"Nieprawidlowa ilosc mleka.\"}");
-      return;
-    }
-    // Nowy format: flagi milkMother/milkModified (mozna obie => MLEKO_MIESZANE).
-    // Wsteczna zgodnosc: gdy brak flag, uzyj starego milkType.
-    bool mother = webServer.hasArg("milkMother") && webServer.arg("milkMother") == "1";
-    bool modified = webServer.hasArg("milkModified") && webServer.arg("milkModified") == "1";
-    if (!mother && !modified && webServer.hasArg("milkType")) {
-      const String mt = webServer.arg("milkType");
-      mother = (mt == "MLEKO_MATKI");
-      modified = (mt == "MLEKO_MODYFIKOWANE");
-    }
-    if (!mother && !modified) {
-      sendJson(400, "{\"message\":\"Zaznacz rodzaj mleka (matki i/lub modyfikowane).\"}");
-      return;
-    }
-    if (mother && modified) milkType = "MLEKO_MIESZANE";
-    else if (mother) milkType = "MLEKO_MATKI";
-    else milkType = "MLEKO_MODYFIKOWANE";
   }
 
   // Minuty karmienia piersią są opcjonalne (0, gdy panel ich nie wysłał).
@@ -2439,8 +2413,13 @@ void handleApiEntry() {
     sendJson(500, "{\"message\":\"Nie udalo sie zapisac karmienia.\"}");
     return;
   }
-  if (extraMilk && !appendEntry(milkType.c_str(), when, milkMl)) {
-    sendJson(500, "{\"message\":\"Karmienie zapisano, ale nie udalo sie zapisac dodatkowego mleka.\"}");
+  // Mleko mieszane = dwa osobne wiersze o tej samej godzinie co karmienie.
+  if (motherMl > 0 && !appendEntry("MLEKO_MATKI", when, motherMl)) {
+    sendJson(500, "{\"message\":\"Karmienie zapisano, ale nie udalo sie zapisac mleka matki.\"}");
+    return;
+  }
+  if (modifiedMl > 0 && !appendEntry("MLEKO_MODYFIKOWANE", when, modifiedMl)) {
+    sendJson(500, "{\"message\":\"Karmienie zapisano, ale nie udalo sie zapisac mleka modyfikowanego.\"}");
     return;
   }
 
@@ -2466,8 +2445,9 @@ void handleApiDeleteEntry() {
 
 // Edycja karmienia W MIEJSCU (mleko + godzina), ten sam kontrakt co panel WWW
 // (POST /api/update-feeding): feedLine (indeks wiersza KARMIENIE), when (nowy czas),
-// oraz jedno z: milkRemove=1 (usun mleko) albo milkMother/milkModified (+ milkMl).
-// Oba rodzaje zaznaczone => MLEKO_MIESZANE. Minuty piersi zachowane bez zmian.
+// oraz jedno z: milkRemove=1 (usun mleko) albo osobne ilosci milkMotherMl/milkModifiedMl
+// (mleko mieszane = obie > 0 => dwa wiersze). Wsteczna zgodnosc: milkMother/milkModified+milkMl.
+// Minuty piersi zachowane bez zmian.
 void handleApiUpdateFeeding() {
   if (!storageReady) {
     sendJson(503, "{\"message\":\"Pamiec wewnetrzna jest niedostepna.\"}");
@@ -2485,32 +2465,18 @@ void handleApiUpdateFeeding() {
   }
 
   const bool milkRemove = webServer.hasArg("milkRemove") && webServer.arg("milkRemove") == "1";
-  String milkType;   // pusty => brak mleka (usun)
-  int milkMl = 0;
+  // Mleko rozbite na DWIE osobne ilosci (mieszane = obie > 0 => dwa wiersze).
+  int motherMl = 0, modifiedMl = 0;
   if (!milkRemove) {
-    bool mother = webServer.hasArg("milkMother") && webServer.arg("milkMother") == "1";
-    bool modified = webServer.hasArg("milkModified") && webServer.arg("milkModified") == "1";
-    if (!mother && !modified) {
-      sendJson(400, "{\"message\":\"Zaznacz rodzaj mleka albo usun mleko.\"}");
+    milkAmountsFromArgs(motherMl, modifiedMl);
+    if (motherMl == 0 && modifiedMl == 0) {
+      sendJson(400, "{\"message\":\"Zaznacz rodzaj mleka i podaj ilosc albo usun mleko.\"}");
       return;
     }
-    if (!webServer.hasArg("milkMl")) {
-      sendJson(400, "{\"message\":\"Brakuje ilosci mleka.\"}");
-      return;
-    }
-    milkMl = webServer.arg("milkMl").toInt();
-    if (milkMl < MILK_ML_MIN || milkMl > MILK_ML_MAX) {
-      sendJson(400, "{\"message\":\"Nieprawidlowa ilosc mleka.\"}");
-      return;
-    }
-    if (mother && modified) milkType = "MLEKO_MIESZANE";
-    else if (mother) milkType = "MLEKO_MATKI";
-    else milkType = "MLEKO_MODYFIKOWANE";
   }
 
   String err;
-  const char *milkTypeArg = milkType.length() ? milkType.c_str() : nullptr;
-  if (!updateFeeding(feedLine, when, milkTypeArg, milkMl, err)) {
+  if (!updateFeeding(feedLine, when, motherMl, modifiedMl, err)) {
     sendJson(400, "{\"message\":\"" + jsonEscape(err.length() ? err : String("Nie udalo sie zapisac edycji.")) + "\"}");
     return;
   }
