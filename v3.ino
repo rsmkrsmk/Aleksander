@@ -3635,7 +3635,7 @@ void createDiagnosticsScreen() {
   s += "  ostatni push CSV: " + hostTimeAgo(hostLastPushMs) + "\n";
   s += "  ostatni blad: " + hostErrorText(hostLastError) + " (" + String(hostLastError) + ")\n";
   s += "---\n";
-  s += "Wi-Fi: " + (wifiOk ? "polaczono" : "ROZLACZONO") + "\n";
+  s += String("Wi-Fi: ") + (wifiOk ? "polaczono" : "ROZLACZONO") + "\n";
   if (wifiOk) {
     s += "IP: " + WiFi.localIP().toString() + "\n";
     s += "Sygnal: " + String(WiFi.RSSI()) + " dBm\n";
