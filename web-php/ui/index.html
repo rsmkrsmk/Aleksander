@@ -552,9 +552,15 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 @media(min-width:860px){.hero .lead .big{font-size:1.7rem}}
+
+/* ---------------- Przełącznik widoku (v4) ---------------- */
+.viewswitch{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:200;display:flex;justify-content:center}
+.viewswitch button{appearance:none;border:1px solid var(--brd);background:color-mix(in srgb,var(--card-solid) 78%,transparent);color:var(--muted);backdrop-filter:blur(8px);box-shadow:var(--sh-1);border-radius:999px;padding:5px 14px;font-family:var(--fu);font-size:.72rem;font-weight:700;letter-spacing:.03em;cursor:pointer;transition:color .2s,border-color .2s,background .2s}
+.viewswitch button:hover{color:var(--acc);border-color:var(--acc)}
 </style>
 </head>
 <body>
+<div class="viewswitch"><button type="button" id="viewSwitch" title="Przełącz na prostą wersję">wersja prosta</button></div>
 <div class="wrap">
   <!-- TOP BAR -->
   <header class="topbar reveal">
@@ -816,6 +822,19 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 </div></div>
 
 <div class="toasts" id="toastWrap"></div>
+<script>
+/* Przełącznik widoku (v4): zapamiętany wybór ładuje właściwą wersję od razu. */
+(function(){
+  try {
+    if (localStorage.getItem('viewMode') === 'esp') { location.replace('indexesp.html'); return; }
+  } catch(e) {}
+  var btn = document.getElementById('viewSwitch');
+  if (btn) btn.addEventListener('click', function(){
+    try { localStorage.setItem('viewMode', 'esp'); } catch(e) {}
+    location.href = 'indexesp.html';
+  });
+})();
+</script>
 <script src="app.js?v=20260913"></script>
 </body>
 </html>

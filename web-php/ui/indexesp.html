@@ -28,7 +28,7 @@
 .sleep-state{text-align:center;margin:6px 0 2px}.sleep-big{font-size:1.02rem;font-weight:850;color:var(--ink);margin-bottom:10px}.sleep-bar{border-radius:14px;padding:10px 12px;font-size:.82rem;font-weight:850;color:#fff;background:var(--muted)}.sleep-bar.ok{background:#3f9d55}.sleep-bar.warn{background:#D98B5F}.sleep-bar.bad{background:var(--danger)}.sleep-window{margin-top:8px;font-size:.74rem;font-weight:700;color:var(--muted)}
 .sleep-balance{margin-top:14px}.sleep-bal-grid{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:.84rem;margin-top:8px}.sleep-bal-grid .bk{color:var(--muted);font-weight:700}.sleep-bal-grid .bv{text-align:right;font-weight:850;color:var(--ink)}.sleep-bal-grid .bv.ok{color:var(--moss)}
 .feedbar{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:-6px 0 12px}.fb-cell{background:var(--tonal);border-radius:14px;padding:8px 4px;text-align:center;display:flex;flex-direction:column;gap:2px}.fb-cap{font-size:.58rem;font-weight:850;letter-spacing:.04em;color:var(--muted)}.fb-val{font-size:.98rem;font-weight:900;color:var(--moss)}.fb-cell.warn .fb-val{color:var(--acorn)}.fb-cell.danger .fb-val{color:var(--danger)}
-.diag-card.hidden{display:none}.diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:.8rem}.diag-grid .dk{color:var(--muted);font-weight:700}.diag-grid .dv{text-align:right;font-weight:850;color:var(--ink)}.diag-grid .dv.ok{color:var(--moss)}.diag-grid .dv.bad{color:var(--danger)}.diag-toggle{display:inline-flex;align-items:center;gap:6px;cursor:pointer}.diag-toggle input{width:18px;height:18px;accent-color:var(--moss)}
+.diag-card.hidden{display:none}.diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:.8rem}.diag-grid .dk{color:var(--muted);font-weight:700}.diag-grid .dv{text-align:right;font-weight:850;color:var(--ink)}.diag-grid .dv.ok{color:var(--moss)}.diag-grid .dv.bad{color:var(--danger)}.diag-toggle{display:inline-flex;align-items:center;gap:6px;cursor:pointer}.diag-toggle input{width:18px;height:18px;accent-color:var(--moss)}.viewswitch{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:200;display:flex;justify-content:center}.viewswitch button{appearance:none;border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 80%,transparent);color:var(--muted);backdrop-filter:blur(8px);box-shadow:var(--shadow-soft);border-radius:999px;padding:5px 14px;font:inherit;font-size:.72rem;font-weight:800;letter-spacing:.03em;cursor:pointer;transition:color .2s,border-color .2s}.viewswitch button:hover{color:var(--moss);border-color:var(--moss)}
 .dayband-card{padding:12px 14px;margin:0 0 14px}.dayband-head{display:flex;justify-content:space-between;align-items:center;font-size:.7rem;font-weight:850;letter-spacing:.06em;color:var(--muted);margin-bottom:8px}.dayband-legend{display:inline-flex;align-items:center;gap:5px;font-size:.6rem;font-weight:700;letter-spacing:0}.dayband-legend .db{width:9px;height:9px;border-radius:3px;display:inline-block;margin-left:8px}.db.feed{background:var(--acorn)}.db.milk{background:var(--berry)}.db.diaper{background:var(--moss)}.db.sleep{background:#9a8cc4}
 .dayband{position:relative;height:30px;border-radius:9px;overflow:hidden;background:linear-gradient(90deg,#e7edf5 0%,#f4f1e7 25%,#fbf6ec 50%,#f4f1e7 75%,#e7edf5 100%);border:1px solid var(--line)}body.night .dayband{background:linear-gradient(90deg,#1e2740 0%,#2a2f22 25%,#31301f 50%,#2a2f22 75%,#1e2740 100%)}
 .dayband .db-night{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(45deg,rgba(90,110,150,.18),rgba(90,110,150,.18) 4px,transparent 4px,transparent 8px)}
@@ -41,6 +41,7 @@
 </head>
 <body>
 <main class="app">
+  <div class="viewswitch"><button type="button" id="viewSwitch" title="Przełącz na nowoczesną wersję">wersja nowoczesna</button></div>
   <header class="hero">
     <div><div class="hero-line"><h1>LEŚNY DZIENNIK ALEKSANDRA</h1><p id="clock">Łączenie z urządzeniem…</p></div><span class="ip" id="ip">Panel lokalny</span></div>
   </header>
@@ -203,6 +204,17 @@
   </form>
 </div>
 <script>
+/* Przełącznik widoku (v4): zapamiętany wybór ładuje właściwą wersję od razu. */
+(function(){
+  try {
+    if (localStorage.getItem('viewMode') === 'modern') { location.replace('/'); return; }
+  } catch(e) {}
+  var vs = document.getElementById('viewSwitch');
+  if (vs) vs.addEventListener('click', function(){
+    try { localStorage.setItem('viewMode', 'modern'); } catch(e) {}
+    location.href = '/';
+  });
+})();
 const state={data:null,view:'home',activeDay:null,milkMother:true,milkModified:false,editFeedLine:null,editMilkHad:false,milkMotherMl:60,milkModifiedMl:60,mlPopKind:null};
 const $=id=>document.getElementById(id);
 const modals=['calendarModal','detailModal','chartModal','diaperModal','chart5Modal','otherModal','weightModal','sleepModal','bathModal'];
