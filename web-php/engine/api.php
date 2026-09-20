@@ -201,6 +201,8 @@ function handle_api(string $route, string $method, Repository $repo): void
         $ml = (int)param('ml', '0');
         $when = Domain::parseWebDateTime((string)param('when'));
         if ($when === null) sendJson(400, ['message' => 'Nieprawidlowy czas wpisu.']);
+        // Zapis w przyszlosci nie ma sensu — odrzucamy (tolerancja +60 s).
+        if ($when->getTimestamp() > (new DateTimeImmutable())->getTimestamp() + 60) sendJson(400, ['message' => 'Czas wpisu nie moze byc w przyszlosci.']);
 
         if (Domain::isMilkType($type)) {
             if ($ml < Config::MILK_ML_MIN || $ml > Config::MILK_ML_MAX) sendJson(400, ['message' => 'Nieprawidlowa ilosc mleka.']);
@@ -257,6 +259,8 @@ function handle_api(string $route, string $method, Repository $repo): void
         if (param('feedLine') === null || param('when') === null) sendJson(400, ['message' => 'Niepelne dane edycji.']);
         $when = Domain::parseWebDateTime((string)param('when'));
         if ($when === null) sendJson(400, ['message' => 'Nieprawidlowy czas karmienia.']);
+        // Zapis w przyszlosci nie ma sensu — odrzucamy (tolerancja +60 s).
+        if ($when->getTimestamp() > (new DateTimeImmutable())->getTimestamp() + 60) sendJson(400, ['message' => 'Czas wpisu nie moze byc w przyszlosci.']);
         // Docelowe mleko: milkRemove=1 => brak mleka; inaczej DWIE osobne ilosci
         // (mleko mieszane = obie > 0 => dwa wiersze MLEKO_MATKI + MLEKO_MODYFIKOWANE).
         $motherMl = 0; $modifiedMl = 0;
@@ -276,6 +280,8 @@ function handle_api(string $route, string $method, Repository $repo): void
         if (param('when') !== null) {
             $parsed = Domain::parseWebDateTime((string)param('when'));
             if ($parsed === null) sendJson(400, ['message' => 'Nieprawidlowy czas zdarzenia.']);
+            // Zapis w przyszlosci nie ma sensu — odrzucamy (tolerancja +60 s).
+            if ($parsed->getTimestamp() > (new DateTimeImmutable())->getTimestamp() + 60) sendJson(400, ['message' => 'Czas wpisu nie moze byc w przyszlosci.']);
             $when = $parsed;
         }
         if ($type === 'WAGA') {

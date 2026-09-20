@@ -1184,7 +1184,9 @@ void loadLatestEntries() {
       // w pliku. Po dodaniu edycji karmienia W MIEJSCU plik nie jest juz scisle
       // append-only/chronologiczny (edytowany wiersz zostaje na swojej pozycji), wiec
       // wybor "ostatniego w pliku" pokazywalby zla godzine. Porownujemy po stamp.
-      if (stamp >= lastFeedingTime) {
+      // Zapis w przyszlosci (np. z blednej edycji) jest ignorowany — nie pokazujemy
+      // "ostatnie karmienie w przyszlosci".
+      if (stamp >= lastFeedingTime && stamp <= time(nullptr) + 60) {
         lastFeeding = formatEntryForUi(line);
         lastFeedingTime = stamp;
       }
@@ -1204,8 +1206,9 @@ void loadLatestEntries() {
       }
     }
     if (isMilkType(entry.type)) {
-      // Analogicznie do karmienia: "ostatnia butelka" po NAJPOZNIEJSZYM czasie.
-      if (stamp >= lastMilkTime) {
+      // Analogicznie do karmienia: "ostatnia butelka" po NAJPOZNIEJSZYM czasie,
+      // z pominieciem wpisow w przyszlosci.
+      if (stamp >= lastMilkTime && stamp <= time(nullptr) + 60) {
         lastMilk = formatEntryForUi(line);
         lastMilkTime = stamp;
       }
@@ -2430,6 +2433,11 @@ void handleApiEntry() {
     sendJson(400, "{\"message\":\"Nieprawidlowy czas wpisu.\"}");
     return;
   }
+  // Zapis w przyszlosci nie ma sensu — odrzucamy z komunikatem (tolerancja +60 s).
+  if (when > time(nullptr) + 60) {
+    sendJson(400, "{\"message\":\"Czas wpisu nie moze byc w przyszlosci.\"}");
+    return;
+  }
 
   // Zachowuje obsluge starszych, samodzielnych wpisow mleka wysylanych przez poprzednia wersje WWW.
   if (isMilkType(type)) {
@@ -2560,6 +2568,11 @@ void handleApiUpdateFeeding() {
     sendJson(400, "{\"message\":\"Nieprawidlowy czas wpisu.\"}");
     return;
   }
+  // Zapis w przyszlosci nie ma sensu — odrzucamy (tolerancja +60 s).
+  if (when > time(nullptr) + 60) {
+    sendJson(400, "{\"message\":\"Czas wpisu nie moze byc w przyszlosci.\"}");
+    return;
+  }
 
   const bool milkRemove = webServer.hasArg("milkRemove") && webServer.arg("milkRemove") == "1";
   // Mleko rozbite na DWIE osobne ilosci (mieszane = obie > 0 => dwa wiersze).
@@ -2639,6 +2652,11 @@ void handleApiEvent() {
   time_t when = time(nullptr);
   if (webServer.hasArg("when") && !parseWebDateTime(webServer.arg("when"), when)) {
     sendJson(400, "{\"message\":\"Nieprawidlowy czas zdarzenia.\"}");
+    return;
+  }
+  // Zapis w przyszlosci nie ma sensu — odrzucamy (tolerancja +60 s).
+  if (webServer.hasArg("when") && when > time(nullptr) + 60) {
+    sendJson(400, "{\"message\":\"Czas wpisu nie moze byc w przyszlosci.\"}");
     return;
   }
 

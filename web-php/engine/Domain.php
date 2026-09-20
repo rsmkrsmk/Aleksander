@@ -191,8 +191,14 @@ final class Domain
         $prevFeedingToday = null; $sumGap = 0; $gapCount = 0; $sawStart = false;
         foreach ($entries as $e) {
             $stamp = self::csvDateTimeToDate($e['date'], $e['time']);
+            // "Ostatnie karmienie/butelka" = wpis o NAJPOZNIEJSZYM czasie (nie ostatni
+            // w pliku — po edycji W MIEJSCU plik nie jest scisle chronologiczny),
+            // z pominieciem wpisow w przyszlosci (nie pokazujemy "w przyszlosci").
+            $isPast = ($stamp !== null && $stamp->getTimestamp() <= $now->getTimestamp() + 60);
             if ($e['type'] === 'KARMIENIE') {
-                $res['lastFeeding'] = self::formatEntryForUi($e); $res['lastFeedingTime'] = $stamp;
+                if ($isPast && ($res['lastFeedingTime'] === null || $stamp->getTimestamp() >= $res['lastFeedingTime']->getTimestamp())) {
+                    $res['lastFeeding'] = self::formatEntryForUi($e); $res['lastFeedingTime'] = $stamp;
+                }
                 if ($e['date'] === $today) {
                     $res['todayFeedingCount']++;
                     if ($prevFeedingToday !== null && $stamp !== null) {
@@ -202,7 +208,11 @@ final class Domain
                     $prevFeedingToday = $stamp;
                 }
             }
-            if (self::isMilkType($e['type'])) { $res['lastMilk'] = self::formatEntryForUi($e); $res['lastMilkTime'] = $stamp; }
+            if (self::isMilkType($e['type'])) {
+                if ($isPast && ($res['lastMilkTime'] === null || $stamp->getTimestamp() >= $res['lastMilkTime']->getTimestamp())) {
+                    $res['lastMilk'] = self::formatEntryForUi($e); $res['lastMilkTime'] = $stamp;
+                }
+            }
             if ($e['type'] === 'WAGA') $res['lastWeightG'] = $e['ml'];
             if ($e['type'] === 'KAPIEL') $res['lastBath'] = $e['date'];
             if ($e['type'] === 'SEN_START') { $res['sleepInProgress'] = true; $res['sleepStartedTime'] = $stamp; $sawStart = true; }
