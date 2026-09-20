@@ -1166,6 +1166,18 @@ void loadLatestEntries() {
   long sumGapMin = 0;
   int gapCount = 0;
   bool sawSleepStart = false; // czy w pliku byl SEN_START przed danym SEN_STOP
+  // Najpozniejszy wpis w ogole (latestAny) i najpozniejszy PRZESZLY (latestPast).
+  // Gdy zegar jest cofniety (NTP niedostepny), data z pliku bywa "w przyszlosci"
+  // wzgledem now — wtedy uzywamy latestAny, zeby nigdy nie znikalo "ostatnie".
+  time_t latestAny = 0;
+  time_t latestPast = 0;
+  String latestAnyText;
+  String latestPastText;
+  time_t milkAny = 0;
+  time_t milkPast = 0;
+  String milkAnyText;
+  String milkPastText;
+  const time_t nowLimit = time(nullptr) + 60;
 
   file.readStringUntil('\n'); // pominięcie nagłówka
   while (file.available()) {
@@ -1184,12 +1196,11 @@ void loadLatestEntries() {
       // w pliku. Po dodaniu edycji karmienia W MIEJSCU plik nie jest juz scisle
       // append-only/chronologiczny (edytowany wiersz zostaje na swojej pozycji), wiec
       // wybor "ostatniego w pliku" pokazywalby zla godzine. Porownujemy po stamp.
-      // Zapis w przyszlosci (np. z blednej edycji) jest ignorowany — nie pokazujemy
-      // "ostatnie karmienie w przyszlosci".
-      if (stamp >= lastFeedingTime && stamp <= time(nullptr) + 60) {
-        lastFeeding = formatEntryForUi(line);
-        lastFeedingTime = stamp;
-      }
+      // Zapis w przyszlosci jest pomijany, ALE gdyby zegar byl cofniety (NTP niedostepny)
+      // i wszystkie wpisy wygladalyby na "przyszle", uzywamy najpozniejszego ogolem —
+      // zeby "ostatnie karmienie" nigdy nie znikalo.
+      if (stamp >= latestAny) { latestAny = stamp; latestAnyText = formatEntryForUi(line); }
+      if (stamp >= latestPast && stamp <= nowLimit) { latestPast = stamp; latestPastText = formatEntryForUi(line); }
       // Rytm dnia: tylko wpisy KARMIENIE z dzisiejsza data. Przerwy liczymy zakladajac
       // chronologie w obrebie dnia; przy typowym uzyciu wpisy dnia sa uporzadkowane.
       if (entry.date == today) {
@@ -1206,12 +1217,9 @@ void loadLatestEntries() {
       }
     }
     if (isMilkType(entry.type)) {
-      // Analogicznie do karmienia: "ostatnia butelka" po NAJPOZNIEJSZYM czasie,
-      // z pominieciem wpisow w przyszlosci.
-      if (stamp >= lastMilkTime && stamp <= time(nullptr) + 60) {
-        lastMilk = formatEntryForUi(line);
-        lastMilkTime = stamp;
-      }
+      // Analogicznie do karmienia: "ostatnia butelka" po NAJPOZNIEJSZYM czasie.
+      if (stamp >= milkAny) { milkAny = stamp; milkAnyText = formatEntryForUi(line); }
+      if (stamp >= milkPast && stamp <= nowLimit) { milkPast = stamp; milkPastText = formatEntryForUi(line); }
     }
     if (entry.type == "WAGA") {
       lastWeightG = entry.ml; // gramy zapisane w kolumnie ml
@@ -1233,6 +1241,13 @@ void loadLatestEntries() {
     }
   }
   file.close();
+
+  // Wybor "ostatniego": preferujemy najpozniejszy PRZESZLY; jesli zegar cofniety
+  // (brak przeszlych), uzywamy najpozniejszego ogolem — "ostatnie" nigdy nie znika.
+  if (latestPast) { lastFeeding = latestPastText; lastFeedingTime = latestPast; }
+  else if (latestAny) { lastFeeding = latestAnyText; lastFeedingTime = latestAny; }
+  if (milkPast) { lastMilk = milkPastText; lastMilkTime = milkPast; }
+  else if (milkAny) { lastMilk = milkAnyText; lastMilkTime = milkAny; }
 
   // Podsumowanie rytmu — identyczne jak w recomputeFeedingRhythm, ale bez 2. skanu.
   if (gapCount >= 1) avgFeedingGapMin = static_cast<int>(sumGapMin / gapCount);

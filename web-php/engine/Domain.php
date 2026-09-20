@@ -189,35 +189,41 @@ final class Domain
         ];
         $today = self::dateIso(self::dayOffsetFromToday(0, $now));
         $prevFeedingToday = null; $sumGap = 0; $gapCount = 0; $sawStart = false;
+        // Najpozniejszy wpis w ogole (Any) i najpozniejszy PRZESZLY (Past).
+        // Gdy zegar cofniety, data z pliku bywa "w przyszlosci" — uzywamy Any jako
+        // fallbacku, zeby "ostatnie karmienie/butelka" nigdy nie znikaly.
+        $feedAny = null; $feedPast = null; $milkAny = null; $milkPast = null;
+        $feedAnyText = ''; $feedPastText = ''; $milkAnyText = ''; $milkPastText = '';
+        $nowLimit = $now->getTimestamp() + 60;
         foreach ($entries as $e) {
             $stamp = self::csvDateTimeToDate($e['date'], $e['time']);
-            // "Ostatnie karmienie/butelka" = wpis o NAJPOZNIEJSZYM czasie (nie ostatni
-            // w pliku — po edycji W MIEJSCU plik nie jest scisle chronologiczny),
-            // z pominieciem wpisow w przyszlosci (nie pokazujemy "w przyszlosci").
-            $isPast = ($stamp !== null && $stamp->getTimestamp() <= $now->getTimestamp() + 60);
-            if ($e['type'] === 'KARMIENIE') {
-                if ($isPast && ($res['lastFeedingTime'] === null || $stamp->getTimestamp() >= $res['lastFeedingTime']->getTimestamp())) {
-                    $res['lastFeeding'] = self::formatEntryForUi($e); $res['lastFeedingTime'] = $stamp;
-                }
+            if ($e['type'] === 'KARMIENIE' && $stamp !== null) {
+                if ($feedAny === null || $stamp->getTimestamp() >= $feedAny->getTimestamp()) { $feedAny = $stamp; $feedAnyText = self::formatEntryForUi($e); }
+                if ($stamp->getTimestamp() <= $nowLimit && ($feedPast === null || $stamp->getTimestamp() >= $feedPast->getTimestamp())) { $feedPast = $stamp; $feedPastText = self::formatEntryForUi($e); }
                 if ($e['date'] === $today) {
                     $res['todayFeedingCount']++;
-                    if ($prevFeedingToday !== null && $stamp !== null) {
+                    if ($prevFeedingToday !== null) {
                         $gap = intdiv($stamp->getTimestamp() - $prevFeedingToday->getTimestamp(), 60);
                         if ($gap > 0) { $sumGap += $gap; $gapCount++; if ($gap > $res['longestFeedingGapMin']) $res['longestFeedingGapMin'] = $gap; }
                     }
                     $prevFeedingToday = $stamp;
                 }
             }
-            if (self::isMilkType($e['type'])) {
-                if ($isPast && ($res['lastMilkTime'] === null || $stamp->getTimestamp() >= $res['lastMilkTime']->getTimestamp())) {
-                    $res['lastMilk'] = self::formatEntryForUi($e); $res['lastMilkTime'] = $stamp;
-                }
+            if (self::isMilkType($e['type']) && $stamp !== null) {
+                if ($milkAny === null || $stamp->getTimestamp() >= $milkAny->getTimestamp()) { $milkAny = $stamp; $milkAnyText = self::formatEntryForUi($e); }
+                if ($stamp->getTimestamp() <= $nowLimit && ($milkPast === null || $stamp->getTimestamp() >= $milkPast->getTimestamp())) { $milkPast = $stamp; $milkPastText = self::formatEntryForUi($e); }
             }
             if ($e['type'] === 'WAGA') $res['lastWeightG'] = $e['ml'];
             if ($e['type'] === 'KAPIEL') $res['lastBath'] = $e['date'];
             if ($e['type'] === 'SEN_START') { $res['sleepInProgress'] = true; $res['sleepStartedTime'] = $stamp; $sawStart = true; }
             elseif ($e['type'] === 'SEN_STOP') { $res['sleepInProgress'] = false; $res['sleepStartedTime'] = null; if ($sawStart) { $res['lastWakeTime'] = $stamp; $sawStart = false; } }
         }
+        // Wybor "ostatniego": preferujemy najpozniejszy PRZESZLY; jesli zegar cofniety
+        // (brak przeszlych), uzywamy najpozniejszego ogolem — "ostatnie" nigdy nie znika.
+        if ($feedPast !== null) { $res['lastFeeding'] = $feedPastText; $res['lastFeedingTime'] = $feedPast; }
+        elseif ($feedAny !== null) { $res['lastFeeding'] = $feedAnyText; $res['lastFeedingTime'] = $feedAny; }
+        if ($milkPast !== null) { $res['lastMilk'] = $milkPastText; $res['lastMilkTime'] = $milkPast; }
+        elseif ($milkAny !== null) { $res['lastMilk'] = $milkAnyText; $res['lastMilkTime'] = $milkAny; }
         if ($gapCount >= 1) $res['avgFeedingGapMin'] = intdiv($sumGap, $gapCount);
         if ($res['lastFeedingTime'] !== null) $res['nextFeedingEta'] = $res['lastFeedingTime']->modify('+' . Config::COUNTER_BLINK_MIN . ' minutes');
         return $res;
