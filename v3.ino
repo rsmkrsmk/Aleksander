@@ -2099,6 +2099,26 @@ bool parseWebDateTime(const String &value, time_t &result) {
          verifiedTime.tm_min == expectedMinute;
 }
 
+// Kopiowanie plikow w obrębie LittleFS (uzywane przez backup i import).
+bool copyLittleFsFile(const char *srcPath, const char *dstPath) {
+  File src = LittleFS.open(srcPath, FILE_READ);
+  if (!src) return false;
+  File dst = LittleFS.open(dstPath, FILE_WRITE);
+  if (!dst) {
+    src.close();
+    return false;
+  }
+  uint8_t buffer[512];
+  while (true) {
+    const int readBytes = src.read(buffer, sizeof(buffer));
+    if (readBytes <= 0) break;
+    dst.write(buffer, readBytes);
+  }
+  src.close();
+  dst.close();
+  return true;
+}
+
 // ===================== Serwer WWW urządzenia (v4: wyłączony) =====================
 // v4: obsługa WWW odbywa się przez hosting. Gdy FEATURE_DEVICE_WEB=0 (domyślnie),
 // cały blok serwera WWW urządzenia (sendJson, httpBailIfLowMemory, handlery,
@@ -2758,24 +2778,8 @@ void handleExportCsv() {
 }
 
 // Kopiowanie plikow w obrębie LittleFS (uzywane przez backup i import).
-bool copyLittleFsFile(const char *srcPath, const char *dstPath) {
-  File src = LittleFS.open(srcPath, FILE_READ);
-  if (!src) return false;
-  File dst = LittleFS.open(dstPath, FILE_WRITE);
-  if (!dst) {
-    src.close();
-    return false;
-  }
-  uint8_t buffer[512];
-  while (true) {
-    const int readBytes = src.read(buffer, sizeof(buffer));
-    if (readBytes <= 0) break;
-    dst.write(buffer, readBytes);
-  }
-  src.close();
-  dst.close();
-  return true;
-}
+// (definicja przeniesiona przed blok #if FEATURE_DEVICE_WEB — uzywa jej
+//  archiveDataFileIfHuge/appendBackupIfDue, ktore sa poza serwerem WWW)
 
 // Przywracanie historii: przyjmuje tresc CSV w ciele zapytania, sanityzuje,
 // przed nadpisaniem robi kopie obecnych danych, zapis atomowy przez rename.
