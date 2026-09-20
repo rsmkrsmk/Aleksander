@@ -235,8 +235,15 @@ volatile bool hostSyncPending = false;
 unsigned long hostSyncNextMs = 0;   // najwczesniejszy czas kolejnej wysylki (debounce/retry)
 // Polling danych z hostingu (v4): co HOST_POLL_MS sprawdzamy rewizje, gdy sie
 // zmienila — pobieramy pelny CSV jako mirror. Zmienne czytane/uzupelniane w telegramTask.
-long hostRevisionLocal = -1;        // ostatnio pobrana rewizja z hostingu (-1 = nie pobrano)
+long hostRevisionLocal = -1;        // rewizja lokalnego mirror (potwierdzona pobraniem; -1 = brak)
+long hostRevRemote = -1;            // ostatnio WIDZIANA rewizja na hostingu (-1 = brak kontaktu)
 unsigned long hostLastPollMs = 0;   // millis() ostatniego sprawdzenia rewizji
+// Diagnostyka host-sync (v4) — stan nowego modelu (urzadzenie = wyswietlacz).
+unsigned long hostLastRevCheckMs = 0;    // millis() OSTATNIEGO UDANEGO odczytu rewizji
+unsigned long hostLastDownloadMs = 0;    // millis() OSTATNIEGO UDANEGO pobrania CSV (mirror)
+unsigned long hostLastPushMs = 0;        // millis() OSTATNIEGO UDANEGO push CSV na hosting
+unsigned int  hostDownloadFails = 0;     // liczba KOLEJNYCH nieudanych prob pobrania
+int           hostLastError = 0;         // 0=brak, 1=brak WiFi, 2=blad TLS, 3=HTTP !=200, 4=brak danych/parsing
 // Znacznik ostatniej aktywnosci TLS Telegrama. Host-sync (drugi TLS) czeka po nim krotki
 // czas, aby pierwszy klient TLS zwolnil pamiec i heap sie skonsolidowal (bez tego drugi
 // handshake pada na "esp-aes: Failed to allocate memory" przez fragmentacje).
@@ -3574,6 +3581,27 @@ const char *resetReasonText(int reason) {
   }
 }
 
+// "N s temu" / "N min temu" / "N h temu" / "NIGDY" dla timestampow millis().
+String hostTimeAgo(unsigned long ms) {
+  if (ms == 0) return "NIGDY";
+  const unsigned long sec = (millis() - ms) / 1000;
+  if (sec < 60) return String(sec) + " s temu";
+  if (sec < 3600) return String(sec / 60) + " min temu";
+  return String(sec / 3600) + " h temu";
+}
+
+// Opis ostatniego bledu host-sync (0 = brak).
+String hostErrorText(int e) {
+  switch (e) {
+    case 0: return "brak";
+    case 1: return "brak Wi-Fi";
+    case 2: return "blad TLS";
+    case 3: return "HTTP nie-200";
+    case 4: return "niekompletne dane";
+    default: return "?";
+  }
+}
+
 void createDiagnosticsScreen() {
   resetReusableScreen(diagnosticsScreen);
 
@@ -3616,7 +3644,17 @@ void createDiagnosticsScreen() {
   s += "Watchdog: " + String(watchdogReady ? "aktywny" : "wylaczony") + "\n";
   s += "Uruchomien urzadzenia: " + String(bootCount) + "\n";
   s += "Restartow watchdoga: " + String(watchdogResetCount) + "\n";
-  s += "Ostatni reset: " + String(resetReasonText(lastResetReason));
+  s += "Ostatni reset: " + String(resetReasonText(lastResetReason)) + "\n";
+  // --- HostSync (v4): hosting = zrodlo, urzadzenie = wyswietlacz -----------------
+  s += "---\n";
+  s += "HostSync (v4): hosting=zrodlo, mirror=urzadzenie\n";
+  s += "  rewizja lokalna: " + (hostRevisionLocal < 0 ? String("-") : String(hostRevisionLocal)) + "\n";
+  s += "  rewizja zdalna: " + (hostRevRemote < 0 ? String("-") : String(hostRevRemote)) + "\n";
+  s += "  sprawdzanie rewizji: " + hostTimeAgo(hostLastRevCheckMs) + "\n";
+  s += "  ostatnie pobranie CSV: " + hostTimeAgo(hostLastDownloadMs) + "\n";
+  s += "  nieudane pobrania: " + String(hostDownloadFails) + "\n";
+  s += "  ostatni push CSV: " + hostTimeAgo(hostLastPushMs) + "\n";
+  s += "  ostatni blad: " + hostErrorText(hostLastError) + " (" + String(hostLastError) + ")";
 
   lv_obj_t *info = createLabel(card, s.c_str(), COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 2);
   lv_obj_set_width(info, 416);
@@ -4658,6 +4696,14 @@ void requestHostSync() {
 bool uploadCsvToHost() {
   if (WiFi.status() != WL_CONNECTED) return false;
   if (!storageReady || !LittleFS.exists(DATA_FILE_PATH)) return false;
+  // v4: hosting jest zrodlem prawdy. Dopoki mirror nie zostal pobrany z hostingu
+  // (hostRevisionLocal < 0), NIE wysylamy lokalnego CSV — moglby on nadpisac dobre
+  // dane hostingu starym lokalnym plikiem (np. po wgraniu firmware z wiekowym
+  // mirror). Push rusza dopiero po pierwszym udanym pobraniu.
+  if (hostRevisionLocal < 0) {
+    Serial.println("HostSync: pominieto push — mirror niezsynchronizowany (pierwsze pobranie w toku).");
+    return false;
+  }
 
   // Parsowanie PANEL_UPLOAD_URL: wymagany https://host[:port]/sciezka
   // P5: parsowanie na C-stringach (strchr) zamiast budowania ~6 tymczasowych String
@@ -4760,6 +4806,8 @@ bool uploadCsvToHost() {
   requestRgbResync(); // po zakonczeniu transmisji — korekta ewentualnego dryfu
 
   if (code == 200 || code == 201) {
+    hostLastPushMs = millis();
+    hostLastError = 0;
     Serial.println("HostSync: CSV wyslany na panel.");
     return true;
   }
@@ -4805,7 +4853,11 @@ long fetchRevision() {
   client.setInsecure();
   client.setHandshakeTimeout(8000);
   client.setTimeout(8000);
-  if (!client.connect(host, port)) return -1;
+  if (!client.connect(host, port)) {
+    hostLastError = 2; // blad TLS
+    Serial.println("HostSync: rev — blad TLS.");
+    return -1;
+  }
   client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ESP32\r\nConnection: close\r\n\r\n", path, host);
   client.flush();
   unsigned long waitUntil = millis() + 6000;
@@ -4817,9 +4869,13 @@ long fetchRevision() {
     code = statusLine.substring(9, 12).toInt();
   long rev = -1;
   if (code == 200) {
-    // Odczyt ciala: szukamy "rev":N
+    // Odczyt ciala z timeoutem (nie polega na chwilowym client.available()).
     String body;
-    while (client.available()) body += (char)client.read();
+    unsigned long bWait = millis() + 4000;
+    while (millis() < bWait && body.length() < 512) {
+      if (client.available()) body += (char)client.read();
+      else delay(5);
+    }
     int k = body.indexOf("\"rev\"");
     if (k >= 0) {
       int p = body.indexOf(':', k);
@@ -4831,7 +4887,15 @@ long fetchRevision() {
   }
   while (client.available()) client.read();
   client.stop();
-  if (code != 200) Serial.printf("HostSync: revision HTTP %d.\n", code);
+  if (code == 200 && rev >= 0) {
+    hostRevRemote = rev;
+    hostLastRevCheckMs = millis();
+    hostLastError = 0;
+    Serial.printf("HostSync: rev=%ld (lokalnie %ld).\n", (long)rev, (long)hostRevisionLocal);
+  } else {
+    hostLastError = (code == 0) ? 2 : 3; // TLS/HTTP
+    Serial.printf("HostSync: revision blad (HTTP %d, rev=%ld).\n", code, (long)rev);
+  }
   return rev;
 }
 
@@ -4874,7 +4938,12 @@ bool downloadCsvFromHost() {
   client.setInsecure();
   client.setHandshakeTimeout(8000);
   client.setTimeout(10000);
-  if (!client.connect(host, port)) return false;
+  if (!client.connect(host, port)) {
+    ++hostDownloadFails;
+    hostLastError = 2; // blad TLS
+    Serial.println("HostSync: CSV — blad TLS.");
+    return false;
+  }
   client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ESP32\r\nConnection: close\r\n\r\n", path, host);
   client.flush();
   unsigned long waitUntil = millis() + 8000;
@@ -4887,44 +4956,107 @@ bool downloadCsvFromHost() {
   if (code != 200) {
     while (client.available()) client.read();
     client.stop();
+    ++hostDownloadFails;
+    hostLastError = 3; // HTTP != 200
     Serial.printf("HostSync: CSV HTTP %d.\n", code);
     return false;
   }
-  // Pomijamy naglowki HTTP do konca \r\n\r\n
+  // Pomijamy naglowki HTTP do konca \r\n\r\n (odczyt z timeoutem — nie polega na
+  // chwilowym client.available(), ktore na wolnym laczu bywa chwilowo puste).
   String headers;
-  while (client.available()) {
-    char ch = (char)client.read();
-    headers += ch;
-    if (headers.endsWith("\r\n\r\n")) break;
+  unsigned long hWait = millis() + 5000;
+  while (millis() < hWait) {
+    if (client.available()) {
+      headers += (char)client.read();
+      if (headers.endsWith("\r\n\r\n")) break;
+    } else {
+      delay(5);
+    }
   }
+  if (!headers.endsWith("\r\n\r\n")) {
+    while (client.available()) client.read();
+    client.stop();
+    ++hostDownloadFails;
+    hostLastError = 4; // brak pelnych naglowkow
+    Serial.println("HostSync: CSV — timeout naglowkow.");
+    return false;
+  }
+  // Content-Length (jesli podany przez serwer) — czytamy dokladnie tyle bajtow.
+  long contentLength = -1;
+  {
+    const int clIdx = headers.indexOf("Content-Length:");
+    if (clIdx >= 0) {
+      int p = clIdx + 15;
+      while (p < headers.length() && headers[p] == ' ') ++p;
+      long v = 0;
+      while (p < headers.length() && headers[p] >= '0' && headers[p] <= '9') {
+        v = v * 10 + (headers[p] - '0');
+        ++p;
+      }
+      contentLength = v;
+    }
+  }
+
   // Zapis do pliku tymczasowego, potem atomowy rename.
   File tmp = LittleFS.open("/karmienia_sync.tmp", FILE_WRITE);
-  if (!tmp) { while (client.available()) client.read(); client.stop(); return false; }
+  if (!tmp) {
+    while (client.available()) client.read();
+    client.stop();
+    ++hostDownloadFails;
+    hostLastError = 4;
+    return false;
+  }
   uint8_t chunk[512];
   bool wroteAny = false;
   int syncChunkNo = 0;
-  while (client.available()) {
-    const size_t n = client.read(chunk, sizeof(chunk));
-    if (n == 0) break;
-    tmp.write(chunk, n);
-    wroteAny = true;
-    if ((++syncChunkNo % 8) == 0) requestRgbResync();
+  long received = 0;
+  unsigned long bWait = millis() + 15000;
+  while (millis() < bWait) {
+    if (client.available()) {
+      const size_t n = client.read(chunk, sizeof(chunk));
+      if (n > 0) {
+        tmp.write(chunk, n);
+        received += static_cast<long>(n);
+        wroteAny = true;
+        if ((++syncChunkNo % 8) == 0) requestRgbResync();
+        bWait = millis() + 15000; // reset timeoutu przy danych
+        if (contentLength >= 0 && received >= contentLength) break;
+      } else {
+        delay(5);
+      }
+    } else {
+      if (!client.connected()) break;
+      delay(5);
+    }
   }
   tmp.close();
   while (client.available()) client.read();
   client.stop();
   feedWatchdog();
   requestRgbResync();
-  if (!wroteAny) { LittleFS.remove("/karmienia_sync.tmp"); return false; }
+  bool ok = wroteAny;
+  if (contentLength >= 0 && received < contentLength) ok = false; // niekompletny
+  if (!ok) {
+    LittleFS.remove("/karmienia_sync.tmp");
+    ++hostDownloadFails;
+    hostLastError = 4;
+    Serial.printf("HostSync: CSV niekompletny (%ld/%ld).\n", (long)received, (long)contentLength);
+    return false;
+  }
   if (!LittleFS.rename("/karmienia_sync.tmp", DATA_FILE_PATH)) {
     LittleFS.remove("/karmienia_sync.tmp");
+    ++hostDownloadFails;
+    hostLastError = 4;
     return false;
   }
   // Odswiez dane i ekran z nowego mirror.
   loadLatestEntries();
   invalidateDayStats();
   if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation();
-  Serial.println("HostSync: CSV pobrany z hostingu (mirror zaktualizowany).");
+  hostLastDownloadMs = millis();
+  hostDownloadFails = 0;
+  hostLastError = 0;
+  Serial.printf("HostSync: CSV pobrany (%ld B), mirror zaktualizowany.\n", (long)received);
   return true;
 }
 #endif
@@ -5059,9 +5191,20 @@ void telegramTask(void *parameter) {
         (millis() - lastTelegramTlsMs) >= TLS_COOLDOWN_MS) {
       hostLastPollMs = millis();
       const long rev = fetchRevision();
+      // WAZNE: hostRevisionLocal aktualizujemy TYLKO po UDANYM pobraniu. Gdy
+      // downloadCsvFromHost() zawiedzie (np. TLS), rewizja pozostaje stara i
+      // pobranie jest ponawiane przy kolejnym pollingu. (Wczesniej ustawiano ja
+      // przed pobraniem — po jednym niepowodzeniu urzadzenie NIGDY nie probowalo
+      // ponownie, bo rev sie nie zmienial.)
       if (rev >= 0 && rev != hostRevisionLocal) {
-        hostRevisionLocal = rev;
-        downloadCsvFromHost();
+        if (downloadCsvFromHost()) {
+          hostRevisionLocal = rev;
+        } else {
+          // Krotki odstep miedzy dwoch kolejnymi klientami TLS (fragmentacja heap
+          // potrafi wywalic drugi handshake — jak przy Telegramie). Ponowimy przy
+          // nastepnym pollingu.
+          delay(1000);
+        }
       }
     }
 #endif
