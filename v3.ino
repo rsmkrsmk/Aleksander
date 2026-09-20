@@ -245,6 +245,10 @@ unsigned long hostLastPushMs = 0;        // millis() OSTATNIEGO UDANEGO push CSV
 unsigned int  hostDownloadFails = 0;     // liczba KOLEJNYCH nieudanych prob pobrania
 int           hostLastError = 0;         // 0=brak, 1=brak WiFi, 2=blad TLS, 3=HTTP !=200, 4=brak danych/parsing
 volatile int  hostSyncProgressPct = -1;  // postep pobierania mirror: -1=b/d, 0-100, 100=OK (boot + telegramTask)
+// Pasek postepu synchronizacji na ekranie startowym (v4). Deklarowane TUTAJ, bo
+// uzywa ich downloadCsvFromHost() (wyzej w pliku niz kod ekranu startowego).
+lv_obj_t *bootSyncBar = nullptr;      // wypełniony pasek postepu
+lv_obj_t *bootSyncPctLabel = nullptr; // "WWW: 45%"
 // Znacznik ostatniej aktywnosci TLS Telegrama. Host-sync (drugi TLS) czeka po nim krotki
 // czas, aby pierwszy klient TLS zwolnil pamiec i heap sie skonsolidowal (bez tego drugi
 // handshake pada na "esp-aes: Failed to allocate memory" przez fragmentacje).
@@ -6015,8 +6019,6 @@ constexpr uint8_t BOOT_STEP_COUNT = 5;
 lv_obj_t *bootScreen = nullptr;
 lv_obj_t *bootStepLabel[BOOT_STEP_COUNT] = {nullptr};
 lv_obj_t *bootStatusLabel = nullptr;
-lv_obj_t *bootSyncBar = nullptr;      // pasek postepu synchronizacji z hostingiem (v4)
-lv_obj_t *bootSyncPctLabel = nullptr; // "45%" obok paska
 const char *BOOT_STEP_NAMES[BOOT_STEP_COUNT] = {
     "Wi-Fi", "Zegar (NTP)", "Pamiec danych", "Pogoda", "Sync z hostingiem (WWW)"};
 
