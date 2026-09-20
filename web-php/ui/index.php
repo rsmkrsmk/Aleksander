@@ -36,12 +36,13 @@ if ($route !== null) {
 }
 
 /* ---- statyki UI ---- */
-if ($method === 'GET' && preg_match('#^/([A-Za-z0-9_\-]+\.(js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map))$#', $uri, $mm)) {
+if ($method === 'GET' && preg_match('#^/([A-Za-z0-9_\-]+\.(js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map|html))$#', $uri, $mm)) {
     $file = __DIR__ . '/' . $mm[1];
     if (is_file($file)) {
         $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
         $types = [
             'js' => 'text/javascript; charset=utf-8', 'css' => 'text/css; charset=utf-8',
+            'html' => 'text/html; charset=utf-8',
             'svg' => 'image/svg+xml', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg',
             'gif' => 'image/gif', 'webp' => 'image/webp', 'ico' => 'image/x-icon',
             'woff' => 'font/woff', 'woff2' => 'font/woff2', 'map' => 'application/json',
