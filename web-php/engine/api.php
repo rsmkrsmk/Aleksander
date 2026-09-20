@@ -232,6 +232,17 @@ function handle_api(string $route, string $method, Repository $repo): void
         $repo->append('KARMIENIE', $when, $ml, $clamp(param('lewaMin', '0'), 0, 120), $clamp(param('prawaMin', '0'), 0, 120));
         if ($motherMl > 0)   $repo->append('MLEKO_MATKI', $when, $motherMl);
         if ($modifiedMl > 0) $repo->append('MLEKO_MODYFIKOWANE', $when, $modifiedMl);
+
+        // Auto-sen przy karmieniu (WWW): dziecko "obudzilo sie" 30 min przed
+        // karmieniem (SEN_STOP T-30) i "zasnieto" 1h po (SEN_START T+60). Jesli
+        // dziecko w chwili wpisu spalo, najpierw zamykamy biezacy sen (SEN_STOP teraz).
+        if ($type === 'KARMIENIE') {
+            $latest = Domain::loadLatestEntries($repo->allEntries(), new DateTimeImmutable());
+            if ($latest['sleepInProgress']) $repo->append('SEN_STOP', new DateTimeImmutable(), 0);
+            $repo->append('SEN_STOP', $when->modify('-30 minutes'), 0);
+            $repo->append('SEN_START', $when->modify('+60 minutes'), 0);
+        }
+
         sendJson(201, $extraMilk ? ['message' => 'Zapisano karmienie i mleko.'] : ['message' => 'Karmienie zapisane w pamieci urzadzenia.']);
     }
 

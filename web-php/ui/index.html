@@ -101,12 +101,12 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 :root[data-theme="night"] .tgl .knob{transform:translateX(26px);background:var(--g-sleep)}
 
 /* ---------------- PASEK STATUSU DNIA ---------------- */
-.daystat{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-.ds{position:relative;border-radius:var(--r3);padding:12px 10px;background:var(--card);border:1px solid var(--brd);box-shadow:var(--sh-1);overflow:hidden;text-align:center}
+.daystat{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:12px}
+.ds{position:relative;border-radius:var(--r3);padding:10px 7px;background:var(--card);border:1px solid var(--brd);box-shadow:var(--sh-1);overflow:hidden;text-align:center}
 .ds .di{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;margin:0 auto 7px;color:#fff}
 .ds .di svg{width:16px;height:16px}
 .ds.feed .di{background:var(--g-feed)} .ds.milk .di{background:var(--g-milk)} .ds.diaper .di{background:var(--g-acc)} .ds.sleep .di{background:var(--g-sleep)} .ds.bath .di{background:linear-gradient(135deg,var(--bath-2),var(--bath))}
-.ds .dv{font-family:var(--fd);font-size:1.28rem;font-weight:800;line-height:1;color:var(--ink)}
+.ds .dv{font-family:var(--fd);font-size:1.12rem;font-weight:800;line-height:1;color:var(--ink)}
 .ds .dk{font-size:.58rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin-top:4px}
 @media(max-width:380px){.ds .dk{font-size:.54rem}}
 
@@ -254,10 +254,11 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .sysinfo{text-align:center;font-size:.62rem;color:var(--faint);margin-top:8px;font-weight:600}
 
 /* ---------------- DOCK ---------------- */
-.dock{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));z-index:60;
-  display:flex;gap:4px;padding:8px;border-radius:999px;background:var(--card-solid);border:1px solid var(--brd);box-shadow:var(--sh-pop);width:min(94%,430px);justify-content:space-between}
+.dock{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));z-index:60;
+  display:flex;flex-direction:column;gap:4px;padding:8px;border-radius:999px;background:var(--card-solid);border:1px solid var(--brd);box-shadow:var(--sh-pop);width:min(94%,460px)}
 @media(min-width:860px){.dock{width:min(94%,520px)}}
-.dock button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;border:none;background:none;cursor:pointer;font-family:inherit;color:var(--muted);border-radius:16px;transition:color .18s,background .18s,transform .16s;min-width:0}
+.dock .dock-row{display:flex;gap:2px;justify-content:space-between;align-items:center}
+.dock .dock-row button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px;border:none;background:none;cursor:pointer;font-family:inherit;color:var(--muted);border-radius:16px;transition:color .18s,background .18s,transform .16s;min-width:0}
 .dock button .di{width:26px;height:26px;display:grid;place-items:center}
 .dock button .di svg{width:24px;height:24px}
 .dock button .dl{font-size:.6rem;font-weight:800;letter-spacing:.01em;white-space:nowrap}
@@ -268,9 +269,10 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .dock button.nav::after{content:"";position:absolute;bottom:3px;width:5px;height:5px;border-radius:50%;background:transparent;transition:.2s}
 .dock button.nav{position:relative}
 .dock button.nav.active::after{background:var(--acc-2)}
-.dock button.primary{color:#fff}
-.dock button.primary .di{width:48px;height:48px;border-radius:16px;background:var(--g-feed);box-shadow:0 8px 18px -4px color-mix(in srgb,var(--feed) 60%,transparent);margin-top:-24px;border:3px solid var(--card-solid)}
-.dock button.primary .dl{color:var(--feed);margin-top:1px}
+.dock button.primary{color:#fff;width:100%;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border:none;border-radius:18px;background:var(--g-feed);box-shadow:0 8px 18px -4px color-mix(in srgb,var(--feed) 60%,transparent);cursor:pointer;font-family:inherit;font-weight:800}
+.dock button.primary .di{width:28px;height:28px;display:grid;place-items:center;border-radius:10px}
+.dock button.primary .di svg{width:22px;height:22px}
+.dock button.primary .dl{color:#fff;font-size:.82rem;letter-spacing:.01em}
 .dock button:not(.primary):active{transform:scale(.9)}
 .dock button:not(.primary):hover{color:var(--ink)}
 @media(max-width:360px){.dock{gap:2px;padding:7px 6px}.dock button .dl{font-size:.55rem}.dock button .di svg{width:22px;height:22px}}
@@ -721,19 +723,23 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
   </main>
 </div>
 
-<!-- DOLNA NAWIGACJA (podstrony) -->
+<!-- DOLNA NAWIGACJA (podstrony) — 2 wiersze: Dodaj górą, pozostałe dołem -->
 <nav class="dock" aria-label="Nawigacja">
-  <button class="nav" data-nav="start" aria-label="Start">
-    <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M3.6 11.3 12 3.8l8.4 7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v8.6c0 .8.6 1.4 1.4 1.4H10v-4.3c0-.7.6-1.3 1.3-1.3h1.4c.7 0 1.3.6 1.3 1.3V20h3.1c.8 0 1.4-.6 1.4-1.4V10" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg></span><span class="dl">Start</span></button>
-  <button class="nav" data-nav="diary" aria-label="Dziennik">
-    <span class="di"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.9"/><path d="M3.5 9.5h17" stroke="currentColor" stroke-width="1.9"/><path d="M8 3.2v3.4M16 3.2v3.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="13.7" r="1.15" fill="currentColor"/><circle cx="12" cy="13.7" r="1.15" fill="currentColor"/><circle cx="16" cy="13.7" r="1.15" fill="currentColor"/><circle cx="8" cy="17.2" r="1.15" fill="currentColor"/><circle cx="12" cy="17.2" r="1.15" fill="currentColor"/></svg></span><span class="dl">Dziennik</span></button>
-  <button class="primary" data-action="new-feed" aria-label="Dodaj karmienie"><span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5.5v13M5.5 12h13" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="dl">Dodaj</span></button>
-  <button class="nav" data-nav="stats" aria-label="Statystyki">
-    <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><rect x="4.5" y="12" width="3.4" height="6.2" rx="1.2" fill="currentColor"/><rect x="10.3" y="8" width="3.4" height="10.2" rx="1.2" fill="currentColor" fill-opacity=".55"/><rect x="16.1" y="4.5" width="3.4" height="13.7" rx="1.2" fill="currentColor"/></svg></span><span class="dl">Statystyki</span></button>
-  <button class="nav" data-nav="weight" aria-label="Waga">
-    <span class="di"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="5" r="2" fill="currentColor"/><path d="M8.5 7.5h7l3 12.5a1 1 0 0 1-1 1.2H6.5a1 1 0 0 1-1-1.2l3-12.5Z" fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.5c.8.7 1.6 1 2.5 1s1.7-.3 2.5-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="dl">Waga</span></button>
-  <button class="nav" data-nav="sleep" aria-label="Sen">
-    <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7Z" fill="currentColor" fill-opacity=".22" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14.5 4h3.2l-3.2 3.6h3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="dl" id="dockSleep">Sen</span></button>
+  <button class="primary" data-action="new-feed" aria-label="Dodaj karmienie"><span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5.5v13M5.5 12h13" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></span><span class="dl">Dodaj karmienie</span></button>
+  <div class="dock-row">
+    <button class="nav" data-nav="start" aria-label="Start">
+      <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M3.6 11.3 12 3.8l8.4 7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 10v8.6c0 .8.6 1.4 1.4 1.4H10v-4.3c0-.7.6-1.3 1.3-1.3h1.4c.7 0 1.3.6 1.3 1.3V20h3.1c.8 0 1.4-.6 1.4-1.4V10" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg></span><span class="dl">Start</span></button>
+    <button class="nav" data-nav="diary" aria-label="Dziennik">
+      <span class="di"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.9"/><path d="M3.5 9.5h17" stroke="currentColor" stroke-width="1.9"/><path d="M8 3.2v3.4M16 3.2v3.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="13.7" r="1.15" fill="currentColor"/><circle cx="12" cy="13.7" r="1.15" fill="currentColor"/><circle cx="16" cy="13.7" r="1.15" fill="currentColor"/><circle cx="8" cy="17.2" r="1.15" fill="currentColor"/><circle cx="12" cy="17.2" r="1.15" fill="currentColor"/></svg></span><span class="dl">Dziennik</span></button>
+    <button class="nav" data-nav="stats" aria-label="Statystyki">
+      <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><rect x="4.5" y="12" width="3.4" height="6.2" rx="1.2" fill="currentColor"/><rect x="10.3" y="8" width="3.4" height="10.2" rx="1.2" fill="currentColor" fill-opacity=".55"/><rect x="16.1" y="4.5" width="3.4" height="13.7" rx="1.2" fill="currentColor"/></svg></span><span class="dl">Statystyki</span></button>
+    <button class="nav" data-nav="weight" aria-label="Waga">
+      <span class="di"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="5" r="2" fill="currentColor"/><path d="M8.5 7.5h7l3 12.5a1 1 0 0 1-1 1.2H6.5a1 1 0 0 1-1-1.2l3-12.5Z" fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.5c.8.7 1.6 1 2.5 1s1.7-.3 2.5-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="dl">Waga</span></button>
+    <button class="nav" data-nav="sleep" aria-label="Sen">
+      <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7Z" fill="currentColor" fill-opacity=".22" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14.5 4h3.2l-3.2 3.6h3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="dl" id="dockSleep">Sen</span></button>
+    <button class="nav bath" data-action="bath" aria-label="Kąpiel">
+      <span class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16v1a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6v-1Z" fill="currentColor" fill-opacity=".22" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M6 12V6.5a2 2 0 0 1 2-2 2 2 0 0 1 2 2V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 12v-2M20 12v-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="dl">Kąpiel</span></button>
+  </div>
 </nav>
 
 <!-- MODAL: formularz -->

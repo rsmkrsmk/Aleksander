@@ -378,6 +378,7 @@ int interpTable(long x, const int *xs, const int *ys, int n);
 void loadSettings();
 bool saveSettings();
 void checkSleepNotifications();
+void applyAutoSleepForFeeding(time_t feedingWhen);
 String nextFeedingClock();
 String formatGapShort(int minutes);
 void initWatchdog();
@@ -2515,6 +2516,10 @@ void handleApiEntry() {
     return;
   }
 
+  // Auto-sen przy karmieniu (tylko przez WWW): SEN_STOP T-30 + SEN_START T+60,
+  // zamknij biezacy sen jesli dziecko spalo. Ekran dotykowy LVGL pomija te logike.
+  applyAutoSleepForFeeding(when);
+
   updateHomeInformation();
   sendJson(201, extraMilk ? "{\"message\":\"Zapisano karmienie i dodatkowe mleko.\"}" : "{\"message\":\"Karmienie zapisane w pamieci urzadzenia.\"}");
 }
@@ -3381,6 +3386,20 @@ String formatDurationShort(long minutes) {
   const long h = minutes / 60, m = minutes % 60;
   if (h == 0) return String(m) + " min";
   return String(h) + "h " + m + " min";
+}
+
+// Automatyczny sen przy zapisie karmienia (tylko przez WWW — serwowane strony).
+// Model: dziecko "obudzilo sie" 30 min przed karmieniem (SEN_STOP T-30) i "zasnieto"
+// 1h po karmieniu (SEN_START T+60). Jesli w chwili wpisu dziecko juz spalo (otwarty
+// SEN_START), najpierw zamykamy biezacy sen (SEN_STOP o "teraz"), zeby nie zostalo
+// dwoch otwartych przedzialow. NIE wolamy z ekranu dotykowego LVGL (performSaveForm) —
+// tam sen pozostaje reczny.
+void applyAutoSleepForFeeding(time_t feedingWhen) {
+  if (!storageReady || !timeIsValid) return;
+  if (sleepInProgress) appendEntry("SEN_STOP", time(nullptr), 0);
+  appendEntry("SEN_STOP", feedingWhen - 30 * 60, 0);
+  appendEntry("SEN_START", feedingWhen + 60 * 60, 0);
+  loadLatestEntries(); // odswiez sleepInProgress/sleepStartedTime/lastWakeTime
 }
 
 void sleepOpenEvent(lv_event_t *event) {
