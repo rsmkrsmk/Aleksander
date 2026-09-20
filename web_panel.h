@@ -155,7 +155,8 @@ const char WEB_APP_HTML[] PROGMEM = R"WEBPANEL(
         <div class="form-actions" style="grid-template-columns:2fr 1fr;margin-top:14px">
           <button type="button" class="feed wide" data-action="bath-save">ZAPISZ KĄPIEL</button>
           <button type="button" class="muted" data-action="home">ANULUJ</button>
-        </div>
+        
+        <p class="notice" id="bathNotice"></p></div>
       </div>
     </div>
   </div>
