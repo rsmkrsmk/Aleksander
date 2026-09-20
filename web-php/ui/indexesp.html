@@ -49,12 +49,14 @@
   <section class="two">
     <article class="card info feeding"><h2>KARMIENIE</h2><p class="latest" id="lastFeeding">Brak zapisanego wpisu</p></article>
     <article class="card info milk"><h2>BUTELKA</h2><p class="latest" id="lastMilk">Brak zapisanego wpisu</p></article>
+  </section>
   <section class="since" id="since">OSTATNIE KARMIENIE: …</section>
   <p class="since-bath" id="sinceBath" style="text-align:center;font-size:.75rem;color:var(--muted);margin:2px 0 4px"></p>
   <section class="feedbar" id="feedbar">
     <div class="fb-cell"><span class="fb-cap">OSTATNIE</span><span class="fb-val" id="fbLast">—</span></div>
     <div class="fb-cell"><span class="fb-cap">NASTĘPNE (~+4h)</span><span class="fb-val" id="fbNext">—</span></div>
     <div class="fb-cell"><span class="fb-cap">ŚR. PRZERWA</span><span class="fb-val" id="fbAvg">—</span></div>
+  </section>
   <section class="card dayband-card"><div class="dayband-head"><span>PRZEBIEG DNIA</span><span class="dayband-legend"><i class="db feed"></i>karm.<i class="db milk"></i>butelka<i class="db diaper"></i>pielucha<i class="db sleep"></i>sen</span></div><div class="dayband" id="dayband"></div><div class="dayband-hours"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div></section>
   <nav class="actions" aria-label="Główne działania">
     <button class="feed wide" data-action="new-feed">KARMIENIE</button>
@@ -73,7 +75,6 @@
     <button type="button" class="small muted" data-action="send-backup">WYŚLIJ BACKUP</button>
     <input type="file" id="importFile" accept=".csv,text/csv" class="hidden">
   </div>
-    <div class="section-title">DIAGNOSTYKA URZĄDZENIA</div>
   <div id="calendarModal" class="modal" role="presentation" aria-hidden="true">
     <div class="modal-backdrop" data-action="home"></div>
     <div class="card modal-dialog">

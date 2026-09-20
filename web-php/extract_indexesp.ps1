@@ -38,12 +38,16 @@ $html = $html.Replace('<p class="sysinfo" id="sysinfo"></p>', '')
 # 2. Przycisk DIAGNOSTYKA (HTML)
 $html = $html.Replace('<button type="button" class="small muted" data-action="toggle-diag">DIAGNOSTYKA</button>', '')
 
-# 3. Karta DIAGNOSTYKA (HTML)
-$html = $html.Replace("  <section class=`"card diag-card hidden`" id=`"diagCard`">", '')
-$html = $html.Replace('    <div class="section-title">DIAGNOSTYKA URZADZENIA</div>', '')
-$html = $html.Replace('    <div class="diag-grid" id="diagGrid"></div>', '')
-$html = $html.Replace('  </section>', '')
-# Uwaga: usuwamy puste zostawione linie (4 puste po wycieciu) — poniżej czyszczenie pustych wierszy w HTML.
+# 3. Karta DIAGNOSTYKA (HTML) — usuwamy ATOMOWO cały blok od <section ... diagCard>
+#    do jego zamykającego </section>. NIE używamy Replace('</section>',''), bo to
+#    usunęłoby WSZYSTKIE sekcje w dokumencie i rozsypało układ.
+$diagStart = $html.indexOf('<section class="card diag-card hidden" id="diagCard">')
+if ($diagStart -ge 0) {
+    $diagEnd = $html.indexOf('</section>', $diagStart)
+    if ($diagEnd -ge 0) {
+        $html = $html.Substring(0, $diagStart) + $html.Substring($diagEnd + 10)   # +10 za '</section>'
+    }
+}
 
 # 4. JS: blok sysinfo (const heapPct ... setText('sysinfo',...);) — usuwamy fragment od "const heapPct=" do ";renderNextFeed("
 $needleStart = 'const heapPct='
