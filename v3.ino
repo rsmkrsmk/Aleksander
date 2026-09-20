@@ -5015,7 +5015,7 @@ bool downloadCsvFromHost() {
     Serial.println("HostSync: CSV — timeout naglowkow.");
     return false;
   }
-  // Content-Length (jesli podany przez serwer) — czytamy dokladnie tyle bajtow.
+  // Content-Length (jesli podany) i wykrycie chunked.
   long contentLength = -1;
   {
     const int clIdx = headers.indexOf("Content-Length:");
@@ -5030,6 +5030,7 @@ bool downloadCsvFromHost() {
       contentLength = v;
     }
   }
+  const bool isChunked = headers.indexOf("Transfer-Encoding: chunked") >= 0;
 
   // Zapis do pliku tymczasowego, potem atomowy rename.
   File tmp = LittleFS.open("/karmienia_sync.tmp", FILE_WRITE);
@@ -5045,33 +5046,117 @@ bool downloadCsvFromHost() {
   int syncChunkNo = 0;
   long received = 0;
   hostSyncProgressPct = 0;
-  unsigned long bWait = millis() + 15000;
-  while (millis() < bWait) {
-    if (client.available()) {
-      const size_t n = client.read(chunk, sizeof(chunk));
-      if (n > 0) {
-        tmp.write(chunk, n);
-        received += static_cast<long>(n);
-        wroteAny = true;
-        if ((++syncChunkNo % 8) == 0) requestRgbResync();
-        bWait = millis() + 15000; // reset timeoutu przy danych
-        if (contentLength > 0) {
-          hostSyncProgressPct = (int)(received * 100 / contentLength);
-          if (hostSyncProgressPct > 99) hostSyncProgressPct = 99;
-          if (received >= contentLength) break;
+
+  // Krotka aktualizacja paska postepu (tylko gdy ekran startowy zyje).
+  auto pumpBootBar = [&]() {
+    if (bootSyncBar) updateBootSyncUi();
+  };
+
+  if (isChunked) {
+    // Transfer-Encoding: chunked — cialo w ramkach:
+    //   <rozmiar-hex>\r\n<dane>\r\n <rozmiar-hex>\r\n<dane>\r\n ... 0\r\n\r\n
+    // Bez dekodowania do pliku trafialyby bajty ramki i walidacja CSV odrzucala plik.
+    while (true) {
+      // 1) Linia rozmiaru chunku (hex, mozliwe ';' + rozszerzenia).
+      String sizeLine;
+      unsigned long sw = millis() + 8000;
+      bool gotCrlf = false;
+      while (millis() < sw) {
+        if (client.available()) {
+          const char ch = (char)client.read();
+          if (ch == '\n') { gotCrlf = true; break; }
+          if (sizeLine.length() < 64 && ch != '\r') sizeLine += ch;
+        } else {
+          delay(5);
+        }
+      }
+      if (!gotCrlf) break; // blad — brak linii rozmiaru
+      long csize = 0;
+      for (int i = 0; i < (int)sizeLine.length(); ++i) {
+        const char c = sizeLine[i];
+        if (c == ';') break;
+        int dv = -1;
+        if (c >= '0' && c <= '9') dv = c - '0';
+        else if (c >= 'a' && c <= 'f') dv = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') dv = c - 'A' + 10;
+        if (dv < 0) break;
+        csize = csize * 16 + dv;
+      }
+      if (csize <= 0) break; // ostatni chunk (0) — koniec ciala
+      // 2) Odczyt dokladnie csize bajtow danych.
+      long left = csize;
+      unsigned long cw = millis() + 15000;
+      while (left > 0 && millis() < cw) {
+        if (client.available()) {
+          size_t toRead = static_cast<size_t>(left);
+          if (toRead > sizeof(chunk)) toRead = sizeof(chunk);
+          const size_t n = client.read(chunk, toRead);
+          if (n > 0) {
+            tmp.write(chunk, n);
+            received += static_cast<long>(n);
+            left -= static_cast<long>(n);
+            wroteAny = true;
+            if ((++syncChunkNo & 7) == 0) {
+              requestRgbResync();
+              // Bez Content-Length postep nie jest znany — pasek pulsuje (animacja).
+              hostSyncProgressPct = (int)((millis() / 60) % 100);
+              pumpBootBar();
+            }
+            cw = millis() + 15000;
+          } else {
+            delay(5);
+          }
+        } else {
+          delay(5);
+        }
+      }
+      if (left > 0) break; // chunk niekompletny
+      // 3) Znaki \r\n po danych chunku — odrzucamy DOKLADNIE 2 bajty, inaczej
+      //    pozostaly '\n' zostalby odczytany jako pusta linia rozmiaru (koniec).
+      unsigned long tr = millis() + 2000;
+      int disc = 0;
+      while (disc < 2 && millis() < tr) {
+        if (client.available()) {
+          client.read();
+          ++disc;
+        } else {
+          delay(5);
+        }
+      }
+    }
+  } else {
+    // Content-Length (albo read-until-close gdy nie podany).
+    unsigned long bWait = millis() + 15000;
+    while (millis() < bWait) {
+      if (client.available()) {
+        const size_t n = client.read(chunk, sizeof(chunk));
+        if (n > 0) {
+          tmp.write(chunk, n);
+          received += static_cast<long>(n);
+          wroteAny = true;
+          if ((++syncChunkNo & 7) == 0) {
+            requestRgbResync();
+            pumpBootBar();
+          }
+          bWait = millis() + 15000; // reset timeoutu przy danych
+          if (contentLength > 0) {
+            hostSyncProgressPct = (int)(received * 100 / contentLength);
+            if (hostSyncProgressPct > 99) hostSyncProgressPct = 99;
+            if (received >= contentLength) break;
+          }
+        } else {
+          delay(5);
         }
       } else {
-        delay(5);
-      }
-    } else {
-      // ESP32: connected() potrafi byc false, mimo ze w buforze zostaly jeszcze
-      // dane (serwer zamknal polaczenie po wyslaniu ciala). Nie wychodzimy od
-      // razu — dajemy chwile na doplyniecie bufora.
-      if (!client.connected()) {
-        delay(300);
-        if (!client.available()) break;
-      } else {
-        delay(5);
+        // ESP32: connected() potrafi byc false, mimo ze w buforze zostaly jeszcze
+        // dane (serwer zamknal polaczenie po wyslaniu ciala). Nie wychodzimy od
+        // razu — dajemy chwile na doplyniecie bufora.
+        if (!client.connected()) {
+          delay(300);
+          if (!client.available()) break;
+        } else {
+          delay(5);
+        }
       }
     }
   }
