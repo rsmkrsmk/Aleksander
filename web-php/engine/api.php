@@ -133,6 +133,7 @@ function handle_api(string $route, string $method, Repository $repo): void
                 'piersLeftMin' => $s['piersLeftMin'], 'piersRightMin' => $s['piersRightMin'],
                 'diaperWet' => $s['diaperWet'], 'diaperDirty' => $s['diaperDirty'],
                 'pumpingMl' => $s['pumpingMl'], 'vitaminD' => $s['vitaminD'], 'weightG' => $s['weightG'],
+                'bathCount' => $s['bathCount'],
             ];
         }
 
@@ -170,6 +171,7 @@ function handle_api(string $route, string $method, Repository $repo): void
             'milkMinMl' => Config::MILK_ML_MIN, 'milkMaxMl' => Config::MILK_ML_MAX,
             'milkStepMl' => Config::MILK_ML_STEP, 'milkDefaultMl' => Config::MILK_ML_DEFAULT,
             'birthWeightG' => Config::BIRTH_WEIGHT_G, 'lastWeightG' => $latest['lastWeightG'],
+            'lastBath' => $latest['lastBath'],
             'calendar' => $calendar, 'night' => $nightActive,
             'mdns' => 'karmienie.local', 'undoWindowSec' => 60,
             'freeHeap' => 0, 'totalHeap' => 0, 'freePsram' => 0, 'totalPsram' => 0, 'maxAlloc' => 0,
@@ -211,7 +213,7 @@ function handle_api(string $route, string $method, Repository $repo): void
             sendJson(201, ['message' => 'Zapisano wage.']);
         }
         if (!Domain::isMilkType($type) && $type !== 'KARMIENIE') {
-            if (!in_array($type, ['ODCIAGANIE', 'PIELUCHA_MOKRA', 'PIELUCHA_BRUDNA', 'WITAMINA_D'], true)) sendJson(400, ['message' => 'Nieznany typ zdarzenia.']);
+            if (!in_array($type, ['ODCIAGANIE', 'PIELUCHA_MOKRA', 'PIELUCHA_BRUDNA', 'WITAMINA_D', 'KAPIEL'], true)) sendJson(400, ['message' => 'Nieznany typ zdarzenia.']);
             if ($type === 'WITAMINA_D') {
                 $todayS = Domain::dayStatsForOffset($repo->allEntries(), 0, $when);
                 if ($todayS['vitaminD']) sendJson(200, ['message' => 'Witamina D juz zapisana dzisiaj.']);
@@ -258,7 +260,7 @@ function handle_api(string $route, string $method, Repository $repo): void
 
     if ($route === 'event' && $method === 'POST') {
         $type = param('type', '');
-        if (!in_array($type, ['PIELUCHA_MOKRA', 'PIELUCHA_BRUDNA', 'WITAMINA_D', 'ODCIAGANIE', 'WAGA', 'SEN_START', 'SEN_STOP'], true)) sendJson(400, ['message' => 'Nieznany typ zdarzenia.']);
+        if (!in_array($type, ['PIELUCHA_MOKRA', 'PIELUCHA_BRUDNA', 'WITAMINA_D', 'ODCIAGANIE', 'WAGA', 'SEN_START', 'SEN_STOP', 'KAPIEL'], true)) sendJson(400, ['message' => 'Nieznany typ zdarzenia.']);
         $when = new DateTimeImmutable();
         if (param('when') !== null) {
             $parsed = Domain::parseWebDateTime((string)param('when'));

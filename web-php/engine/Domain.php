@@ -183,7 +183,7 @@ final class Domain
     {
         $res = [
             'lastFeeding' => 'Brak zapisanego wpisu', 'lastMilk' => 'Brak zapisanego wpisu',
-            'lastFeedingTime' => null, 'lastMilkTime' => null, 'lastWeightG' => 0,
+            'lastFeedingTime' => null, 'lastMilkTime' => null, 'lastWeightG' => 0, 'lastBath' => null,
             'sleepInProgress' => false, 'sleepStartedTime' => null, 'lastWakeTime' => null,
             'avgFeedingGapMin' => 0, 'longestFeedingGapMin' => 0, 'todayFeedingCount' => 0, 'nextFeedingEta' => null,
         ];
@@ -204,6 +204,7 @@ final class Domain
             }
             if (self::isMilkType($e['type'])) { $res['lastMilk'] = self::formatEntryForUi($e); $res['lastMilkTime'] = $stamp; }
             if ($e['type'] === 'WAGA') $res['lastWeightG'] = $e['ml'];
+            if ($e['type'] === 'KAPIEL') $res['lastBath'] = $e['date'];
             if ($e['type'] === 'SEN_START') { $res['sleepInProgress'] = true; $res['sleepStartedTime'] = $stamp; $sawStart = true; }
             elseif ($e['type'] === 'SEN_STOP') { $res['sleepInProgress'] = false; $res['sleepStartedTime'] = null; if ($sawStart) { $res['lastWakeTime'] = $stamp; $sawStart = false; } }
         }
@@ -217,7 +218,7 @@ final class Domain
     {
         return ['feedingCount'=>0,'milkCount'=>0,'milkMl'=>0,'motherMilkMl'=>0,'modifiedMilkMl'=>0,'mixedMilkMl'=>0,
             'piersLeftMin'=>0,'piersRightMin'=>0,'diaperWet'=>0,'diaperDirty'=>0,'pumpingMl'=>0,
-            'vitaminD'=>false,'weightG'=>0,'sleepDayMin'=>0,'sleepNightMin'=>0,'napCount'=>0];
+            'vitaminD'=>false,'weightG'=>0,'sleepDayMin'=>0,'sleepNightMin'=>0,'napCount'=>0,'bathCount'=>0];
     }
     private static function accrueSleepInterval(DateTimeImmutable $start, DateTimeImmutable $stop, array $iso, array &$stats): void
     {
@@ -265,6 +266,7 @@ final class Domain
                 elseif ($e['type'] === 'ODCIAGANIE') $s['pumpingMl'] += $e['ml'];
                 elseif ($e['type'] === 'WITAMINA_D') $s['vitaminD'] = true;
                 elseif ($e['type'] === 'WAGA') $s['weightG'] = $e['ml'];
+                elseif ($e['type'] === 'KAPIEL') $s['bathCount']++;
                 unset($s); break;
             }
         }

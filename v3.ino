@@ -197,6 +197,7 @@ struct DaySummary {
   int sleepDayMin;   // minuty snu dziennego (drzemki) przypisane do tego dnia
   int sleepNightMin; // minuty snu nocnego przypisane do tego dnia
   int napCount;      // liczba drzemek dziennych rozpoczetych tego dnia
+  int bathCount;     // liczba kapieli danego dnia (typ KAPIEL, ml=0)
 };
 
 // Grupa pogody dla ikony/opisu wygaszacza (kody wttr.in mapowane na WMO).
@@ -240,6 +241,7 @@ bool otaInProgress = false;         // podczas OTA wstrzymujemy odswiezanie LVGL
 time_t lastFeedingTime = 0;         // czas ostatniego KARMIENIE (do licznika "temu")
 time_t lastMilkTime = 0;
 int lastWeightG = 0;                // ostatnia zapisana waga (g); 0 = brak wpisu
+time_t lastBathTime = 0;            // data ostatniej kapieli (KAPIEL, godzina zapisu 12:00); 0 = brak
 int avgFeedingGapMin = 0;           // sredni odstep miedzy karmieniami DZIS (min); 0 = za malo danych
 int longestFeedingGapMin = 0;       // najdluzsza przerwa miedzy karmieniami DZIS (min)
 int todayFeedingCount = 0;          // liczba karmien DZIS (tylko typ KARMIENIE)
@@ -1143,6 +1145,7 @@ void loadLatestEntries() {
   lastFeedingTime = 0;
   lastMilkTime = 0;
   lastWeightG = 0;
+  lastBathTime = 0;
   sleepInProgress = false;
   sleepStartedTime = 0;
   lastWakeTime = 0;
@@ -1166,7 +1169,11 @@ void loadLatestEntries() {
   file.readStringUntil('\n'); // pominięcie nagłówka
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // Zamiast line.trim() (nowy String): usuwamy tylko koncowy CR/LF (1 modyfikacja
+    // w miejscu) — P3: mniej alokacji przy kazdym przebiegu pliku.
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     if (line.length() == 0) continue;
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) continue;
@@ -1204,6 +1211,10 @@ void loadLatestEntries() {
     }
     if (entry.type == "WAGA") {
       lastWeightG = entry.ml; // gramy zapisane w kolumnie ml
+    }
+    if (entry.type == "KAPIEL") {
+      // Ostatnia kapiel = wpis o NAJPOZNIEJSZYM czasie (data; godzina zapisu 12:00).
+      if (stamp >= lastBathTime) lastBathTime = stamp;
     }
     if (entry.type == "SEN_START") {
       sleepInProgress = true;
@@ -1247,7 +1258,10 @@ void recomputeFeedingRhythm() {
   int gapCount = 0;
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     if (line.length() == 0) continue;
     if (!line.startsWith(today + ",")) continue;
     CsvEntry entry;
@@ -1723,7 +1737,10 @@ String entriesForDay(time_t day, bool compact) {
   file.readStringUntil('\n');
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     if (!line.startsWith(targetDate + ",")) continue;
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) continue;
@@ -1829,6 +1846,7 @@ void refreshDayStats() {
     s.sleepDayMin = 0;
     s.sleepNightMin = 0;
     s.napCount = 0;
+    s.bathCount = 0;
   }
   if (storageReady) {
     File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
@@ -1837,7 +1855,10 @@ void refreshDayStats() {
       time_t openSleepStart = 0; // otwarty SEN_START (plik jest chronologiczny)
       while (file.available()) {
         String line = file.readStringUntil('\n');
-        line.trim();
+        // P3: koncowe CR/LF usuwamy w miejscu (bez trim() — nowy String na wiersz).
+        while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+          line.remove(line.length() - 1);
+        }
         if (line.length() == 0) continue;
         CsvEntry entry;
         if (!parseCsvLine(line, entry)) continue;
@@ -1877,6 +1898,8 @@ void refreshDayStats() {
             s.vitaminD = true;
           } else if (entry.type == "WAGA") {
             s.weightG = entry.ml; // ostatni wpis danego dnia nadpisuje (kolejnosc chronologiczna)
+          } else if (entry.type == "KAPIEL") {
+            ++s.bathCount;
           }
           break;
         }
@@ -1929,7 +1952,8 @@ String formatDaySummaryLine(const DaySummary &s) {
 
 String formatDayExtraLine(const DaySummary &s) {
   return String("PIELUCHY: ") + s.diaperWet + "/" + s.diaperDirty +
-         " | ODCIAG.: " + s.pumpingMl + " ml | WIT.D: " + (s.vitaminD ? "TAK" : "BRAK");
+         " | ODCIAG.: " + s.pumpingMl + " ml | WIT.D: " + (s.vitaminD ? "TAK" : "BRAK") +
+         (s.bathCount > 0 ? " | KAPIELI: " + String(s.bathCount) : String());
 }
 
 // "2 godz. 5 min temu" dla licznika od ostatniego karmienia.
@@ -1973,6 +1997,38 @@ String jsonEscape(const String &value) {
     }
   }
   return escaped;
+}
+
+// --- Pomocnicze budowy JSON bez tymczasowych String (P1) --------------------------
+// `payload += "..." + String(v) + ...` tworzy po 1-2 tymczasowe String na pole —
+// przy ~40 polach /api/status to ~50-80 alokacji co 10 s pollingu, co na malym
+// heapie wewnetrznym (prog HTTP = 24 KB) mocno fragmentuje RAM i przyspiesza
+// restarty. Helpery pisz a do malej tablicy C i dorzucaja do payload appendem w
+// miejscu (bez tymczasowych Stringow).
+
+// Dopisuje:  "key":N,
+void jsonAppendInt(String &dst, const char *key, long value) {
+  char buf[40];
+  snprintf(buf, sizeof(buf), "\"%s\":%ld,", key, value);
+  dst += buf;
+}
+
+// Dopisuje:  "key":true/false,
+void jsonAppendBool(String &dst, const char *key, bool value) {
+  dst += '"';
+  dst += key;
+  dst += value ? "\":true," : "\":false,";
+}
+
+// Dopisuje:  "key":"encodowane",
+void jsonAppendStr(String &dst, const char *key, const String &value) {
+  dst += '"';
+  dst += key;
+  dst += "\":\"";
+  // jsonEscape z reserve pokrywa dlugosc; jedyny tymczasowy String jest nieuchronny.
+  String esc = jsonEscape(value);
+  dst += esc;
+  dst += "\",";
 }
 
 String webDateTime(time_t value) {
@@ -2037,6 +2093,10 @@ bool httpBailIfLowMemory() {
 void handleWebRoot() {
   Serial.println("HTTP: obsluga /");
   if (httpBailIfLowMemory()) return;
+  // Ograniczenie czasu pojedynczego write() przy slabym laczu: TCP retransmisje nie
+  // moga zawiesic loop() (subskrybent WDT 30 s) na cale sekundy. Klient jest tutaj
+  // juz polaczony, wiec timeout trafia na faktyczne gniazdo tej odpowiedzi.
+  webServer.client().setTimeout(5000);
   // Wysylamy PROGMEM partiami, aby nie alokowac 32 KB Stringa.
   webServer.sendHeader("Cache-Control", "no-store, max-age=0");
   webServer.setContentLength(strlen_P(WEB_APP_HTML));
@@ -2050,6 +2110,10 @@ void handleWebRoot() {
     memcpy_P(buffer, WEB_APP_HTML + pos, toRead);
     buffer[toRead] = '\0';
     webServer.sendContent(buffer);
+    // Karmienie WDT w petli wysylki: przy slabym laczu pojedynczy sendContent()
+    // moze czekac na TCP retransmisje. Feed co chunk strona sie nie mgrnie, ale
+    // loop() pozostaje "zywy" dla watchdoga i nie nastapi bledny restart.
+    feedWatchdog();
     pos += toRead;
   }
   Serial.println("HTTP: strona wyslana.");
@@ -2065,20 +2129,21 @@ void handleApiStatus() {
   // (wspoldzielony z Wi-Fi/TLS/LVGL/serwerem WWW — patrz bounce_buffer_size_px).
   payload.reserve(2560);
   payload = "{";
-  payload += "\"now\":\"" + jsonEscape(timeIsValid ? formatDateTime(now) : "Brak potwierdzonego czasu") + "\",";
-  payload += "\"nowIso\":\"" + jsonEscape(webDateTime(now)) + "\",";
-  payload += "\"ip\":\"" + jsonEscape(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "") + "\",";
-  payload += "\"age\":\"" + jsonEscape(calculateAgeText()) + "\",";
-  payload += "\"developmentTip\":\"" + jsonEscape(developmentTipForToday()) + "\",";
-  payload += "\"developmentDay\":" + String(calculateAgeDays()) + ",";
-  payload += "\"lastFeeding\":\"" + jsonEscape(lastFeeding) + "\",";
-  payload += "\"lastMilk\":\"" + jsonEscape(lastMilk) + "\",";
-  payload += "\"lastFeedingAgo\":\"" + jsonEscape(lastFeedingTime ? formatAgoText(lastFeedingTime) : String()) + "\",";
-  payload += "\"lastFeedingAgeMin\":" + String(lastFeedingTime ? static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60) : -1) + ",";
-  payload += "\"avgFeedingGapMin\":" + String(avgFeedingGapMin) + ",";
-  payload += "\"nextFeedingIso\":\"" + jsonEscape(nextFeedingEta ? webDateTime(nextFeedingEta) : String()) + "\",";
-  payload += "\"longestFeedingGapMin\":" + String(longestFeedingGapMin) + ",";
-  payload += "\"sleepInProgress\":" + String(sleepInProgress ? "true" : "false") + ",";
+  // Tons: helpery jsonAppend* buduja pola bez tymczasowych String (P1).
+  jsonAppendStr(payload, "now", timeIsValid ? formatDateTime(now) : String("Brak potwierdzonego czasu"));
+  jsonAppendStr(payload, "nowIso", webDateTime(now));
+  jsonAppendStr(payload, "ip", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String(""));
+  jsonAppendStr(payload, "age", calculateAgeText());
+  jsonAppendStr(payload, "developmentTip", developmentTipForToday());
+  jsonAppendInt(payload, "developmentDay", calculateAgeDays());
+  jsonAppendStr(payload, "lastFeeding", lastFeeding);
+  jsonAppendStr(payload, "lastMilk", lastMilk);
+  jsonAppendStr(payload, "lastFeedingAgo", lastFeedingTime ? formatAgoText(lastFeedingTime) : String(""));
+  jsonAppendInt(payload, "lastFeedingAgeMin", lastFeedingTime ? static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60) : -1);
+  jsonAppendInt(payload, "avgFeedingGapMin", avgFeedingGapMin);
+  jsonAppendStr(payload, "nextFeedingIso", nextFeedingEta ? webDateTime(nextFeedingEta) : String(""));
+  jsonAppendInt(payload, "longestFeedingGapMin", longestFeedingGapMin);
+  jsonAppendBool(payload, "sleepInProgress", sleepInProgress);
   // --- Sen (Napper): stan biezacy, okno czuwania, predykcja, bilans dnia ---
   {
     const long ageDays = calculateAgeDays();
@@ -2099,69 +2164,82 @@ void handleApiStatus() {
     }
     const long sleepSinceMin = sleepInProgress && sleepStartedTime ? static_cast<long>(difftime(time(nullptr), sleepStartedTime) / 60) : -1;
     const long wakeSinceMin = (!sleepInProgress && lastWakeTime) ? static_cast<long>(difftime(time(nullptr), lastWakeTime) / 60) : -1;
-    payload += "\"sleepState\":\"" + sleepState + "\",";
-    payload += "\"sleepSinceMin\":" + String(sleepSinceMin) + ",";
-    payload += "\"wakeSinceMin\":" + String(wakeSinceMin) + ",";
-    payload += "\"wakeWindowMinMin\":" + String(ww.minMin) + ",";
-    payload += "\"wakeWindowMaxMin\":" + String(ww.maxMin) + ",";
-    payload += "\"nextNapStartIso\":\"" + jsonEscape(napStart ? webDateTime(napStart) : String()) + "\",";
-    payload += "\"nextNapEndIso\":\"" + jsonEscape(napEnd ? webDateTime(napEnd) : String()) + "\",";
-    payload += "\"sleepDayMin\":" + String(today.sleepDayMin) + ",";
-    payload += "\"sleepNightMin\":" + String(today.sleepNightMin) + ",";
-    payload += "\"sleepNeedDayMin\":" + String(needDay) + ",";
-    payload += "\"sleepNeedNightMin\":" + String(needNight) + ",";
-    payload += "\"napCount\":" + String(today.napCount) + ",";
-    payload += "\"napTarget\":" + String(napTargetCount(ageDays)) + ",";
-    payload += "\"sleepTelegram\":" + String(sleepTelegramEnabled ? "true" : "false") + ",";
+    jsonAppendStr(payload, "sleepState", sleepState);
+    jsonAppendInt(payload, "sleepSinceMin", sleepSinceMin);
+    jsonAppendInt(payload, "wakeSinceMin", wakeSinceMin);
+    jsonAppendInt(payload, "wakeWindowMinMin", ww.minMin);
+    jsonAppendInt(payload, "wakeWindowMaxMin", ww.maxMin);
+    jsonAppendStr(payload, "nextNapStartIso", napStart ? webDateTime(napStart) : String(""));
+    jsonAppendStr(payload, "nextNapEndIso", napEnd ? webDateTime(napEnd) : String(""));
+    jsonAppendInt(payload, "sleepDayMin", today.sleepDayMin);
+    jsonAppendInt(payload, "sleepNightMin", today.sleepNightMin);
+    jsonAppendInt(payload, "sleepNeedDayMin", needDay);
+    jsonAppendInt(payload, "sleepNeedNightMin", needNight);
+    jsonAppendInt(payload, "napCount", today.napCount);
+    jsonAppendInt(payload, "napTarget", napTargetCount(ageDays));
+    jsonAppendBool(payload, "sleepTelegram", sleepTelegramEnabled);
   }
-  payload += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
-  payload += "\"storage\":" + String(storageReady ? "true" : "false") + ",";
-  payload += "\"dataFileHuge\":" + String(dataFileHuge ? "true" : "false") + ",";
-  payload += "\"timeValid\":" + String(timeIsValid ? "true" : "false") + ",";
-  payload += "\"minMl\":" + String(ML_MIN) + ",";
-  payload += "\"maxMl\":" + String(ML_MAX) + ",";
-  payload += "\"defaultMl\":" + String(DEFAULT_ML) + ",";
-  payload += "\"milkMinMl\":" + String(MILK_ML_MIN) + ",";
-  payload += "\"milkMaxMl\":" + String(MILK_ML_MAX) + ",";
-  payload += "\"milkStepMl\":" + String(MILK_ML_STEP) + ",";
-  payload += "\"milkDefaultMl\":" + String(MILK_ML_DEFAULT) + ",";
-  payload += "\"birthWeightG\":" + String(BIRTH_WEIGHT_G) + ",";
-  payload += "\"lastWeightG\":" + String(lastWeightG) + ",";
+  jsonAppendBool(payload, "wifi", WiFi.status() == WL_CONNECTED);
+  jsonAppendBool(payload, "storage", storageReady);
+  jsonAppendBool(payload, "dataFileHuge", dataFileHuge);
+  jsonAppendBool(payload, "timeValid", timeIsValid);
+  jsonAppendInt(payload, "minMl", ML_MIN);
+  jsonAppendInt(payload, "maxMl", ML_MAX);
+  jsonAppendInt(payload, "defaultMl", DEFAULT_ML);
+  jsonAppendInt(payload, "milkMinMl", MILK_ML_MIN);
+  jsonAppendInt(payload, "milkMaxMl", MILK_ML_MAX);
+  jsonAppendInt(payload, "milkStepMl", MILK_ML_STEP);
+  jsonAppendInt(payload, "milkDefaultMl", MILK_ML_DEFAULT);
+  jsonAppendInt(payload, "birthWeightG", BIRTH_WEIGHT_G);
+  jsonAppendInt(payload, "lastWeightG", lastWeightG);
+  // Data ostatniej kapieli jako ISO (YYYY-MM-DD); puste, gdy brak wpisu.
+  jsonAppendStr(payload, "lastBath", lastBathTime ? dateIso(lastBathTime) : String(""));
   payload += "\"calendar\":[";
   for (uint8_t i = 0; i < 5; ++i) {
     const time_t day = dayOffsetFromToday(i);
     DaySummary s;
     dayStats(day, s);
     if (i) payload += ',';
-    payload += "{\"date\":\"" + dateIso(day) + "\",\"label\":\"" + jsonEscape(calendarDayTitle(day, i)) +
-               "\",\"feedingCount\":" + String(s.feedingCount) + ",\"milkMl\":" + String(s.milkMl) +
-               ",\"motherMilkMl\":" + String(s.motherMilkMl) + ",\"modifiedMilkMl\":" + String(s.modifiedMilkMl) +
-               ",\"mixedMilkMl\":" + String(s.mixedMilkMl) +
-               ",\"piersLeftMin\":" + String(s.piersLeftMin) + ",\"piersRightMin\":" + String(s.piersRightMin) +
-               ",\"diaperWet\":" + String(s.diaperWet) + ",\"diaperDirty\":" + String(s.diaperDirty) +
-               ",\"pumpingMl\":" + String(s.pumpingMl) + ",\"vitaminD\":" + String(s.vitaminD ? "true" : "false") +
-               ",\"weightG\":" + String(s.weightG) +
-               "}";
+    payload += "{\"date\":\"" + dateIso(day) + "\",\"label\":\"" + jsonEscape(calendarDayTitle(day, i)) + "\",";
+    jsonAppendInt(payload, "feedingCount", s.feedingCount);
+    jsonAppendInt(payload, "milkMl", s.milkMl);
+    jsonAppendInt(payload, "motherMilkMl", s.motherMilkMl);
+    jsonAppendInt(payload, "modifiedMilkMl", s.modifiedMilkMl);
+    jsonAppendInt(payload, "mixedMilkMl", s.mixedMilkMl);
+    jsonAppendInt(payload, "piersLeftMin", s.piersLeftMin);
+    jsonAppendInt(payload, "piersRightMin", s.piersRightMin);
+    jsonAppendInt(payload, "diaperWet", s.diaperWet);
+    jsonAppendInt(payload, "diaperDirty", s.diaperDirty);
+    jsonAppendInt(payload, "pumpingMl", s.pumpingMl);
+    jsonAppendBool(payload, "vitaminD", s.vitaminD);
+    jsonAppendInt(payload, "weightG", s.weightG);
+    jsonAppendInt(payload, "bathCount", s.bathCount);
+    // jsonAppend* dopisuja "," po wartosci; usuwamy nadmiarowa przecinek po "bathCount".
+    payload.remove(payload.length() - 1, 1);
+    payload += "}";
   }
   payload += "],";
-  payload += "\"night\":" + String(nightModeActive ? "true" : "false") + ",";
+  jsonAppendBool(payload, "night", nightModeActive);
   payload += "\"mdns\":\"karmienie.local\",";
-  payload += "\"undoWindowSec\":60,";
-  payload += "\"freeHeap\":" + String(ESP.getFreeHeap() / 1024) + ",";
-  payload += "\"totalHeap\":" + String(heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024) + ",";
-  payload += "\"freePsram\":" + String(ESP.getFreePsram() / 1024) + ",";
-  payload += "\"totalPsram\":" + String(ESP.getPsramSize() / 1024) + ",";
-  payload += "\"maxAlloc\":" + String(ESP.getMaxAllocHeap() / 1024) + ",";
-  payload += "\"uptimeSec\":" + String(millis() / 1000) + ",";
-  payload += "\"cpuLoad\":" + String(cpuLoadPct) + ",";
+  jsonAppendInt(payload, "undoWindowSec", 60);
+  jsonAppendInt(payload, "freeHeap", ESP.getFreeHeap() / 1024);
+  jsonAppendInt(payload, "totalHeap", heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024);
+  jsonAppendInt(payload, "freePsram", ESP.getFreePsram() / 1024);
+  jsonAppendInt(payload, "totalPsram", ESP.getPsramSize() / 1024);
+  jsonAppendInt(payload, "maxAlloc", ESP.getMaxAllocHeap() / 1024);
+  jsonAppendInt(payload, "uptimeSec", millis() / 1000);
+  jsonAppendInt(payload, "cpuLoad", cpuLoadPct);
   // Diagnostyka (te same dane co ekran DIAGNOSTYKA na urzadzeniu).
-  payload += "\"minFreeHeap\":" + String((minFreeHeapEver == 0xFFFFFFFFUL ? 0 : minFreeHeapEver) / 1024) + ",";
-  payload += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
-  payload += "\"httpRequests\":" + String(httpRequestCount) + ",";
-  payload += "\"bootCount\":" + String(bootCount) + ",";
-  payload += "\"watchdogResets\":" + String(watchdogResetCount) + ",";
-  payload += "\"watchdogReady\":" + String(watchdogReady ? "true" : "false") + ",";
-  payload += "\"resetReason\":\"" + jsonEscape(resetReasonText(lastResetReason)) + "\"}";
+  jsonAppendInt(payload, "minFreeHeap", (minFreeHeapEver == 0xFFFFFFFFUL ? 0 : minFreeHeapEver) / 1024);
+  jsonAppendInt(payload, "rssi", WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0);
+  jsonAppendInt(payload, "httpRequests", httpRequestCount);
+  jsonAppendInt(payload, "bootCount", bootCount);
+  jsonAppendInt(payload, "watchdogResets", watchdogResetCount);
+  jsonAppendBool(payload, "watchdogReady", watchdogReady);
+  jsonAppendStr(payload, "resetReason", resetReasonText(lastResetReason));
+  // jsonAppendStr dopisalo "," — zastepujemy finalna "}" przy zamknieciu.
+  payload.remove(payload.length() - 1, 1);
+  payload += "}";
   sendJson(200, payload);
 }
 
@@ -2195,13 +2273,18 @@ void handleApiEntries() {
   webServer.sendHeader("Cache-Control", "no-store, max-age=0");
   webServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
   webServer.send(200, "application/json; charset=utf-8", "");
+  webServer.client().setTimeout(5000); // nie pozwol retransmisjom zamrozic loop()
   webServer.sendContent("{\"date\":\"" + targetDate + "\",\"entries\":[");
   bool firstEntry = true;
   int dataIndex = 0;
+  uint32_t entriesFeedCounter = 0;
   file.readStringUntil('\n');
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     if (line.length() == 0) { ++dataIndex; continue; }
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) { ++dataIndex; continue; }
@@ -2212,6 +2295,8 @@ void handleApiEntries() {
            ",\"piersLeftMin\":" + String(entry.piersLeft) + ",\"piersRightMin\":" + String(entry.piersRight) +
            ",\"lineIndex\":" + String(dataIndex) + "}";
     webServer.sendContent(obj);
+    // Feed WDT: dzien z wieloma wpisami przez wolne lacze nie moze zawiesic loop().
+    if ((++entriesFeedCounter & 0x3F) == 0) feedWatchdog();
     ++dataIndex;
   }
   file.close();
@@ -2255,14 +2340,19 @@ void handleApiWeightSeries() {
   webServer.sendHeader("Cache-Control", "no-store, max-age=0");
   webServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
   webServer.send(200, "application/json; charset=utf-8", "");
+  webServer.client().setTimeout(5000); // nie pozwol retransmisjom zamrozic loop()
   webServer.sendContent("{\"birthWeightG\":");
   webServer.sendContent(String(BIRTH_WEIGHT_G));
   webServer.sendContent(",\"points\":[");
   bool first = true;
+  uint32_t weightFeedCounter = 0;
   file.readStringUntil('\n');
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     if (line.length() == 0) continue;
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) continue;
@@ -2273,6 +2363,8 @@ void handleApiWeightSeries() {
     first = false;
     obj += "{\"day\":" + String(dol) + ",\"date\":\"" + entry.date + "\",\"g\":" + String(entry.ml) + "}";
     webServer.sendContent(obj);
+    // Feed WDT w dlugiej liscie wag przez wolne lacze.
+    if ((++weightFeedCounter & 0x3F) == 0) feedWatchdog();
   }
   file.close();
   webServer.sendContent("]}");
@@ -2531,7 +2623,7 @@ void handleApiEvent() {
   const String type = webServer.arg("type");
   const bool validType = type == "PIELUCHA_MOKRA" || type == "PIELUCHA_BRUDNA" ||
                          type == "WITAMINA_D" || type == "ODCIAGANIE" || type == "WAGA" ||
-                         type == "SEN_START" || type == "SEN_STOP";
+                         type == "SEN_START" || type == "SEN_STOP" || type == "KAPIEL";
   if (!validType) {
     sendJson(400, "{\"message\":\"Nieznany typ zdarzenia.\"}");
     return;
@@ -2599,11 +2691,16 @@ void handleExportCsv() {
   webServer.sendHeader("Content-Disposition", "attachment; filename=karmienia.csv");
   webServer.setContentLength(file.size());
   webServer.send(200, "text/csv; charset=utf-8", "");
+  webServer.client().setTimeout(5000); // nie pozwol retransmisjom zamrozic loop()
   uint8_t buffer[512];
+  uint32_t csvFeedCounter = 0;
   while (file.available()) {
     const size_t readBytes = file.read(buffer, sizeof(buffer));
     if (readBytes == 0) break;
     webServer.client().write(buffer, readBytes);
+    // Feed WDT co ~8 KB wyslanych: eksport calej historii przez wolne lacze
+    // nie moze zawiesic loop() na tyle, by watchdog zrestartowal urzadzenie.
+    if ((++csvFeedCounter & 0xF) == 0) feedWatchdog();
   }
   file.close();
 }
@@ -2693,6 +2790,12 @@ void handleApiImport() {
     start = nl + 1;
   }
   dst.close();
+  // Zwolnij roboczy bufor PRZED dalszymi operacjami (copy/rename tez alokuja).
+  // P2: bez tego caly /api/import trzymalby pelny plik (do ~128 KB+ wewn. RAM)
+  // przez kopie i podmiane, co na malym heapie spychalo go na przyspieszenie
+  // fragmentacji (pamietamy: heap wewn. wspoldzielony z Wi-Fi/TLS/LVGL/serwerem).
+  body.clear();
+  body = String(); // minimalny cap zamiast trzymania 512 KB bufora
 
   if (!headerSeen || rowCount == 0) {
     LittleFS.remove("/karmienia_import.tmp");
@@ -2791,7 +2894,10 @@ void populateDayEntries(lv_obj_t *container, time_t day) {
 
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     if (!line.startsWith(targetDate + ",")) continue;
     CsvEntry entry;
     if (!parseCsvLine(line, entry)) continue;
@@ -3083,7 +3189,10 @@ void createFeedingChartScreen() {
       int dataIndex = 0;
       while (file.available()) {
         String line = file.readStringUntil('\n');
-        line.trim();
+        // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
+        while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+          line.remove(line.length() - 1);
+        }
         if (line.length() == 0) { ++dataIndex; continue; }
         CsvEntry entry;
         if (!parseCsvLine(line, entry)) { ++dataIndex; continue; }
@@ -4351,6 +4460,12 @@ String telegramTextFor(const String &type, int ml, int piersLeft, int piersRight
   if (type == "WAGA") return String("Waga ") + hhmm + " - " + ml + " g";
   if (type == "SEN_START") return String("Zasnal ") + hhmm;
   if (type == "SEN_STOP") return String("Obudzil sie ") + hhmm;
+  if (type == "KAPIEL") {
+    // Kapiel zapisujemy data (godzina zawsze 12:00) — pokazuj date, nie godzine.
+    char ddmmyy[16];
+    strftime(ddmmyy, sizeof(ddmmyy), "%d.%m.%Y", &t);
+    return String("Kapiel ") + ddmmyy;
+  }
   return type + " " + hhmm;
 }
 
@@ -4474,19 +4589,43 @@ bool uploadCsvToHost() {
   if (!storageReady || !LittleFS.exists(DATA_FILE_PATH)) return false;
 
   // Parsowanie PANEL_UPLOAD_URL: wymagany https://host[:port]/sciezka
-  String url = String(PANEL_UPLOAD_URL);
-  if (!url.startsWith("https://")) {
+  // P5: parsowanie na C-stringach (strchr) zamiast budowania ~6 tymczasowych String
+  // przy KAZDYM uploadzie (a sync odpala sie po kazdej zmianie danych).
+  const char *urlStart = strstr(PANEL_UPLOAD_URL, "https://");
+  if (!urlStart) {
     Serial.println("HostSync: PANEL_UPLOAD_URL musi byc https:// — pomijam.");
     return false;
   }
-  String rest = url.substring(8); // po "https://"
-  int slash = rest.indexOf('/');
-  String hostPort = (slash >= 0) ? rest.substring(0, slash) : rest;
-  String path = (slash >= 0) ? rest.substring(slash) : "/";
-  int colon = hostPort.indexOf(':');
-  String host = (colon >= 0) ? hostPort.substring(0, colon) : hostPort;
-  int port = (colon >= 0) ? hostPort.substring(colon + 1).toInt() : 443;
-  if (host.length() == 0) return false;
+  const char *hostBegin = urlStart + 8;
+  const char *pathPos = strchr(hostBegin, '/');
+  const char *colonPos = strchr(hostBegin, ':');
+  // Szerokosc czesci host:promie do '/', ale do CONKA (jesli jest przed '/') — krotsza.
+  size_t hostEnd = pathPos ? static_cast<size_t>(pathPos - hostBegin) : strlen(hostBegin);
+  if (colonPos && static_cast<size_t>(colonPos - hostBegin) < hostEnd)
+    hostEnd = static_cast<size_t>(colonPos - hostBegin);
+  char host[160];
+  if (hostEnd >= sizeof(host)) hostEnd = sizeof(host) - 1;
+  memcpy(host, hostBegin, hostEnd);
+  host[hostEnd] = '\0';
+  char path[256];
+  if (pathPos) {
+    size_t pl = strlen(pathPos);
+    if (pl >= sizeof(path)) pl = sizeof(path) - 1;
+    memcpy(path, pathPos, pl);
+    path[pl] = '\0';
+  } else {
+    path[0] = '/';
+    path[1] = '\0';
+  }
+  // Port (opcjonalny) — cyfry po ':' a przed '/'. Domyslnie 443.
+  int port = 443;
+  if (colonPos) {
+    const char *p = colonPos + 1;
+    int pv = 0;
+    while (*p >= '0' && *p <= '9') { pv = pv * 10 + (*p - '0'); ++p; }
+    if (pv > 0) port = pv;
+  }
+  if (strlen(host) == 0) return false;
 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!file) return false;
@@ -4499,8 +4638,8 @@ bool uploadCsvToHost() {
   client.setInsecure();
   client.setHandshakeTimeout(8000);
   client.setTimeout(8000);
-  if (!client.connect(host.c_str(), port)) {
-    Serial.printf("HostSync: blad TLS do %s:%d\n", host.c_str(), port);
+  if (!client.connect(host, port)) {
+    Serial.printf("HostSync: blad TLS do %s:%d\n", host, port);
     file.close();
     return false;
   }
@@ -4513,7 +4652,7 @@ bool uploadCsvToHost() {
   const size_t bodyLen = head.length() + fileSize + tail.length();
 
   client.printf("POST %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ESP32\r\n",
-                path.c_str(), host.c_str());
+                path, host);
   if (strlen(PANEL_UPLOAD_TOKEN) > 0) {
     client.printf("X-Upload-Token: %s\r\n", PANEL_UPLOAD_TOKEN);
   }
@@ -4620,6 +4759,7 @@ void pumpTelegramQueue() {
   const String url = String("/bot") + TELEGRAM_BOT_TOKEN + "/sendMessage";
   if (!http.begin(client, "api.telegram.org", 443, url)) {
     Serial.println("Telegram: http.begin() nieudany.");
+    http.end(); // zwolnij ew. context przy nieudanej probie (P6)
     telegramNextAttemptMs = millis() + 30000;
     return;
   }
@@ -4979,11 +5119,12 @@ void updateScreensaverContent() {
     setLabelTextIfChanged(ssSleepLabel, ssRenderedSleep, sleepLine);
     if (ssSleepLabel) lv_obj_set_style_text_color(ssSleepLabel, sleepColor, 0);
     // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
-    // Odswiezamy je NA BIEZACO — przeliczamy rytm co ~30 s (nie tylko przy zapisie),
-    // aby "srednia" i "najdluzsza przerwa" uwzglednialy uplyw czasu od ostatniego
-    // karmienia. Liczba karmien z dayStats (jeden wspolny licznik z kalendarzem/WWW).
+    // Odswiezamy je NA BIEZACO — przeliczamy rytm co ~3 min (nie co 30 s), aby nie
+    // skanowac pliku CSV i nie fragmntowac heapa przy kazdym odswiezeniu wygaszacza
+    // (P4: wieksza czestotliwosc dodawala ~300 alokacji/min w tle). "Otwarta" przerwa
+    // od ostatniego karmienia i tak rosnie wizualnie na biezaco (openGap nizej).
     static uint32_t ssStatsLastRecalc = 0;
-    if (ssStatsLastRecalc == 0 || millis() - ssStatsLastRecalc >= 30000) {
+    if (ssStatsLastRecalc == 0 || millis() - ssStatsLastRecalc >= 180000) {
       recomputeFeedingRhythm();
       ssStatsLastRecalc = millis();
     }
@@ -5179,7 +5320,10 @@ void loadSettings() {
   if (!file) return; // brak pliku = wartosci domyslne
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    line.trim();
+    // Jednorazowy odczyt ustawien — trim() w miejscu (bez alokacji).
+    while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
+      line.remove(line.length() - 1);
+    }
     const int eq = line.indexOf('=');
     if (eq <= 0) continue;
     const String key = line.substring(0, eq);
@@ -5854,6 +5998,11 @@ void loop() {
     // iteracji LUB wlasnie sie polaczyl w jej trakcie, by nie marnowac cykli, gdy nikt
     // nie jest polaczony.
     if (webServerStarted && (httpClientActive || (webServer.client() && webServer.client().connected()))) {
+      // Po dlugiej wysylce poprzedniego handlera resetujemy WDT TUZ PRZED kolejna
+      // obsluga: handleClient() moze czytac cale zadanie (np. upload CSV), a na
+      // wolnym laczach to trwa. Feed w tym miejscu oznacza, ze loop() "nadal zyje"
+      // nawet gdy pojedyncze proszenie o request zabierze sporo czasu.
+      feedWatchdog();
       webServer.handleClient();
       httpClientActive = true;
     }

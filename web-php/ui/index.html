@@ -26,6 +26,7 @@
   --milk:#3f77d6; --milk-2:#5f95ec;
   --sleep:#7b58d4; --sleep-2:#9a7ce8;
   --diaper:#0f8a5f; --sun:#e0a52e; --danger:#e0483c;
+  --bath:#14B8A6; --bath-2:#2dd4bf;
   --g-acc:linear-gradient(135deg,#12b877,#0b6e4b);
   --g-feed:linear-gradient(135deg,#f0954f,#d85f1f);
   --g-milk:linear-gradient(135deg,#5f95ec,#2f63c4);
@@ -48,6 +49,7 @@
   --acc:#2fd48f; --acc-2:#25c081; --acc-ink:#7fe6b6;
   --feed:#f2a768; --feed-2:#e08a45; --milk:#78a6f0; --milk-2:#5f8fe0;
   --sleep:#b295ec; --sleep-2:#9a7ce8; --diaper:#2fd48f; --sun:#e8c46a; --danger:#f0685e;
+  --bath:#2dd4bf; --bath-2:#14B8A6;
   --g-acc:linear-gradient(135deg,#2fd48f,#12855c);
   --g-hero:linear-gradient(150deg,#12855c 0%,#0c5a58 55%,#0a3f52 100%);
   --sh-1:0 1px 3px rgba(0,0,0,.5);
@@ -103,7 +105,7 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .ds{position:relative;border-radius:var(--r3);padding:12px 10px;background:var(--card);border:1px solid var(--brd);box-shadow:var(--sh-1);overflow:hidden;text-align:center}
 .ds .di{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;margin:0 auto 7px;color:#fff}
 .ds .di svg{width:16px;height:16px}
-.ds.feed .di{background:var(--g-feed)} .ds.milk .di{background:var(--g-milk)} .ds.diaper .di{background:var(--g-acc)} .ds.sleep .di{background:var(--g-sleep)}
+.ds.feed .di{background:var(--g-feed)} .ds.milk .di{background:var(--g-milk)} .ds.diaper .di{background:var(--g-acc)} .ds.sleep .di{background:var(--g-sleep)} .ds.bath .di{background:linear-gradient(135deg,var(--bath-2),var(--bath))}
 .ds .dv{font-family:var(--fd);font-size:1.28rem;font-weight:800;line-height:1;color:var(--ink)}
 .ds .dk{font-size:.58rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin-top:4px}
 @media(max-width:380px){.ds .dk{font-size:.54rem}}
@@ -331,7 +333,7 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .hbar-v{font-size:.6rem;font-weight:800;color:var(--ink-2);white-space:nowrap;min-height:.8em}
 .hbar-track{width:100%;max-width:34px;height:96px;display:flex;align-items:flex-end;background:var(--card-2);border-radius:7px 7px 4px 4px;overflow:hidden}
 .hbar-fill{width:100%;border-radius:7px 7px 4px 4px;transition:height .6s cubic-bezier(.3,.9,.3,1);min-height:3px}
-.hbar-fill.feed{background:var(--g-feed)} .hbar-fill.milk{background:var(--g-milk)} .hbar-fill.diaper{background:var(--g-acc)} .hbar-fill.sleep{background:var(--g-sleep)}
+.hbar-fill.feed{background:var(--g-feed)} .hbar-fill.milk{background:var(--g-milk)} .hbar-fill.diaper{background:var(--g-acc)} .hbar-fill.sleep{background:var(--g-sleep)} .hbar-fill.bath{background:linear-gradient(180deg,var(--bath-2),var(--bath))}
 .hbar-stack{width:100%;display:flex;flex-direction:column;border-radius:7px 7px 4px 4px;overflow:hidden;min-height:3px}
 .hbar-stack .hs.mother{background:var(--g-acc)} .hbar-stack .hs.mixed{background:linear-gradient(135deg,#12b877,#5f95ec)} .hbar-stack .hs.modified{background:var(--g-milk)}
 .hbar-lab{font-size:.56rem;font-weight:700;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
@@ -359,7 +361,7 @@ body.modal-open{overflow:hidden}
 .db-cell{border-radius:var(--r3);padding:12px;background:var(--card-2);border:1px solid var(--brd);text-align:center}
 .db-cell .cv{font-family:var(--fd);font-size:1.5rem;font-weight:800;line-height:1}
 .db-cell .ck{font-size:.6rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-top:5px}
-.db-cell.feed .cv{color:var(--feed)} .db-cell.milk .cv{color:var(--milk)} .db-cell.sleep .cv{color:var(--sleep)} .db-cell.diaper .cv{color:var(--diaper)}
+.db-cell.feed .cv{color:var(--feed)} .db-cell.milk .cv{color:var(--milk)} .db-cell.sleep .cv{color:var(--sleep)} .db-cell.diaper .cv{color:var(--diaper)} .db-cell.bath .cv{color:var(--bath)}
 .day-arc{position:relative;height:52px;border-radius:14px;overflow:hidden;border:1px solid var(--brd);margin-bottom:16px;
   background:linear-gradient(90deg,color-mix(in srgb,var(--milk) 16%,transparent),color-mix(in srgb,var(--sun) 14%,transparent) 50%,color-mix(in srgb,var(--milk) 16%,transparent))}
 
@@ -384,7 +386,7 @@ body.modal-open{overflow:hidden}
 .tl-card:active{transform:scale(.99)}
 .tl-ic{width:30px;height:30px;flex:none;border-radius:9px;display:grid;place-items:center;color:#fff}
 .tl-ic svg{width:16px;height:16px}
-.tl-ic.feed{background:var(--g-feed)} .tl-ic.milk{background:var(--g-milk)} .tl-ic.diaper{background:var(--g-acc)} .tl-ic.sleep{background:var(--g-sleep)} .tl-ic.other{background:linear-gradient(135deg,#9fb0a2,#7a8c7e)}
+.tl-ic.feed{background:var(--g-feed)} .tl-ic.milk{background:var(--g-milk)} .tl-ic.diaper{background:var(--g-acc)} .tl-ic.sleep{background:var(--g-sleep)} .tl-ic.other{background:linear-gradient(135deg,#9fb0a2,#7a8c7e)} .tl-ic.bath{background:linear-gradient(135deg,var(--bath-2),var(--bath))}
 .tl-main{flex:1;min-width:0}
 .tl-t{font-weight:800;font-size:.85rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tl-s{font-size:.71rem;color:var(--muted);font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -459,7 +461,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:16px;border:none;border-radius:var(--r2);font:inherit;font-weight:800;font-size:.94rem;cursor:pointer;color:#fff;box-shadow:var(--sh-2);transition:transform .16s,filter .16s}
 .btn:hover{filter:brightness(1.06)} .btn:active{transform:scale(.98)}
-.btn.acc{background:var(--g-acc)} .btn.feed{background:var(--g-feed)} .btn.milk{background:var(--g-milk)} .btn.plum,.btn.sleep{background:var(--g-sleep)} .btn.acorn{background:var(--g-feed)}
+.btn.acc{background:var(--g-acc)} .btn.feed{background:var(--g-feed)} .btn.milk{background:var(--g-milk)} .btn.plum,.btn.sleep{background:var(--g-sleep)} .btn.acorn{background:var(--g-feed)} .btn.bath{background:linear-gradient(135deg,var(--bath-2),var(--bath))}
 .btn.ghost{background:var(--card-2);color:var(--ink-2);box-shadow:none;border:1px solid var(--brd)}
 .btn-row{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-top:20px}
 
@@ -480,7 +482,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
 .bar-col .v{font-size:.68rem;font-weight:800;color:var(--ink-2)}
 .bstack{width:100%;max-width:36px;display:flex;flex-direction:column-reverse;border-radius:9px 9px 4px 4px;overflow:hidden;transition:height .6s cubic-bezier(.3,.9,.3,1)}
-.bseg{width:100%}.bseg.mother{background:var(--g-acc)}.bseg.modified{background:var(--g-milk)}.bseg.mixed{background:linear-gradient(135deg,#12b877,#5f95ec)}
+.bseg{width:100%}.bseg.mother{background:var(--g-acc)}.bseg.modified{background:var(--g-milk)}.bseg.mixed{background:linear-gradient(135deg,#12b877,#5f95ec)}.bseg.bath{background:linear-gradient(180deg,var(--bath-2),var(--bath))}
 .bar-col .feeds{font-size:.62rem;font-weight:800;color:var(--feed)}
 .bar-col .lab{font-size:.62rem;font-weight:700;color:var(--muted)}
 .dtable{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:8px}
@@ -581,7 +583,9 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
     <div class="ds milk"><div class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M8.5 2.5h7l-.6 3.1c.7.4 1.1 1.1 1.1 1.9v11a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-11c0-.8.4-1.5 1.1-1.9L8.5 2.5Z" fill="#fff"/><path d="M8 11.5h8" stroke="var(--milk)" stroke-width="1.6" stroke-linecap="round"/><path d="M8 15h8" stroke="var(--milk)" stroke-width="1.6" stroke-linecap="round" opacity=".6"/></svg></div><div class="dv" id="dsMilk">0</div><div class="dk">ml mleka</div></div>
     <div class="ds diaper"><div class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M3.5 6.5h17v3a9 9 0 0 1-4.6 7.9l-.4.2v2.4a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V17.6l-.4-.2A9 9 0 0 1 3.5 9.5v-3Z" fill="#fff"/><path d="M9 10c1 1 2 1.4 3 1.4S13.9 11 15 10" stroke="var(--diaper)" stroke-width="1.5" stroke-linecap="round"/></svg></div><div class="dv" id="dsDiaper">0</div><div class="dk">pieluchy</div></div>
     <div class="ds sleep"><div class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M21 13.5A8.5 8.5 0 1 1 10.5 3a6.8 6.8 0 0 0 10.5 10.5Z" fill="#fff"/><path d="M15 4h3l-3 3.5h3" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/></svg></div><div class="dv" id="dsSleep">0</div><div class="dk">sen</div></div>
+    <div class="ds bath"><div class="di"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16v1a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6v-1Z" fill="#fff"/><path d="M6 12V6.5a2 2 0 0 1 2-2 2 2 0 0 1 2 2V7" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/><path d="M4 12v-2M20 12v-2" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg></div><div class="dv" id="dsBath">0</div><div class="dk">kąpieli</div></div>
   </div>
+  <p class="chart-note" id="lastBathLine" style="text-align:center;margin:4px 0 0;font-size:.78rem;color:var(--muted)">Ostatnia kąpiel: brak</p>
 
   <!-- HERO / licznik -->
   <section class="hero reveal">
@@ -782,7 +786,17 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 <div class="modal" id="otherModal" aria-hidden="true"><div class="sheet" role="dialog">
   <div class="grip"></div><div class="m-head"><h2>Więcej działań</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
   <button class="btn acc" data-action="diaper" style="margin-bottom:10px">Pielucha</button>
-  <button class="btn milk" data-action="pumping">Odciąganie pokarmu</button>
+  <button class="btn milk" data-action="pumping" style="margin-bottom:10px">Odciąganie pokarmu</button>
+  <button class="btn bath" data-action="bath">Kąpiel</button>
+</div></div>
+
+<!-- MODAL: kąpiel -->
+<div class="modal" id="bathModal" aria-hidden="true"><div class="sheet" role="dialog">
+  <div class="grip"></div><div class="m-head"><h2>Kąpiel</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+  <p class="hint" style="margin:0 0 10px">Zapisz datę kąpieli (bez godziny).</p>
+  <input id="bathDate" type="date" value="" style="width:100%;padding:12px;border:1px solid var(--brd);border-radius:14px;background:var(--card-solid);color:var(--ink);font:inherit;text-align:center;margin-bottom:12px">
+  <div class="btn-row"><button type="button" class="btn bath" data-action="bath-save">Zapisz kąpiel</button><button type="button" class="btn ghost" data-action="home">Anuluj</button></div>
+  <p class="notice" id="bathNotice"></p>
 </div></div>
 
 <!-- MODAL: pielucha -->

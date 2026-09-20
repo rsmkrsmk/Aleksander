@@ -12,7 +12,7 @@ const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:
   // uzywany gdy tylko JEDEN rodzaj; przy obu rodzajach uzywamy tych dwoch pol.
   milkMotherMl:60, milkModifiedMl:60, mlPopKind:null };
 const $ = id => document.getElementById(id);
-const MODALS = ['formModal','otherModal','diaperModal'];
+const MODALS = ['formModal','otherModal','diaperModal','bathModal'];
 const PAGES = ['start','diary','stats','weight','sleep'];
 const PAGE_TITLES = {start:'Leśny Dziennik',diary:'Dziennik',stats:'Statystyki',weight:'Waga',sleep:'Sen'};
 
@@ -121,6 +121,7 @@ function entryIcon(type){
   if((type||'').startsWith('MLEKO'))return['milk','<path d="M9 2h6v3l1 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l1-3V2Z" fill="#fff"/>'];
   if(type==='PIELUCHA_MOKRA'||type==='PIELUCHA_BRUDNA')return['diaper','<path d="M4 6h16v5a8 8 0 0 1-16 0V6Z" fill="#fff"/>'];
   if(type==='SEN_START'||type==='SEN_STOP')return['sleep','<path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="#fff"/>'];
+  if(type==='KAPIEL')return['bath','<path d="M4 12h16v1a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6v-1Z" fill="#fff"/><path d="M6 12V6.5a2 2 0 0 1 2-2 2 2 0 0 1 2 2V7" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>'];
   return['other','<circle cx="12" cy="12" r="7" stroke="#fff" stroke-width="1.8" fill="none"/><path d="M12 8v4l3 2" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/>'];
 }
 
@@ -159,6 +160,7 @@ function render(data){
   countUp('dsDiaper',(t0.diaperWet||0)+(t0.diaperDirty||0));
   // "sen" na pasku: liczba drzemek dziś (z /api/status napCount)
   countUp('dsSleep',data.napCount||0);
+  countUp('dsBath',(t0.bathCount||0));
 
   // połączona karta posiłku (czas + opis osobno)
   // W hero: karmienie = sama godzina (bo "X temu" jest w wielkim nagłówku), butelka = godz + ml/rodzaj
@@ -174,6 +176,17 @@ function render(data){
     `<span class="s">${sdot(data.storage)}Pamięć ${data.storage?'OK':'błąd'}</span>`+
     `<span class="s">${sdot(data.timeValid)}Czas ${data.timeValid?'OK':'—'}</span>`;
   setText('dockSleep',data.sleepInProgress?'Śpi':'Sen');
+
+  // ostatnia kąpiel (data z /api/status)
+  const bathEl=$('lastBathLine');
+  if(bathEl){
+    if(data.lastBath){
+      const pb=data.lastBath.split('-');const then=new Date(+pb[0],+pb[1]-1,+pb[2]);
+      const nowN=new Date();const nowD=new Date(nowN.getFullYear(),nowN.getMonth(),nowN.getDate());
+      const days=Math.max(0,Math.round((nowD-then)/86400000));
+      bathEl.textContent=days===0?'Ostatnia kąpiel: dzisiaj':`Ostatnia kąpiel: ${days} dni temu`;
+    }else{bathEl.textContent='Ostatnia kąpiel: brak'}
+  }
 
   renderDayBand();
   renderDiag(data);
@@ -409,7 +422,7 @@ async function openDay(date,label){
   list.replaceChildren();
 
   // agregacja dnia
-  let feeds=0,milkMl=0,mother=0,modif=0,wet=0,dirty=0,pump=0,vit=false;
+  let feeds=0,milkMl=0,mother=0,modif=0,wet=0,dirty=0,pump=0,vit=false,baths=0;
   const sleeps=[];let sStart=null;
   entries.forEach(e=>{
     if(e.type==='KARMIENIE')feeds++;
@@ -418,6 +431,7 @@ async function openDay(date,label){
     else if(e.type==='PIELUCHA_BRUDNA')dirty++;
     else if(e.type==='ODCIAGANIE')pump+=e.ml||0;
     else if(e.type==='WITAMINA_D')vit=true;
+    else if(e.type==='KAPIEL')baths++;
     else if(e.type==='SEN_START')sStart=toMin(e.time);
     else if(e.type==='SEN_STOP'&&sStart!=null){const m2=toMin(e.time);if(m2!=null)sleeps.push([sStart,m2]);sStart=null}
   });
@@ -438,7 +452,8 @@ async function openDay(date,label){
     cell('feed',feeds,'karmień')+
     cell('milk',milkMl,'ml mleka')+
     cell('diaper',(wet+dirty),'pieluchy')+
-    cell('sleep',sleeps.length,'drzemki');
+    cell('sleep',sleeps.length,'drzemki')+
+    (baths?cell('bath',baths,'kąpiel'):'');
   list.append(bento);
 
   // łuk doby (pasma snu + znaczniki)
@@ -507,6 +522,10 @@ function renderChart(cal){
   let html='<table class="dtable"><tr><th>Dzień</th><th>Karm.</th><th>Matki</th><th>Mod.</th>'+(anyMixed?'<th>Miesz.</th>':'')+'<th>Suma</th></tr>';
   cal.forEach(d=>{const label=(d.label||'').split(' - ')[0];html+=`<tr><td>${label}</td><td>${d.feedingCount}</td><td>${d.motherMilkMl} ml</td><td>${d.modifiedMilkMl} ml</td>`+(anyMixed?`<td>${d.mixedMilkMl||0} ml</td>`:'')+`<td class="ok">${d.milkMl||0} ml</td></tr>`});
   html+='</table>';$('extraTable').innerHTML=html;
+  // --- Kąpiele (5 dni) ---
+  const anyBath=cal.some(d=>(d.bathCount||0)>0);
+  const bathHtml=anyBath?'<div class="bath5-title" style="margin-top:14px;font-size:.72rem;font-weight:800;letter-spacing:.05em;color:var(--muted);text-transform:uppercase">Kąpiele — 5 dni</div><div style="display:flex;gap:6px;align-items:flex-end;height:70px;margin-top:6px">'+cal.map(d=>{const n=d.bathCount||0;const maxB=Math.max(1,...cal.map(x=>x.bathCount||0));const h=n?Math.max(6,Math.round(n/maxB*60)):2;return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end"><div style="width:60%;border-radius:6px 6px 2px 2px;height:${h}px;background:linear-gradient(180deg,var(--bath-2),var(--bath))"></div><div style="font-size:.58rem;color:var(--muted);margin-top:3px">${(d.label||'').split(' - ')[0]}</div></div>`}).join('')+'</div>':'';
+  const extraEl=$('extraTable');extraEl.insertAdjacentHTML('beforeend',bathHtml);
 }
 /* Odstępy karmień dziś — renderowane w widoku "Wykresy". */
 async function renderGaps(){
@@ -613,7 +632,7 @@ async function loadCsvRows(){
 /* Agreguje wiersze CSV do mapy per-dzień z metrykami. */
 function aggregateByDay(rows){
   const days={};
-  const get=d=>days[d]||(days[d]={feeds:0,milkMl:0,motherMl:0,modMl:0,mixMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,weightG:0,_sleepStart:null});
+  const get=d=>days[d]||(days[d]={feeds:0,milkMl:0,motherMl:0,modMl:0,mixMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,weightG:0,baths:0,_sleepStart:null});
   rows.forEach(r=>{
     const d=get(r.date);
     switch(r.type){
@@ -629,6 +648,7 @@ function aggregateByDay(rows){
       case 'WAGA':d.weightG=r.ml;break;
       case 'SEN_START':d._sleepStart=toMin(r.time);break;
       case 'SEN_STOP':if(d._sleepStart!=null){const e=toMin(r.time);if(e!=null&&e>d._sleepStart)d.sleepMin+=e-d._sleepStart;d._sleepStart=null}break;
+      case 'KAPIEL':d.baths++;break;
     }
   });
   return days;
@@ -658,13 +678,13 @@ async function renderHistory(period){
 
   // Agreguj metryki w każdym kubełku
   const B=buckets.map(b=>{
-    let feeds=0,milkMl=0,motherMl=0,modMl=0,mixMl=0,wet=0,dirty=0,pump=0,vitD=0,sleepMin=0,activeDays=0,lastWeight=0;
-    b.dates.forEach(d=>{const x=byDay[d];if(!x)return;if(x.feeds||x.milkMl||x.wet||x.dirty)activeDays++;feeds+=x.feeds;milkMl+=x.milkMl;motherMl+=x.motherMl;modMl+=x.modMl;mixMl+=(x.mixMl||0);wet+=x.wet;dirty+=x.dirty;pump+=x.pump;vitD+=x.vitD;sleepMin+=x.sleepMin;if(x.weightG)lastWeight=x.weightG});
-    return {sub:b.sub,feeds,milkMl,motherMl,modMl,mixMl,wet,dirty,pump,vitD,sleepMin,activeDays,lastWeight};
+    let feeds=0,milkMl=0,motherMl=0,modMl=0,mixMl=0,wet=0,dirty=0,pump=0,vitD=0,sleepMin=0,baths=0,activeDays=0,lastWeight=0;
+    b.dates.forEach(d=>{const x=byDay[d];if(!x)return;if(x.feeds||x.milkMl||x.wet||x.dirty)activeDays++;feeds+=x.feeds;milkMl+=x.milkMl;motherMl+=x.motherMl;modMl+=x.modMl;mixMl+=(x.mixMl||0);wet+=x.wet;dirty+=x.dirty;pump+=x.pump;vitD+=x.vitD;sleepMin+=x.sleepMin;baths+=(x.baths||0);if(x.weightG)lastWeight=x.weightG});
+    return {sub:b.sub,feeds,milkMl,motherMl,modMl,mixMl,wet,dirty,pump,vitD,sleepMin,baths,activeDays,lastWeight};
   });
 
   // Sumy zbiorcze okresu
-  const tot=B.reduce((a,b)=>({feeds:a.feeds+b.feeds,milkMl:a.milkMl+b.milkMl,motherMl:a.motherMl+b.motherMl,modMl:a.modMl+b.modMl,mixMl:a.mixMl+b.mixMl,wet:a.wet+b.wet,dirty:a.dirty+b.dirty,pump:a.pump+b.pump,vitD:a.vitD+b.vitD,sleepMin:a.sleepMin+b.sleepMin,activeDays:a.activeDays+b.activeDays}),{feeds:0,milkMl:0,motherMl:0,modMl:0,mixMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,activeDays:0});
+  const tot=B.reduce((a,b)=>({feeds:a.feeds+b.feeds,milkMl:a.milkMl+b.milkMl,motherMl:a.motherMl+b.motherMl,modMl:a.modMl+b.modMl,mixMl:a.mixMl+b.mixMl,wet:a.wet+b.wet,dirty:a.dirty+b.dirty,pump:a.pump+b.pump,vitD:a.vitD+b.vitD,sleepMin:a.sleepMin+b.sleepMin,baths:a.baths+b.baths,activeDays:a.activeDays+b.activeDays}),{feeds:0,milkMl:0,motherMl:0,modMl:0,mixMl:0,wet:0,dirty:0,pump:0,vitD:0,sleepMin:0,baths:0,activeDays:0});
   const dd=Math.max(1,tot.activeDays);
 
   // --- KAFELKI ZBIORCZE ---
@@ -674,7 +694,8 @@ async function renderHistory(period){
     kcell(tot.feeds,'karmień','feed')+
     kcell(tot.milkMl+' ml','mleka','milk')+
     kcell(tot.wet+tot.dirty,'pieluch','diaper')+
-    kcell(fmtDurShort(tot.sleepMin),'snu','sleep');
+    kcell(fmtDurShort(tot.sleepMin),'snu','sleep')+
+    kcell(tot.baths,'kąpieli','bath');
   host.append(kpi);
   const avgLine=document.createElement('p');avgLine.className='chart-note';avgLine.style.margin='0 2px 18px';
   avgLine.innerHTML=`Średnio na dzień (${tot.activeDays} dni z danymi): <b>${(tot.feeds/dd).toFixed(1)}</b> karmień · <b>${Math.round(tot.milkMl/dd)}</b> ml · <b>${((tot.wet+tot.dirty)/dd).toFixed(1)}</b> pieluch`;
@@ -686,6 +707,7 @@ async function renderHistory(period){
   host.append(histBarChart('Pieluchy w czasie',B,b=>b.wet+b.dirty,'diaper',''));
   if(B.some(b=>b.sleepMin>0))host.append(histBarChart('Sen (godziny) w czasie',B,b=>Math.round(b.sleepMin/60*10)/10,'sleep',' h'));
   if(B.some(b=>b.pump>0))host.append(histBarChart('Odciąganie (ml) w czasie',B,b=>b.pump,'milk',' ml'));
+  if(B.some(b=>b.baths>0))host.append(histBarChart('Kąpiele w czasie',B,b=>b.baths,'bath',''));
 
   // --- WAGA w okresie ---
   try{
@@ -784,6 +806,15 @@ async function saveWeight(){
   n.textContent='Zapisywanie…';
   try{const r=await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type:'WAGA',ml:String(grams)})});n.className='notice ok';n.textContent=r.message||'Zapisano.';toast('Zapisano wagę');await refresh();renderWeightChart()}
   catch(e){n.className='notice error';n.textContent=e.message}
+}
+/* ---------- Kąpiel (tylko data) ---------- */
+function openBath(){const inp=$('bathDate');const d=new Date();inp.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;const n=$('bathNotice');if(n){n.className='notice';n.textContent=''}show('bathModal')}
+async function saveBath(){
+  const val=$('bathDate').value;const n=$('bathNotice');if(n){n.className='notice'}
+  if(!val||!/^\d{4}-\d{2}-\d{2}$/.test(val)){if(n){n.className='notice error';n.textContent='Wybierz datę kąpieli.'}return}
+  if(n)n.textContent='Zapisywanie…';
+  try{const r=await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type:'KAPIEL',when:val+'T12:00'})});if(n){n.className='notice ok';n.textContent=r.message||'Zapisano kąpiel.'}toast('Zapisano kąpiel');await refresh();setTimeout(()=>clearPanels(),600)}
+  catch(e){if(n){n.className='notice error';n.textContent=e.message}}
 }
 async function renderWeightChart(){
   const host=$('weightChart');host.replaceChildren();
@@ -971,6 +1002,8 @@ document.addEventListener('click',async ev=>{
     case 'w-minus':{const w=$('weightG');w.value=Math.max(2000,(Number(w.value)||3700)-10);break;}
     case 'w-plus':{const w=$('weightG');w.value=Math.min(15000,(Number(w.value)||3700)+10);break;}
     case 'w-save':saveWeight();break;
+    case 'bath':openBath();break;
+    case 'bath-save':await saveBath();break;
   }
 });
 
