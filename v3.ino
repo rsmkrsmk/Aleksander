@@ -16,8 +16,9 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 // Te biblioteki rdzenia sa wymagane przez szkic: mDNS, OTA, pogoda i Telegram.
-#define FEATURE_MDNS 1
-#define FEATURE_OTA 1
+// v4: mDNS i OTA WYLACZONE (0) — urzadzenie jest wyswietlaczem; wgrywanie przez USB.
+#define FEATURE_MDNS 0
+#define FEATURE_OTA 0
 #define FEATURE_HTTPCLIENT 1
 
 #include <time.h>
@@ -232,6 +233,10 @@ SemaphoreHandle_t telegramMutex = nullptr;
 // z rdzenia serwera WWW / loop(); obsluga w telegramTask (rdzen 0, obok Telegrama).
 volatile bool hostSyncPending = false;
 unsigned long hostSyncNextMs = 0;   // najwczesniejszy czas kolejnej wysylki (debounce/retry)
+// Polling danych z hostingu (v4): co HOST_POLL_MS sprawdzamy rewizje, gdy sie
+// zmienila — pobieramy pelny CSV jako mirror. Zmienne czytane/uzupelniane w telegramTask.
+long hostRevisionLocal = -1;        // ostatnio pobrana rewizja z hostingu (-1 = nie pobrano)
+unsigned long hostLastPollMs = 0;   // millis() ostatniego sprawdzenia rewizji
 // Znacznik ostatniej aktywnosci TLS Telegrama. Host-sync (drugi TLS) czeka po nim krotki
 // czas, aby pierwszy klient TLS zwolnil pamiec i heap sie skonsolidowal (bez tego drugi
 // handshake pada na "esp-aes: Failed to allocate memory" przez fragmentacje).
@@ -475,6 +480,8 @@ bool appendBackupIfDue();
 String buildBackupFileName();
 bool sendBackupViaTelegram(const String &fileName);
 bool uploadCsvToHost();
+long fetchRevision();
+bool downloadCsvFromHost();
 void requestHostSync();
 void resyncNtpIfDue();
 void queueTelegram(const String &text);
@@ -1685,7 +1692,9 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
     appendBackupIfDue();
     archiveDataFileIfHuge(); // miekka rotacja: kopia + ostrzezenie przy duzym pliku
     queueTelegram(telegramTextFor(String(entryType), ml, piersLeft, piersRight, when));
-    requestHostSync(); // wyslij aktualny CSV na panel WWW (hosting = lustro danych)
+    // v4: hosting jest zrodlem prawdy. Push calego CSV utrzymuje mirror na hostingu;
+    // urzadzenie rowniez pobiera dane z hostingu (polling rewizji, Etap 3).
+    requestHostSync();
   }
   return saved;
 }
@@ -2090,6 +2099,11 @@ bool parseWebDateTime(const String &value, time_t &result) {
          verifiedTime.tm_min == expectedMinute;
 }
 
+// ===================== Serwer WWW urządzenia (v4: wyłączony) =====================
+// v4: obsługa WWW odbywa się przez hosting. Gdy FEATURE_DEVICE_WEB=0 (domyślnie),
+// cały blok serwera WWW urządzenia (sendJson, httpBailIfLowMemory, handlery,
+// startWebServer) jest pomijany — kod zachowany do ewentualnego powrotu (ustaw 1).
+#if FEATURE_DEVICE_WEB
 void sendJson(int statusCode, const String &payload) {
   webServer.sendHeader("Cache-Control", "no-store, max-age=0");
   webServer.send(statusCode, "application/json; charset=utf-8", payload);
@@ -2911,6 +2925,7 @@ void startWebServer() {
   webServerStarted = true;
   Serial.printf("HTTP: serwer gotowy pod adresem http://%s/\n", WiFi.localIP().toString().c_str());
 }
+#endif /* FEATURE_DEVICE_WEB */
 
 // Tworzy osobną kartę dla każdego wiersza danego dnia; kontener można przewijać palcem.
 void populateDayEntries(lv_obj_t *container, time_t day) {
@@ -4747,6 +4762,167 @@ bool uploadCsvToHost() {
   Serial.printf("HostSync: wysylka nieudana (kod %d).\n", code);
   return false;
 }
+
+// Pobiera rewizje danych z hostingu (v4: hosting = zrodlo prawdy).
+// Zwraca licznik rewizji, lub -1 przy bledzie. Wywolywana z telegramTask.
+long fetchRevision() {
+  if (WiFi.status() != WL_CONNECTED) return -1;
+  const char *urlStart = strstr(PANEL_REV_URL, "https://");
+  if (!urlStart) { Serial.println("HostSync: PANEL_REV_URL musi byc https://."); return -1; }
+  const char *hostBegin = urlStart + 8;
+  const char *pathPos = strchr(hostBegin, '/');
+  const char *colonPos = strchr(hostBegin, ':');
+  size_t hostEnd = pathPos ? static_cast<size_t>(pathPos - hostBegin) : strlen(hostBegin);
+  if (colonPos && static_cast<size_t>(colonPos - hostBegin) < hostEnd)
+    hostEnd = static_cast<size_t>(colonPos - hostBegin);
+  char host[160];
+  if (hostEnd >= sizeof(host)) hostEnd = sizeof(host) - 1;
+  memcpy(host, hostBegin, hostEnd);
+  host[hostEnd] = '\0';
+  char path[256];
+  if (pathPos) {
+    size_t pl = strlen(pathPos);
+    if (pl >= sizeof(path)) pl = sizeof(path) - 1;
+    memcpy(path, pathPos, pl);
+    path[pl] = '\0';
+  } else {
+    path[0] = '/'; path[1] = '\0';
+  }
+  int port = 443;
+  if (colonPos) {
+    const char *p = colonPos + 1;
+    int pv = 0;
+    while (*p >= '0' && *p <= '9') { pv = pv * 10 + (*p - '0'); ++p; }
+    if (pv > 0) port = pv;
+  }
+  if (strlen(host) == 0) return -1;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setHandshakeTimeout(8000);
+  client.setTimeout(8000);
+  if (!client.connect(host, port)) return -1;
+  client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ESP32\r\nConnection: close\r\n\r\n", path, host);
+  client.flush();
+  unsigned long waitUntil = millis() + 6000;
+  String statusLine;
+  while (!client.available() && millis() < waitUntil) delay(10);
+  if (client.available()) statusLine = client.readStringUntil('\n');
+  int code = 0;
+  if (statusLine.startsWith("HTTP/1.") && statusLine.length() >= 12)
+    code = statusLine.substring(9, 12).toInt();
+  long rev = -1;
+  if (code == 200) {
+    // Odczyt ciala: szukamy "rev":N
+    String body;
+    while (client.available()) body += (char)client.read();
+    int k = body.indexOf("\"rev\"");
+    if (k >= 0) {
+      int p = body.indexOf(':', k);
+      int e = body.indexOf(',', p);
+      if (e < 0) e = body.indexOf('}', p);
+      if (e < 0) e = body.length();
+      rev = body.substring(p + 1, e).toInt();
+    }
+  }
+  while (client.available()) client.read();
+  client.stop();
+  if (code != 200) Serial.printf("HostSync: revision HTTP %d.\n", code);
+  return rev;
+}
+
+// Pobiera pelny CSV z hostingu i zapisuje atomowo jako lokalny mirror.
+// Po pobraniu odswieza dane i ekran. Zwraca true przy sukcesie.
+bool downloadCsvFromHost() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  const char *urlStart = strstr(PANEL_READ_URL, "https://");
+  if (!urlStart) { Serial.println("HostSync: PANEL_READ_URL musi byc https://."); return false; }
+  const char *hostBegin = urlStart + 8;
+  const char *pathPos = strchr(hostBegin, '/');
+  const char *colonPos = strchr(hostBegin, ':');
+  size_t hostEnd = pathPos ? static_cast<size_t>(pathPos - hostBegin) : strlen(hostBegin);
+  if (colonPos && static_cast<size_t>(colonPos - hostBegin) < hostEnd)
+    hostEnd = static_cast<size_t>(colonPos - hostBegin);
+  char host[160];
+  if (hostEnd >= sizeof(host)) hostEnd = sizeof(host) - 1;
+  memcpy(host, hostBegin, hostEnd);
+  host[hostEnd] = '\0';
+  char path[256];
+  if (pathPos) {
+    size_t pl = strlen(pathPos);
+    if (pl >= sizeof(path)) pl = sizeof(path) - 1;
+    memcpy(path, pathPos, pl);
+    path[pl] = '\0';
+  } else {
+    path[0] = '/'; path[1] = '\0';
+  }
+  int port = 443;
+  if (colonPos) {
+    const char *p = colonPos + 1;
+    int pv = 0;
+    while (*p >= '0' && *p <= '9') { pv = pv * 10 + (*p - '0'); ++p; }
+    if (pv > 0) port = pv;
+  }
+  if (strlen(host) == 0) return false;
+
+  feedWatchdog();
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setHandshakeTimeout(8000);
+  client.setTimeout(10000);
+  if (!client.connect(host, port)) return false;
+  client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ESP32\r\nConnection: close\r\n\r\n", path, host);
+  client.flush();
+  unsigned long waitUntil = millis() + 8000;
+  String statusLine;
+  while (!client.available() && millis() < waitUntil) delay(10);
+  if (client.available()) statusLine = client.readStringUntil('\n');
+  int code = 0;
+  if (statusLine.startsWith("HTTP/1.") && statusLine.length() >= 12)
+    code = statusLine.substring(9, 12).toInt();
+  if (code != 200) {
+    while (client.available()) client.read();
+    client.stop();
+    Serial.printf("HostSync: CSV HTTP %d.\n", code);
+    return false;
+  }
+  // Pomijamy naglowki HTTP do konca \r\n\r\n
+  String headers;
+  while (client.available()) {
+    char ch = (char)client.read();
+    headers += ch;
+    if (headers.endsWith("\r\n\r\n")) break;
+  }
+  // Zapis do pliku tymczasowego, potem atomowy rename.
+  File tmp = LittleFS.open("/karmienia_sync.tmp", FILE_WRITE);
+  if (!tmp) { while (client.available()) client.read(); client.stop(); return false; }
+  uint8_t chunk[512];
+  bool wroteAny = false;
+  int syncChunkNo = 0;
+  while (client.available()) {
+    const size_t n = client.read(chunk, sizeof(chunk));
+    if (n == 0) break;
+    tmp.write(chunk, n);
+    wroteAny = true;
+    if ((++syncChunkNo % 8) == 0) requestRgbResync();
+  }
+  tmp.close();
+  while (client.available()) client.read();
+  client.stop();
+  feedWatchdog();
+  requestRgbResync();
+  if (!wroteAny) { LittleFS.remove("/karmienia_sync.tmp"); return false; }
+  if (!LittleFS.rename("/karmienia_sync.tmp", DATA_FILE_PATH)) {
+    LittleFS.remove("/karmienia_sync.tmp");
+    return false;
+  }
+  // Odswiez dane i ekran z nowego mirror.
+  loadLatestEntries();
+  invalidateDayStats();
+  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation();
+  Serial.println("HostSync: CSV pobrany z hostingu (mirror zaktualizowany).");
+  return true;
+}
 #endif
 
 // Jedna proba obslugi kolejki Telegrama. Wywolywana WYLACZNIE z telegramTask
@@ -4870,6 +5046,18 @@ void telegramTask(void *parameter) {
       if (!uploadCsvToHost()) {
         hostSyncPending = true;                        // ponow po HOST_SYNC_RETRY_MS
         hostSyncNextMs = millis() + HOST_SYNC_RETRY_MS;
+      }
+    }
+    // Polling danych z hostingu (v4): co HOST_POLL_MS sprawdz rewizje; gdy sie
+    // zmienila — pobierz pelny CSV (mirror) i odswiez ekran. Telemetria/timer
+    // dalej dziala niezaleznie.
+    if (WiFi.status() == WL_CONNECTED && millis() - hostLastPollMs >= HOST_POLL_MS &&
+        (millis() - lastTelegramTlsMs) >= TLS_COOLDOWN_MS) {
+      hostLastPollMs = millis();
+      const long rev = fetchRevision();
+      if (rev >= 0 && rev != hostRevisionLocal) {
+        hostRevisionLocal = rev;
+        downloadCsvFromHost();
       }
     }
 #endif
@@ -5827,6 +6015,9 @@ void setup() {
   bootStep(2, storageReady ? 1 : 2);
   loadSettings(); // trwale ustawienia (m.in. powiadomienia snu) — przed uzyciem
   loadLatestEntries();
+  // Polling danych z hostingu (v4): pierwszy cykl po HOST_POLL_MS od startu.
+  hostLastPollMs = millis();
+  hostRevisionLocal = -1;
 
   // Krok 4: Pogoda (z cache lub do pobrania w tle).
   bootStep(3, 0);
@@ -5848,11 +6039,17 @@ void setup() {
   }
   weatherNextTryMs = millis() + WEATHER_START_DELAY_MS;
 
-  // Krok 5: Serwer WWW + uslugi (mDNS/OTA/Telegram).
+  // Krok 5: Serwer WWW (v4: wyłączony) + uslugi (mDNS/OTA/Telegram).
   bootStep(4, 0);
+#if FEATURE_DEVICE_WEB
   startWebServer();
+#endif
   initOptionalServices();
+#if FEATURE_DEVICE_WEB
   bootStep(4, webServerStarted ? 1 : 2);
+#else
+  bootStep(4, 1); // serwer WWW wylaczony (v4) — krok uznany za OK
+#endif
   if (xTaskCreatePinnedToCore(weatherTask, "weather", 4096, nullptr, 1,
                               &weatherTaskHandle, 0) != pdPASS) {
     Serial.println("Pogoda: nie mozna uruchomic zadania FreeRTOS.");
@@ -6005,6 +6202,7 @@ void loop() {
   // Kontrola jasności nie zmienia drzewka LVGL ani nie wymusza odrysowania RGB.
   updateScreenDimming();
 
+#if FEATURE_DEVICE_WEB
   // Serwer musi być zatrzymany po utracie Wi-Fi i uruchomiony na nowo po uzyskaniu aktualnego IP.
   // Dzięki temu nie pozostaje związany ze starym gniazdem po ponownym połączeniu z routerem.
   if (WiFi.status() != WL_CONNECTED && webServerStarted) {
@@ -6019,6 +6217,7 @@ void loop() {
     webServer.handleClient();
     if (hadClient) { ++httpRequestCount; lastHttpMillis = millis(); httpClientActive = true; }
   }
+#endif
 
   uint32_t lvglNowMs = millis();
   lv_tick_inc(lvglNowMs - lastLvglTickMs);
@@ -6042,6 +6241,7 @@ void loop() {
     lv_tick_inc(lvglNowMs - lastLvglTickMs);
     lastLvglTickMs = lvglNowMs;
     if (touchDriver) lv_indev_read(touchDriver); // sam dotyk, bez pelnego renderu
+#if FEATURE_DEVICE_WEB
     // OBSLUGA SERWERA WWW MIEDZY PROBKAMI DOTYKU: serwer Arduino WebServer czesto
     // potrzebuje KILKU wywolan handleClient() na jedno zadanie (accept -> naglowki ->
     // wysylka). Przy jednym wywolaniu na iteracje petli (a iteracja to ciezki render
@@ -6058,6 +6258,7 @@ void loop() {
       webServer.handleClient();
       httpClientActive = true;
     }
+#endif
     samplingWorkUs += micros() - workStart;
   }
   const uint32_t afterDelayStartUs = micros();

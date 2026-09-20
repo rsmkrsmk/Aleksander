@@ -94,6 +94,13 @@ function handle_api(string $route, string $method, Repository $repo): void
         exit;
     }
 
+    if ($route === 'revision' && $method === 'GET') {
+        header('Cache-Control: no-store, max-age=0');
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($repo->revision());
+        exit;
+    }
+
     if ($route === 'status' && $method === 'GET') {
         $entries = $repo->allEntries();
         $latest = Domain::loadLatestEntries($entries, $now);

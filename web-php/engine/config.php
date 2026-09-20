@@ -108,6 +108,9 @@ final class Config
     public static function dataFile(): string    { return getenv('DATA_FILE') ?: (self::dataDir() . '/karmienia.csv'); }
     public static function backupFile(): string  { return getenv('BACKUP_FILE') ?: (self::dataDir() . '/karmienia_backup.csv'); }
     public static function settingsFile(): string{ return getenv('SETTINGS_FILE') ?: (self::dataDir() . '/ustawienia.cfg'); }
+    // Plik z licznikiem rewizji danych — uzywa go polling urzadzenia (v4), aby wykryc
+    // zmiane bez pobierania calej historii. Mozna nadpisac zmienna REV_FILE.
+    public static function revisionFile(): string{ return getenv('REV_FILE') ?: (self::dataDir() . '/karmienia.rev'); }
 
     // Sciezka do kopii zapasowej z aktualnym czasem: DATA-GODZINA-SEKUNDA.bakap
     // (format YYYY-MM-DD-HH-MM-SS.bakap), zapisywana OBOK pliku danych

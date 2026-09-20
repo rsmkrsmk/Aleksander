@@ -2,7 +2,7 @@
 
 ## Zakres kontroli
 
-Wersja 1.3.0 została sprawdzona strukturalnie pod kątem składni nawiasów, komentarzy i literałów oraz obecności kluczowych elementów aplikacji. Projekt zawiera gotowy ekran LVGL, sterowanie dotykiem GT911, uruchamianie LCD ST7701 z wymaganą sekwencją ekspandera TCA9554, Wi‑Fi, synchronizację NTP, obliczanie wieku, LittleFS, dopisywanie danych w formacie CSV, pogodę Open-Meteo oraz wygaszacz ekranu.
+Wersja **v4** (architektura: hosting źródłem prawdy, urządzenie wyświetlaczem) została sprawdzona strukturalnie pod kątem składni nawiasów, komentarzy i literałów oraz obecności kluczowych elementów aplikacji. Projekt zawiera gotowy ekran LVGL, sterowanie dotykiem GT911, uruchamianie LCD ST7701 z wymaganą sekwencją ekspandera TCA9554, Wi‑Fi, synchronizację NTP, obliczanie wieku, mirror CSV na urządzeniu, pogodę Open-Meteo oraz wygaszacz ekranu.
 
 | Obszar | Wynik |
 |---|---|
@@ -13,16 +13,18 @@ Wersja 1.3.0 została sprawdzona strukturalnie pod kątem składni nawiasów, ko
 | Wi‑Fi | Połączenie w trybie stacji, próby ponownego połączenia co 30 s. |
 | Czas | NTP z trzema serwerami oraz regułą polskiej strefy CET/CEST. |
 | Formularze | Karmienie piersią (minuty L/P, kroki ±5), butelka (mleko matki/modyfikowane, suwak 10–120 ml), pieluchy, odciąganie, witamina D. |
-| Historia | LittleFS tworzy `/karmienia.csv` i dopisuje rekordy `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`. |
+| Mirror danych | Lokalny `/karmienia.csv` na urządzeniu jest mirror danych z hostingu; aktualizowany przez polling rewizji (co 10 s) i zapis przez API. |
+| Synchronizacja | Urządzenie sprawdza `GET /api/revision` co 10 s; przy zmianie pobiera `GET /api/export.csv` i aktualizuje mirror + ekran. Zapis z urządzenia: lokalny + push pełnego CSV (`/api/upload-data`). |
 | Ekran główny | Aktualny czas, wiek Aleksandra od 08.08.2026, ostatnie karmienie/butelka, pasek licznika z alarmem, diody W/P/C. |
 | Wygaszacz | Po 2 min: tipCard + ageCard widoczne, karta zegara z datą i ostatnim karmieniem, karta pogody Open-Meteo z ikoną, temp odczuwalną, opisem, min/max, 3h prognozą i poradą ubioru. |
-| Panel WWW | Kopia UI w PROGMEM, `/api/status`, `/api/entries`, `/api/entry` (obsługuje KARMIENIE + MLEKO + ODCIAGANIE + PIELUCHY + WIT.D), `/api/undo`, `/api/event`, `/api/import`, `/export.csv`. |
-| OOM | `undoLastEntry()` sprawdza `file.size()` vs `freeHeap/2` przed wczytaniem. |
+| Panel WWW | Kopia UI w PROGMEM (na urządzeniu — serwer WWW **wyłączony** w v4); strony hostingu (`ui/` + `indexesp.html`) działają przez API hostingu. |
+| mDNS / OTA | **Wyłączone** (zakomentowane) w v4 — kod zachowany. Wgrywanie firmware przez USB. |
 | Pogoda | Open-Meteo HTTP (port 80, bez TLS), własny JSON parser, cache binarny z magic number, osobny task FreeRTOS (stack 4096). |
+| Ostatnie karmienie | `loadLatestEntries` wybiera najpóźniejszy PRZESZŁY wpis z fallbackiem na najpóźniejszy ogółem (gdy zegar cofnięty) — „ostatnie karmienie" nigdy nie znika. |
 
 ## Wynik kontroli lokalnej
 
-Nie wykryto brakujących funkcji wymaganych przez projekt ani niespójności strukturalnych w szkicu. Wyeliminowano martwy plik `forest_friends.h` (~15 KB flash) oraz wiszący komentarz.
+Nie wykryto brakujących funkcji wymaganych przez projekt ani niespójności strukturalnych w szkicu.
 
 ## Warunki wgrania w Arduino IDE
 

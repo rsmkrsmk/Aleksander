@@ -209,6 +209,13 @@ final class MysqlRepository implements Repository
         return $s;
     }
 
+    // Rewizja (v4) — delegujemy do CSV-backupu (ten sam plik meta), zeby polling
+    // urzadzenia dzialal tak samo w obu trybach magazynu.
+public function revision(): array
+    {
+        return $this->csv->revision();
+    }
+
     public function saveSettings(array $settings): void
     {
         $stmt = $this->db->prepare(

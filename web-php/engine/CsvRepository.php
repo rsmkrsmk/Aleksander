@@ -50,7 +50,9 @@ final class CsvRepository implements Repository
     {
         $this->ensureFile();
         $row = Domain::toCsvRow($type, $when, $ml, $piersLeft, $piersRight);
-        return file_put_contents($this->file, $row, FILE_APPEND | LOCK_EX) !== false;
+        $ok = file_put_contents($this->file, $row, FILE_APPEND | LOCK_EX) !== false;
+        if ($ok) $this->bumpRevision();
+        return $ok;
     }
 
     public function deleteByIndex(int $entryIndex): array
@@ -73,6 +75,7 @@ final class CsvRepository implements Repository
         if (!$found || $entryIndex >= count($lines)) return ['ok' => false];
         $body = implode("\n", $kept);
         file_put_contents($this->file, $header . "\n" . $body . ($body !== '' ? "\n" : ''), LOCK_EX);
+        $this->bumpRevision();
         return ['ok' => true, 'removed' => $removed];
     }
 
@@ -127,6 +130,7 @@ final class CsvRepository implements Repository
         }
         $body = implode("\n", $out);
         file_put_contents($this->file, $header . "\n" . $body . ($body !== '' ? "\n" : ''), LOCK_EX);
+        $this->bumpRevision();
         return ['ok' => true, 'message' => 'Zapisano zmiany karmienia.'];
     }
 
@@ -146,6 +150,7 @@ final class CsvRepository implements Repository
         }
         if (!$sawHeader || $imported === 0) return ['ok' => false, 'imported' => 0, 'skipped' => $skipped];
         file_put_contents($this->file, implode("\n", $out) . "\n", LOCK_EX);
+        $this->bumpRevision();
         return ['ok' => true, 'imported' => $imported, 'skipped' => $skipped];
     }
 
@@ -177,6 +182,7 @@ final class CsvRepository implements Repository
         // 3) Podmiana danych na przeslane (znormalizowane: naglowek + poprawne wiersze).
         $ok = file_put_contents($this->file, implode("\n", $out) . "\n", LOCK_EX) !== false;
         if (!$ok) return ['ok' => false, 'backup' => $backupName, 'lines' => 0, 'message' => 'Nie udalo sie zapisac danych.'];
+        $this->bumpRevision();
 
         return ['ok' => true, 'backup' => $backupName, 'lines' => $valid,
                 'message' => "Przyjeto plik: {$valid} wpisow." . ($skipped > 0 ? " Pominieto {$skipped} niepoprawnych." : '') . ($backupName !== '' ? " Kopia: {$backupName}." : '')];
@@ -186,6 +192,33 @@ final class CsvRepository implements Repository
     {
         if (!is_file($this->file)) return Config::CSV_HEADER . "\n";
         return (string)file_get_contents($this->file);
+    }
+
+    // --- Rewizja danych (v4) ----------------------------------------------------
+    // Licznik monotoniczny w osobnym pliku meta. Urzadzenie sprawdza go co 10 s
+    // (GET /api/revision); gdy wartosc sie zmienila — pobiera pelny CSV.
+    public function revision(): array
+    {
+        $rev = 0; $f = Config::revisionFile();
+        if (is_file($f)) $rev = (int)trim((string)file_get_contents($f));
+        $count = 0;
+        if (is_file($this->file)) {
+            foreach (explode("\n", (string)file_get_contents($this->file)) as $ln) {
+                if (trim($ln) !== '') $count++;
+            }
+            $count = max(0, $count - 1); // minus naglowek
+        }
+        return ['rev' => $rev, 'count' => $count, 'updatedAt' => (new DateTimeImmutable())->format('Y-m-d H:i:s')];
+    }
+
+    private function bumpRevision(): void
+    {
+        $f = Config::revisionFile();
+        $cur = 0;
+        if (is_file($f)) $cur = (int)trim((string)file_get_contents($f));
+        $dir = dirname($f);
+        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+        file_put_contents($f, (string)($cur + 1) . "\n", LOCK_EX);
     }
 
     public function loadSettings(): array

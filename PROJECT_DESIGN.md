@@ -101,6 +101,136 @@ Statystyki dni (dziś + 7 wstecz) — w tym bilans snu (drzemki, sen dzień/noc)
 | UI | LVGL 9.3 |
 | Dane | LittleFS (partycja spiffs), backup + eksport CSV |
 
+---
+
+# Architektura v4 — Hosting jako źródło prawdy
+
+> Gałąź **v4** odwraca dotychczasowy model: **hosting staje się źródłem prawdy**, a urządzenie
+> **wyświetlaczem** z lokalną kopią danych (mirror) do szybkiego odświeżania ekranu. Strony WWW
+> hostingu (nowoczesna + `indexesp.html`) już korzystają z API hostingu i pozostają bez zmian.
+
+## Diagram przepływu danych
+
+```
+[HOSTING] data/karmienia.csv (→ docelowo MySQL)
+   engine/api.php:
+     GET  /api/status | /api/entries | /api/weight-series | /api/revision | /api/export.csv
+     POST /api/entry | /api/event | /api/delete-entry | /api/update-feeding | /api/setting
+   ├─→ strona nowoczesna (ui/)            [bez zmian]
+   ├─→ indexesp.html                      [bez zmian]
+   └─→ URZĄDZENIE ESP32:
+         polling co 10 s GET /api/revision
+         → jeśli rev się zmienił: GET /api/export.csv
+         → zapis atomowy lokalnego mirror /karmienia.csv
+         → loadLatestEntries() + invalidateDayStats() + updateHomeInformation()
+```
+
+## Rola urządzenia w v4
+
+- **Wyświetlacz** — ekrany LVGL czytają lokalną kopię CSV (mirror), aktualizowaną z hostingu.
+- **Zapis z urządzenia** (LVGL + strona WWW urządzenia) — tymczasowo działa, ale każdy zapis idzie
+  **przez API hostingu** (`/api/entry`, `/api/event`, `/api/delete-entry`, `/api/update-feeding`).
+  Hosting zapisuje do swojego CSV (źródło), a urządzenie aktualizuje lokalny mirror.
+- **Serwer WWW urządzenia** — **wyłączony** (zakomentowany). Docelowo obsługa wyłącznie przez strony
+  hostingu. W przyszłości ekrany zapisu/edycji na urządzeniu również zostaną wyłączone.
+- **mDNS i OTA** — **wyłączone** (zakomentowane), kod zachowany do powrotu w razie potrzeby.
+- Zostają na urządzeniu: **ekrany LVGL** (mirror), **pogoda**, **Telegram**, **NTP**, **watchdog**.
+
+## Algorytm A — Pobieranie danych (polling 10 s)
+
+```
+telegramTask (rdzeń 0), co HOST_POLL_MS = 10000 ms:
+  rev_local  = zapisany licznik rewizji (LittleFS, plik /karmienia.rev)
+  rev_remote = GET /api/revision        → { rev, count, updatedAt }
+  IF rev_remote != rev_local:
+     csv = GET /api/export.csv          → pełna treść CSV
+     zapis atomowy: karmienia.tmp → rename /karmienia.csv
+     zapisz rev_local = rev_remote
+     loadLatestEntries()                // lastFeeding/lastMilk/sen/rytm
+     invalidateDayStats()               // odbudowa cache statystyk (8 dni)
+     updateHomeInformation()            // odświeżenie ekranu LVGL
+```
+
+## Algorytm B — Zapis danych w v4 (hybryda przejściowa)
+
+W v4 zapis z urządzenia działa **hybrydowo** (pełny refactor per-operacji = v4.1):
+
+```
+Zapis z LVGL / strony urządzenia:
+  appendEntry(...) → zapis lokalny mirror + invalidateDayStats() + queueTelegram(...)
+                   → requestHostSync()   // push CAŁEGO CSV na hosting (uploadCsvToHost)
+Hosting przyjmuje (replaceRawCsv z kopią .bakap) → źródło zaktualizowane
+Urządzenie co 10 s (polling rev) → jeśli rev się zmienił → downloadCsvFromHost()
+  → aktualizacja mirror + ekran
+```
+
+- Zaleta: ekrany LVGL piszą jak dotąd (bez ryzyka regresji), hosting jest źródłem,
+  a device zawsze zsynchronizowany przez polling.
+- Ograniczenie (znane): gdy zapisy na urządzeniu i hostingu nastąpią w tym samym
+  oknie <10 s, ostatni zapisujący nadpisuje (push pełnego CSV). Dla domowego użytku
+  pojedynczego opiekuna akceptowalne. Pełny model (zapisy tylko przez `POST /api/entry`
+  itd., bez lokalnego zapisu) planowany w **v4.1**.
+
+## Algorytm C — `revision` na hostingu (nowy endpoint)
+
+```
+CsvRepository:
+  plik meta /karmienia.rev przechowuje monotoniczny licznik rewizji
+  przy każdej mutacji (append/delete/update) → rev++
+GET /api/revision → { "rev": N, "count": <liczba wpisów>, "updatedAt": "<ISO>" }
+```
+
+## Algorytm D — Wyłączenie serwera WWW + mDNS + OTA
+
+Wyłączenia realizowane są **flagami kompilacji** (kod zachowany, powrót = zmiana flagi na 1):
+
+```
+config.h:  FEATURE_DEVICE_WEB 0   (serwer WWW urządzenia wyłączony)
+v3.ino:    #define FEATURE_MDNS 0  (mDNS wyłączone)
+           #define FEATURE_OTA  0  (OTA wyłączone)
+
+FEATURE_DEVICE_WEB=0 pomija blok: sendJson, httpBailIfLowMemory, handleWebRoot,
+handleApi* (Status/Entries/WeightSeries/Entry/DeleteEntry/UpdateFeeding/SendBackup/
+Event/Import/Setting), handleExportCsv, handleWebNotFound, startWebServer — owinięte
+w #if FEATURE_DEVICE_WEB (l.~2106-2928). W setup() i loop() wywołania serwera też
+wewnątrz #if. mDNS/OTA: bloki initOptionalServices i ArduinoOTA.handle() pod
+istniejącymi #if FEATURE_MDNS/FEATURE_OTA (teraz 0); #include <ESPmDNS.h> /
+<ArduinoOTA.h> / <WebServer.h> zostają (bez zmian). otaInProgress: zostaje (flaga
+zawsze false — warunki w loop/timerach pozostają poprawne).
+Zostają: ekrany LVGL (mirror), pogoda, Telegram, NTP, watchdog
+```
+
+## Algorytmy istniejące (opis skrótowy)
+
+| Algorytm | Zasada |
+|---|---|
+| `loadLatestEntries` | Wybiera **najpóźniejszy PRZESZŁY** wpis (KARMIENIE/MLEKO); gdy zegar cofnięty (NTP niedostępny) — fallback na najpóźniejszy ogółem. "Ostatnie karmienie" nigdy nie znika |
+| `refreshDayStats` | Jeden przebieg pliku; cache 8 dni; sen dzień/noc z rozdzieleniem przez północ; `bathCount`, `weightG`, `napCount` |
+| `recomputeFeedingRhythm` | Rytm dnia: liczba karmień, najdłuższa/średnia przerwa; `nextFeedingEta = ostatnie + 4h` (COUNTER_BLINK_MIN) |
+| Auto-sen przy karmieniu | Po zapisie `KARMIENIE` przez WWW: `SEN_STOP T−30` + `SEN_START T+60`; jeśli dziecko spało — zamknij bieżący sen `SEN_STOP teraz`. Realizacja: firmware `applyAutoSleepForFeeding` + `api.php` route `entry` |
+| `deleteEntryByIndex` / `updateFeeding` | Edycja/usuwanie **w miejscu** (plik nie jest ściśle chronologiczny); zapis przez tmp + atomowy `rename` |
+| Telegram | Kolejka 1-elementowa, mutex, cooldown TLS 3 s po poprzednim kliencie TLS; max 5 błędów z rzędu |
+| Pogoda | Open-Meteo HTTP (port 80), własny parser JSON, cache binarny z magic number `/pogoda.cache` |
+
+## Migracja do MySQL (przygotowanie — aktywacja później)
+
+**Cel:** docelowo hosting przechowuje dane w lekkiej bazie MySQL zamiast CSV.
+
+**Co już jest w projekcie:**
+- `web-php/engine/MysqlRepository.php` — magazyn MySQL (pełny interfejs `Repository`)
+- `web-php/engine/schema.sql` — tabele `entries`, `settings`
+- `web-php/engine/config.php` — `Config::mysql()` + `storageDriver()`
+- `web-php/engine/bootstrap.php` — fabryka z **automatycznym fallbackiem na CSV** gdy MySQL niedostępny
+- Zasada: **CSV zawsze jest backupem** — w trybie mysql każdy zapis idzie równolegle do CSV
+
+**Co trzeba zrobić przed aktywacją:**
+1. Utworzyć bazę MySQL + użytkownika (cPanel → Bazy danych MySQL)
+2. Wgrać `schema.sql` (phpMyAdmin)
+3. Ustawić `STORAGE_DRIVER=mysql` (lub `Config::mysql()` w `config.php`)
+4. Wgrać pierwsze dane: IMPORTUJ DANE w panelu lub załadować CSV w phpMyAdmin
+
+**Wpływ:** żaden na urządzenie i strony WWW — podmieniamy tylko magazyn w silniku (`engine/`).
+
 ## Źródła
 
 [1] [Waveshare — ESP32-S3-Touch-LCD-4B Wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4B)

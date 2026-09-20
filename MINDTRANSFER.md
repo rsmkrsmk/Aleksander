@@ -39,6 +39,56 @@ prawdy**. Wszystkie trzy interfejsy (ekran LVGL, strona WWW urządzenia, panel h
 
 ---
 
+## 0a. ARCHITEKTURA v4 — hosting źródłem prawdy, urządzenie wyświetlaczem
+
+> Gałąź **v4** odwraca model z sekcji 0: **hosting = źródło prawdy**, urządzenie = **wyświetlacz**
+> z lokalną kopią CSV (mirror). Strony WWW hostingu działają jak dotąd (przez API hostingu).
+> Poniżej opisane są wyłącznie różnice względem v3.
+
+```
+[HOSTING] data/karmienia.csv (→ docelowo MySQL)
+   engine/api.php: status/entries/weight-series/revision/export.csv (GET)
+                   entry/event/delete-entry/update-feeding/setting/upload-data (POST)
+   ├─→ strona nowoczesna (ui/)            [bez zmian]
+   ├─→ indexesp.html                      [bez zmian]
+   └─→ URZĄDZENIE ESP32:
+         polling co 10 s GET /api/revision → jeśli rev zmieniony → GET /api/export.csv
+         → zapis atomowy mirror /karmienia.csv → loadLatestEntries() → updateHomeInformation()
+```
+
+### Rola urządzenia w v4
+- **Wyświetlacz**: ekrany LVGL czytają lokalny mirror CSV, aktualizowany z hostingu.
+- **Zapis** (LVGL / strona urządzenia): hybryda — `appendEntry` zapisuje lokalnie, po czym
+  `requestHostSync()` pushuje pełny CSV na hosting; polling wraca aktualizacje. Docelowo
+  (v4.1) ekrany zapisu/edycji będą pisać wyłącznie przez `POST /api/*` i potem zostaną wyłączone.
+- **Serwer WWW urządzenia**: **wyłączony** (`FEATURE_DEVICE_WEB=0`, kod zachowany).
+- **mDNS i OTA**: **wyłączone** (`FEATURE_MDNS=0`, `FEATURE_OTA=0`), kod zachowany. Wgrywanie przez USB.
+- **Zostają**: ekrany LVGL (mirror), pogoda, Telegram, NTP, watchdog. `otaInProgress` (flaga) zostaje (zawsze false).
+
+### Nowe elementy v4 (firmware)
+| Element | Rola |
+|---|---|
+| `fetchRevision()` | GET `/api/revision` → liczba `rev` |
+| `downloadCsvFromHost()` | GET `/api/export.csv` → atomowy zapis mirror → `loadLatestEntries()` |
+| polling (w `telegramTask`) | co `HOST_POLL_MS` (10 s) sprawdza `rev`; przy zmianie pobiera CSV i odświeża UI |
+| hybryda zapisu | `appendEntry` zapisuje lokalnie + `requestHostSync()` (push pełnego CSV); polling wraca; pełny refactor POST → v4.1 |
+| flagi wyłączeń | `FEATURE_DEVICE_WEB=0` (serwer WWW urządzenia), `FEATURE_MDNS=0`, `FEATURE_OTA=0` — kod zachowany, powrót = flaga 1 |
+
+### Nowy endpoint v4 (hosting)
+`GET /api/revision` → `{ rev, count, updatedAt }` (licznik rewizji, inkrementowany przy każdej mutacji CSV — plik meta `/karmienia.rev`).
+
+### Algorytmy v4 (skrót — pełne opisy w `PROJECT_DESIGN.md` sekcja „Architektura v4")
+- **A. Pobieranie:** co 10 s `revision` → gdy zmiana → `export.csv` → mirror → odświeżenie UI.
+- **B. Zapis (hybryda):** `appendEntry` → lokalny zapis + push pełnego CSV (`requestHostSync`); polling wraca. Pełny refactor POST → v4.1.
+- **C. Revision (hosting):** plik meta `/karmienia.rev`, `rev++` przy mutacjach, `GET /api/revision`.
+- **D. Wyłączenia:** flagi `FEATURE_DEVICE_WEB=0` / `FEATURE_MDNS=0` / `FEATURE_OTA=0` (kod zachowany).
+
+### Migracja do MySQL (docelowo)
+Przygotowanie: `MysqlRepository.php`, `schema.sql`, `Config::mysql()`, fallback na CSV — **już są**.
+Aktywacja później: utworzyć bazę, wgrać schema.sql, ustawić `STORAGE_DRIVER=mysql`. Zasada „CSV zawsze backupem".
+
+---
+
 ## 1. Repozytorium — mapa plików
 
 | Plik / katalog | Rola |

@@ -52,6 +52,13 @@ interface Repository
     /** Surowy CSV (do /export.csv) — zawsze aktualny zrzut danych. */
     public function rawCsv(): string;
 
+    /**
+     * Rewizja danych (v4): monotoniczny licznik zmian + liczba wpisow + czas.
+     * Urzadzenie sprawdza go co 10 s (GET /api/revision), aby wykryc zmiane
+     * bez pobierania calego CSV. Zwraca ['rev'=>int,'count'=>int,'updatedAt'=>string].
+     */
+    public function revision(): array;
+
     /** Ustawienia klucz=>wartosc (na teraz: sleepTelegram). */
     public function loadSettings(): array;
     public function saveSettings(array $settings): void;

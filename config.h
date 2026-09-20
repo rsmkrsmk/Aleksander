@@ -103,23 +103,39 @@ constexpr char WEATHER_CACHE_FILE[] = "/pogoda.cache";
 constexpr char TELEGRAM_BOT_TOKEN[] = "8468018843:AAHjt-X20pzkJWG07HkTeRya6b5iR-6oVc4";
 constexpr char TELEGRAM_CHAT_ID[] = "6567938576";
 
-// ---------------- Synchronizacja z panelem WWW na hostingu (auto-wysylka CSV) --
-// Po KAZDEJ zmianie danych urzadzenie wysyla pelny plik CSV na panel WWW
-// (POST multipart/form-data pole "file" -> /api/upload-data). Panel robi kopie
-// .bakap i podmienia dane. Urzadzenie pozostaje zrodlem prawdy; hosting to lustro.
+// ---------------- Synchronizacja z hostingiem (v4: hosting = zrodlo prawdy) ------
+// Urzadzenie jest WYŚWIETLACZEM: co HOST_POLL_MS sprawdza GET /api/revision, a gdy
+// rewizja danych sie zmienila — pobiera pelny CSV przez GET /api/export.csv i
+// aktualizuje lokalny mirror /karmienia.csv. Zapis przez API (POST /api/entry itd.).
 // FEATURE_HOST_SYNC=0 wylacza cala funkcje.
 #ifndef FEATURE_HOST_SYNC
 #define FEATURE_HOST_SYNC 1
 #endif
-// Pelny URL endpointu przyjmujacego CSV (musi byc HTTPS).
+// Podstawa API hostingu (HTTPS) — z niej budujemy sciezki read/revision.
+constexpr char PANEL_API_BASE[] = "https://phpmapy1.webd.pro";
+// Endpoint pobrania pelnego CSV (mirror).
+constexpr char PANEL_READ_URL[] = "https://phpmapy1.webd.pro/api/export.csv";
+// Endpoint rewizji danych (polling).
+constexpr char PANEL_REV_URL[] = "https://phpmapy1.webd.pro/api/revision";
+// Endpoint przyjmujacy pelny CSV z urzadzenia (push, uploadCsvToHost).
 constexpr char PANEL_UPLOAD_URL[] = "https://phpmapy1.webd.pro/api/upload-data";
-// Token uploadu (naglowek X-Upload-Token). PUSTY = bez tokena (rozwiazanie TESTOWE).
-// TODO(bezpieczenstwo): przed wyjsciem poza testy ustawic wspolny token tu i na hostingu.
+// Token dostepu do API (naglowek X-Upload-Token). PUSTY = bez tokena (TESTOWE).
+// TODO(bezpieczenstwo): ustawic wspolny token tu i na hostingu (UPLOAD_TOKEN).
 constexpr char PANEL_UPLOAD_TOKEN[] = "";
+// Interwal sprawdzania zmian danych (v4).
+constexpr uint32_t HOST_POLL_MS = 10000UL;
 // Minimalny odstep miedzy wysylkami (laczy serie szybkich wpisow w jeden upload).
-constexpr uint32_t HOST_SYNC_MIN_INTERVAL_MS = 15000UL;
-// Odstep ponowienia po nieudanej wysylce.
+constexpr uint32_t HOST_SYNC_MIN_INTERVAL_MS = 2000UL;
+// Odstep ponowienia po nieudanej wysylce/pobraniu.
 constexpr uint32_t HOST_SYNC_RETRY_MS = 30000UL;
+
+// ------------------- Serwer WWW urządzenia (v4: wyłączony) ----------------------
+// v4: obsługa interfejsu WWW odbywa się przez hosting (strony ui/ + indexesp).
+// Serwer WWW na urządzeniu jest WYŁĄCZONY (flaga = 0) — kod zachowany (można wrócić
+// ustawiając 1). Gdy wyłączony, urządzenie jest wyłącznie wyświetlaczem (ekran LVGL).
+#ifndef FEATURE_DEVICE_WEB
+#define FEATURE_DEVICE_WEB 0
+#endif
 
 // ArduinoOTA: hasło do wgrywania szkicu przez Wi-Fi. Puste = OTA wyłączone.
 constexpr char OTA_PASSWORD[] = "";

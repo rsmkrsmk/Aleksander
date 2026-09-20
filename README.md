@@ -139,10 +139,10 @@ Pełny opis ekranów i formatu danych znajduje się w `PROJECT_DESIGN.md`.
 | Cofnij | Bezpieczne, atomowe usunięcie ostatniego wpisu (urządzenie i WWW) |
 | **Edycja karmienia** | Zmiana mleka (dodanie / rodzaj / ilość / usunięcie) i godziny istniejącego karmienia **w miejscu**, bez zmiany kolejności wierszy w CSV. Dostępna w panelu WWW i na stronie serwowanej przez urządzenie (przycisk ✎ przy karmieniu). Endpoint `POST /api/update-feeding` (`feedLine`, `when`, oraz `milkMother`/`milkModified`/`milkMl` albo `milkRemove=1`). Po zapisie uruchamia synchronizację z hostingiem |
 | Backup | Automatyczna dzienna kopia `/karmienia_backup.csv`; miękka rotacja (archiwum) po przekroczeniu 256 KB |
-| **Synchronizacja z panelem WWW** | Po **każdej zmianie danych** (dodanie/edycja/usunięcie/import) urządzenie wysyła cały plik CSV na hosting: `POST` multipart do `PANEL_UPLOAD_URL` (`/api/upload-data`). Panel robi kopię `RRRR-MM-DD-GG-MM-SS.bakap` i podmienia dane. **Urządzenie pozostaje źródłem prawdy — hosting jest lustrem** (nadpisywanym przy kolejnej zmianie). Wysyłka w tle (rdzeń 0, nie blokuje UI), łączenie serii zmian (min. 15 s odstępu), ponowienie po błędzie. Włącznik `FEATURE_HOST_SYNC` w `config.h`. **Obecnie BEZ tokena (rozwiązanie testowe)** — patrz „Znane długi / TODO” |
+| **Synchronizacja z hostingiem (v4)** | **Hosting jest źródłem prawdy.** Urządzenie co 10 s sprawdza `GET /api/revision`; gdy rewizja się zmieniła, pobiera pełny CSV (`GET /api/export.csv`) i aktualizuje lokalny mirror + ekran. Zapis z urządzenia: lokalny zapis + push pełnego CSV (`POST /api/upload-data`); polling wraca aktualizacje. Token `PANEL_UPLOAD_TOKEN` wymagany przy zapisach z urządzenia (patrz „Znane długi / TODO”) |
 | Telegram | Powiadomienia o wpisach do drugiego rodzica — uzupełnij `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID` w `config.h` (puste = wyłączone). Wysyłka w osobnym zadaniu (nie blokuje UI) |
-| OTA | Wgrywanie szkicu przez Wi‑Fi — ustaw `OTA_PASSWORD` w `config.h` (puste = wyłączone) |
-| mDNS | `http://karmienie.local` |
+| OTA | **Wyłączone w v4** (zakomentowane). Wgrywanie firmware wyłącznie przez USB |
+| mDNS | **Wyłączone w v4** (zakomentowane). Dostęp po adresie IP |
 | NTP | Re-synchronizacja zegara co 6 h |
 | Wygaszacz | Po 2 min bezczynności: duży zegar z datą, ostatnie karmienie (kolor) + informacja o oknie drzemki, wskazówka rozwojowa, statystyki dnia, pogoda z Open-Meteo z ikoną, opisem, min/max, 3h prognozą i poradą ubioru |
 | Pogoda | Open-Meteo (HTTP, darmowe, bez klucza API), `apparent_temperature`, cache w LittleFS |
@@ -162,12 +162,21 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
 
 ## Znane długi / TODO (bezpieczeństwo)
 
-- **Token uploadu (`/api/upload-data`)** — synchronizacja urządzenie → hosting działa obecnie **bez tokena** (rozwiązanie testowe). Każdy, kto zna URL, może nadpisać dane na hostingu. Przed wyjściem poza testy: ustawić wspólny sekret w `UPLOAD_TOKEN` na hostingu (panel WWW) oraz `PANEL_UPLOAD_TOKEN` w `config.h` urządzenia.
+- **Token API (`/api/*`)** — w v4 urządzenie pisze dane przez hosting, dlatego **wymagany jest token zapisu** (`PANEL_UPLOAD_TOKEN` w `config.h` + `UPLOAD_TOKEN` na hostingu). Obecnie pusty = rozwiązanie testowe. Każdy, kto zna URL, może nadpisać dane na hostingu. Przed wyjściem poza testy: ustawić wspólny sekret po obu stronach.
 - **Token Telegrama jawny w repo** — `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` są wpisane w `config.h` w publicznym repozytorium. Zalecane: zrewokować bota u @BotFather i przenieść sekrety poza repo (np. do `secrets.h`, który nie jest publikowany).
 
 ## Historia zmian
 
 Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
+
+### v4 — Hosting jako źródło prawdy (architektura)
+- **Odwróciło:** model danych — **hosting staje się źródłem prawdy**, urządzenie **wyświetlaczem** z lokalną kopią CSV (mirror).
+- **Dodało:** polling rewizji — urządzenie co 10 s sprawdza `GET /api/revision`; gdy rewizja się zmieniła, pobiera pełny CSV przez `GET /api/export.csv` i aktualizuje lokalny mirror oraz ekran LVGL.
+- **Dodało:** endpoint hostingu `GET /api/revision` (`rev`/`count`/`updatedAt`, licznik w `/karmienia.rev`, inkrementowany przy każdej mutacji).
+- **Zapis (hybryda):** `appendEntry` zapisuje lokalnie + pushuje pełny CSV (`requestHostSync`); polling wraca aktualizacje. Pełny refactor zapisu przez `POST /api/*` planowany w v4.1.
+- **Wyłączyło (flagami):** serwer WWW urządzenia (`FEATURE_DEVICE_WEB=0`), **mDNS** (`FEATURE_MDNS=0`), **OTA** (`FEATURE_OTA=0`) — kod zachowany, powrót = flaga 1. `otaInProgress` pozostaje (zawsze false). Wgrywanie firmware wyłącznie przez USB.
+- **Przygotowało:** migrację do **MySQL** (docelowa baza) — `MysqlRepository.php`, `schema.sql`, fallback na CSV już są; aktywacja później.
+- **Zostawia:** Telegram (powiadomienia), pogodę, NTP, watchdog na urządzeniu.
 
 ### Mleko mieszane — dwie osobne ilości (matki + modyfikowane)
 - **Zmieniło:** koncepcję mleka mieszanego. Gdy w formularzu karmienia zaznaczone są **oba** rodzaje (Matki + Modyfikowane), zamiast jednej wspólnej ilości pojawiają się **dwa osobne pola** — każde otwiera po kliknięciu małe okno wyboru ilości (jak przy wyborze daty). Dzięki temu można podać różne ilości mleka matki i modyfikowanego.
