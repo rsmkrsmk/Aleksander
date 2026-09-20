@@ -244,6 +244,7 @@ unsigned long hostLastDownloadMs = 0;    // millis() OSTATNIEGO UDANEGO pobrania
 unsigned long hostLastPushMs = 0;        // millis() OSTATNIEGO UDANEGO push CSV na hosting
 unsigned int  hostDownloadFails = 0;     // liczba KOLEJNYCH nieudanych prob pobrania
 int           hostLastError = 0;         // 0=brak, 1=brak WiFi, 2=blad TLS, 3=HTTP !=200, 4=brak danych/parsing
+volatile int  hostSyncProgressPct = -1;  // postep pobierania mirror: -1=b/d, 0-100, 100=OK (boot + telegramTask)
 // Znacznik ostatniej aktywnosci TLS Telegrama. Host-sync (drugi TLS) czeka po nim krotki
 // czas, aby pierwszy klient TLS zwolnil pamiec i heap sie skonsolidowal (bez tego drugi
 // handshake pada na "esp-aes: Failed to allocate memory" przez fragmentacje).
@@ -399,6 +400,8 @@ void drawBabyFace(lv_obj_t *box);
 void showBootScreen();
 void bootStep(uint8_t idx, uint8_t state);
 void bootPumpLvgl();
+void updateBootSyncUi();
+void syncOnBoot();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
 bool copyLittleFsFile(const char *srcPath, const char *dstPath);
 void archiveDataFileIfHuge();
@@ -3622,7 +3625,17 @@ void createDiagnosticsScreen() {
   const uint32_t httpAgo = lastHttpMillis ? (millis() - lastHttpMillis) / 1000 : 0;
 
   String s;
-  s  = String("Wi-Fi: ") + (wifiOk ? "polaczono" : "ROZLACZONO") + "\n";
+  // --- HostSync (v4): hosting = zrodlo, urzadzenie = wyswietlacz (najwazniejsze) --
+  s  = String("HostSync (v4): hosting=zrodlo, mirror=urzadzenie\n");
+  s += "  rewizja lokalna: " + (hostRevisionLocal < 0 ? String("-") : String(hostRevisionLocal)) + "\n";
+  s += "  rewizja zdalna: " + (hostRevRemote < 0 ? String("-") : String(hostRevRemote)) + "\n";
+  s += "  sprawdzanie rewizji: " + hostTimeAgo(hostLastRevCheckMs) + "\n";
+  s += "  ostatnie pobranie CSV: " + hostTimeAgo(hostLastDownloadMs) + "\n";
+  s += "  nieudane pobrania: " + String(hostDownloadFails) + "\n";
+  s += "  ostatni push CSV: " + hostTimeAgo(hostLastPushMs) + "\n";
+  s += "  ostatni blad: " + hostErrorText(hostLastError) + " (" + String(hostLastError) + ")\n";
+  s += "---\n";
+  s += "Wi-Fi: " + (wifiOk ? "polaczono" : "ROZLACZONO") + "\n";
   if (wifiOk) {
     s += "IP: " + WiFi.localIP().toString() + "\n";
     s += "Sygnal: " + String(WiFi.RSSI()) + " dBm\n";
@@ -3644,17 +3657,7 @@ void createDiagnosticsScreen() {
   s += "Watchdog: " + String(watchdogReady ? "aktywny" : "wylaczony") + "\n";
   s += "Uruchomien urzadzenia: " + String(bootCount) + "\n";
   s += "Restartow watchdoga: " + String(watchdogResetCount) + "\n";
-  s += "Ostatni reset: " + String(resetReasonText(lastResetReason)) + "\n";
-  // --- HostSync (v4): hosting = zrodlo, urzadzenie = wyswietlacz -----------------
-  s += "---\n";
-  s += "HostSync (v4): hosting=zrodlo, mirror=urzadzenie\n";
-  s += "  rewizja lokalna: " + (hostRevisionLocal < 0 ? String("-") : String(hostRevisionLocal)) + "\n";
-  s += "  rewizja zdalna: " + (hostRevRemote < 0 ? String("-") : String(hostRevRemote)) + "\n";
-  s += "  sprawdzanie rewizji: " + hostTimeAgo(hostLastRevCheckMs) + "\n";
-  s += "  ostatnie pobranie CSV: " + hostTimeAgo(hostLastDownloadMs) + "\n";
-  s += "  nieudane pobrania: " + String(hostDownloadFails) + "\n";
-  s += "  ostatni push CSV: " + hostTimeAgo(hostLastPushMs) + "\n";
-  s += "  ostatni blad: " + hostErrorText(hostLastError) + " (" + String(hostLastError) + ")";
+  s += "Ostatni reset: " + String(resetReasonText(lastResetReason));
 
   lv_obj_t *info = createLabel(card, s.c_str(), COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 2);
   lv_obj_set_width(info, 416);
@@ -4471,6 +4474,12 @@ bool appendBackupIfDue() {
   lastBackupDayStamp = stamp;
   Serial.println("Backup: utworzono kopie dzienna.");
   // Automatyczna wysylka backupu na Telegram, o ile nie czeka juz w kolejce.
+  // v4: wysylamy TYLKO gdy mirror jest zsynchronizowany z hostingiem
+  // (hostRevisionLocal >= 0) — inaczej wyslalibysmy stary/uciety lokalny plik.
+  if (hostRevisionLocal < 0) {
+    Serial.println("Backup: mirror niezsynchronizowany — pominieto wysylke na Telegram.");
+    return true;
+  }
   // Stan backupu czyta telegramTask (inny rdzen) — zapis pod mutexem.
   bool scheduled = false;
   if (telegramMutex) xSemaphoreTake(telegramMutex, portMAX_DELAY);
@@ -4899,6 +4908,31 @@ long fetchRevision() {
   return rev;
 }
 
+// Walidacja mirror przed podminna: plik musi zaczynac sie naglowkiem CSV i konczyc
+// nowa linia (pelny wiersz). Niekompletne/urwane pobranie nigdy nie zostaje mirror —
+// w przeciwnym razie stary/uciety plik niszczylby ekran (np. "ostatnie karmienie
+// 434 godz. temu") i byl wysylany do Telegrama jako backup.
+bool csvFileLooksValid(const char *path) {
+  File f = LittleFS.open(path, FILE_READ);
+  if (!f) return false;
+  const size_t sz = f.size();
+  if (sz < 30) { f.close(); return false; } // naglowek + co najmniej 1 wiersz
+  // Ostatni bajt musi byc '\n' (pelny wiersz, nie ucieta linia).
+  char tail[2] = {0, 0};
+  f.seek(sz - 2);
+  const int tn = f.read((uint8_t*)tail, 2);
+  f.close();
+  if (tn < 1 || tail[tn - 1] != '\n') return false;
+  // Naglowek pliku.
+  f = LittleFS.open(path, FILE_READ);
+  char hdr[24] = {0};
+  const int hn = f.read((uint8_t*)hdr, sizeof(hdr));
+  f.close();
+  if (hn < (int)sizeof(hdr)) return false;
+  const String hs(hdr, hn);
+  return hs.startsWith("data,godzina,typ,");
+}
+
 // Pobiera pelny CSV z hostingu i zapisuje atomowo jako lokalny mirror.
 // Po pobraniu odswieza dane i ekran. Zwraca true przy sukcesie.
 bool downloadCsvFromHost() {
@@ -5010,6 +5044,7 @@ bool downloadCsvFromHost() {
   bool wroteAny = false;
   int syncChunkNo = 0;
   long received = 0;
+  hostSyncProgressPct = 0;
   unsigned long bWait = millis() + 15000;
   while (millis() < bWait) {
     if (client.available()) {
@@ -5020,13 +5055,24 @@ bool downloadCsvFromHost() {
         wroteAny = true;
         if ((++syncChunkNo % 8) == 0) requestRgbResync();
         bWait = millis() + 15000; // reset timeoutu przy danych
-        if (contentLength >= 0 && received >= contentLength) break;
+        if (contentLength > 0) {
+          hostSyncProgressPct = (int)(received * 100 / contentLength);
+          if (hostSyncProgressPct > 99) hostSyncProgressPct = 99;
+          if (received >= contentLength) break;
+        }
       } else {
         delay(5);
       }
     } else {
-      if (!client.connected()) break;
-      delay(5);
+      // ESP32: connected() potrafi byc false, mimo ze w buforze zostaly jeszcze
+      // dane (serwer zamknal polaczenie po wyslaniu ciala). Nie wychodzimy od
+      // razu — dajemy chwile na doplyniecie bufora.
+      if (!client.connected()) {
+        delay(300);
+        if (!client.available()) break;
+      } else {
+        delay(5);
+      }
     }
   }
   tmp.close();
@@ -5036,17 +5082,21 @@ bool downloadCsvFromHost() {
   requestRgbResync();
   bool ok = wroteAny;
   if (contentLength >= 0 && received < contentLength) ok = false; // niekompletny
+  if (ok) ok = csvFileLooksValid("/karmienia_sync.tmp");          // walidacja mirror
   if (!ok) {
     LittleFS.remove("/karmienia_sync.tmp");
     ++hostDownloadFails;
     hostLastError = 4;
-    Serial.printf("HostSync: CSV niekompletny (%ld/%ld).\n", (long)received, (long)contentLength);
+    hostSyncProgressPct = -1;
+    Serial.printf("HostSync: CSV odrzucony (%ld/%ld B, walidacja=%d).\n",
+                  (long)received, (long)contentLength, (int)csvFileLooksValid("/karmienia_sync.tmp"));
     return false;
   }
   if (!LittleFS.rename("/karmienia_sync.tmp", DATA_FILE_PATH)) {
     LittleFS.remove("/karmienia_sync.tmp");
     ++hostDownloadFails;
     hostLastError = 4;
+    hostSyncProgressPct = -1;
     return false;
   }
   // Odswiez dane i ekran z nowego mirror.
@@ -5056,6 +5106,7 @@ bool downloadCsvFromHost() {
   hostLastDownloadMs = millis();
   hostDownloadFails = 0;
   hostLastError = 0;
+  hostSyncProgressPct = 100;
   Serial.printf("HostSync: CSV pobrany (%ld B), mirror zaktualizowany.\n", (long)received);
   return true;
 }
@@ -5879,8 +5930,10 @@ constexpr uint8_t BOOT_STEP_COUNT = 5;
 lv_obj_t *bootScreen = nullptr;
 lv_obj_t *bootStepLabel[BOOT_STEP_COUNT] = {nullptr};
 lv_obj_t *bootStatusLabel = nullptr;
+lv_obj_t *bootSyncBar = nullptr;      // pasek postepu synchronizacji z hostingiem (v4)
+lv_obj_t *bootSyncPctLabel = nullptr; // "45%" obok paska
 const char *BOOT_STEP_NAMES[BOOT_STEP_COUNT] = {
-    "Wi-Fi", "Zegar (NTP)", "Pamiec danych", "Pogoda", "Serwer WWW"};
+    "Wi-Fi", "Zegar (NTP)", "Pamiec danych", "Pogoda", "Sync z hostingiem (WWW)"};
 
 // Wymusza jedno odswiezenie LVGL, aby zmiany byly widoczne mimo blokujacych krokow.
 void bootPumpLvgl() {
@@ -5888,6 +5941,69 @@ void bootPumpLvgl() {
   lv_tick_inc(nowMs - lastLvglTickMs);
   lastLvglTickMs = nowMs;
   lv_timer_handler();
+}
+
+// Aktualizuje pasek postepu synchronizacji z hostingiem na ekranie startowym.
+void updateBootSyncUi() {
+  if (!bootSyncBar) return;
+  int pct = hostSyncProgressPct;
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  lv_obj_set_width(bootSyncBar, (pct * 320) / 100);
+  if (bootSyncPctLabel) {
+    if (hostSyncProgressPct < 0) lv_label_set_text(bootSyncPctLabel, "WWW: --");
+    else lv_label_set_text_fmt(bootSyncPctLabel, "WWW: %d%%", pct);
+  }
+  bootPumpLvgl();
+}
+
+// Pierwsza synchronizacja z hostingiem wykonana blokujaco podczas startu (v4).
+// Hosting jest zrodlem prawdy — zanim wejdziemy do aplikacji MUSIMY odebrac dane
+// (mirror), inaczej ekran pokazalby stary/uciety lokalny plik (np. "ostatnie
+// karmienie 434 godz. temu"). Z limitem czasu: gdy hosting niedostepny, start
+// mimo to (po timeoutcie) z ostrzezeniem w DIAGNOSTYCE.
+void syncOnBoot() {
+#if FEATURE_HOST_SYNC
+  if (WiFi.status() != WL_CONNECTED) {
+    bootStep(4, 2);
+    return;
+  }
+  bootStep(4, 0);
+  hostSyncProgressPct = 0;
+  if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Odbieranie danych z WWW...");
+  const uint32_t startMs = millis();
+  bool done = false;
+  while (millis() - startMs < 25000) {
+    const long rev = fetchRevision();
+    if (rev >= 0 && rev != hostRevisionLocal) {
+      if (downloadCsvFromHost()) {
+        hostRevisionLocal = rev;
+        done = true;
+        break;
+      }
+      // nieudane pobranie — wroć do pętli (będzie ponowne sprawdzenie rewizji)
+    } else if (rev >= 0 && rev == hostRevisionLocal) {
+      // rewizja zgodna — mirror już aktualny
+      done = true;
+      break;
+    }
+    updateBootSyncUi();
+    delay(1000);
+    feedWatchdog();
+  }
+  if (done) {
+    hostSyncProgressPct = 100;
+    bootStep(4, 1);
+    if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Dane WWW odebrane!");
+  } else {
+    hostSyncProgressPct = -1;
+    bootStep(4, 2);
+    if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Brak danych WWW — start mimo to");
+  }
+  updateBootSyncUi();
+#else
+  bootStep(4, 2);
+#endif
 }
 
 // Rysuje uroczą buzię niemowlaka z prymitywow LVGL wewnatrz podanego kontenera
@@ -5985,6 +6101,30 @@ void showBootScreen() {
     lv_obj_set_style_text_font(bootStepLabel[i], &lv_font_montserrat_16, 0);
     lv_obj_align(bootStepLabel[i], LV_ALIGN_TOP_LEFT, 4, 4 + i * 32);
   }
+
+  // Pasek postepu synchronizacji z hostingiem (v4) — czy klient WWW odebral dane.
+  lv_obj_t *syncBg = lv_obj_create(bootScreen);
+  lv_obj_remove_style_all(syncBg);
+  lv_obj_set_size(syncBg, 320, 14);
+  lv_obj_set_pos(syncBg, 80, 440);
+  lv_obj_set_style_radius(syncBg, 7, 0);
+  lv_obj_set_style_bg_color(syncBg, lv_color_hex(0x1F3A28), 0);
+  lv_obj_set_style_bg_opa(syncBg, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(syncBg, LV_OBJ_FLAG_SCROLLABLE);
+  bootSyncBar = lv_obj_create(bootScreen);
+  lv_obj_remove_style_all(bootSyncBar);
+  lv_obj_set_size(bootSyncBar, 0, 10);
+  lv_obj_set_pos(bootSyncBar, 80, 442);
+  lv_obj_set_style_radius(bootSyncBar, 5, 0);
+  lv_obj_set_style_bg_color(bootSyncBar, lv_color_hex(0x7FDF8A), 0);
+  lv_obj_set_style_bg_opa(bootSyncBar, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(bootSyncBar, LV_OBJ_FLAG_SCROLLABLE);
+  bootSyncPctLabel = lv_label_create(bootScreen);
+  lv_label_set_text(bootSyncPctLabel, "WWW: --");
+  lv_obj_set_style_text_color(bootSyncPctLabel, lv_color_hex(0xBFE0C4), 0);
+  lv_obj_set_style_text_font(bootSyncPctLabel, &lv_font_montserrat_14, 0);
+  lv_obj_set_pos(bootSyncPctLabel, 408, 438);
+  updateBootSyncUi();
 
   bootStatusLabel = lv_label_create(bootScreen);
   lv_label_set_text(bootStatusLabel, "Uruchamianie...");
@@ -6186,16 +6326,19 @@ void setup() {
   }
   weatherNextTryMs = millis() + WEATHER_START_DELAY_MS;
 
-  // Krok 5: Serwer WWW (v4: wyłączony) + uslugi (mDNS/OTA/Telegram).
+  // Krok 5: Synchronizacja z hostingiem (v4 — hosting zrodlem, urzadzenie
+  // wyswietlaczem) + uslugi (Telegram). Serwer WWW urzadzenia wylaczony.
   bootStep(4, 0);
 #if FEATURE_DEVICE_WEB
   startWebServer();
 #endif
   initOptionalServices();
-#if FEATURE_DEVICE_WEB
-  bootStep(4, webServerStarted ? 1 : 2);
+  // Sync z hostingiem wykonamy blokujaco PO korekcie NTP (syncOnBoot). Tu tylko
+  // wstępnie oznaczamy krok (status 0 = "w toku") — patrz sekcja po czekaniu na czas.
+#if !FEATURE_DEVICE_WEB
+  // (bootStep(4, ...) w syncOnBoot)
 #else
-  bootStep(4, 1); // serwer WWW wylaczony (v4) — krok uznany za OK
+  bootStep(4, webServerStarted ? 1 : 2);
 #endif
   if (xTaskCreatePinnedToCore(weatherTask, "weather", 4096, nullptr, 1,
                               &weatherTaskHandle, 0) != pdPASS) {
@@ -6208,7 +6351,6 @@ void setup() {
     Serial.println("Telegram: nie mozna uruchomic zadania FreeRTOS — wysylka wylaczona.");
     telegramTaskHandle = nullptr;
   }
-  appendBackupIfDue();
   updateNightMode();
   lv_timer_create(agingTickCb, 30000, nullptr);
   counterAlarmTimer = lv_timer_create(counterAlarmTickCb, 500, nullptr);
@@ -6235,9 +6377,21 @@ void setup() {
   }
   bootStep(1, timeIsValid ? 1 : 2); // ostateczny status kroku zegara
 
-  // "Gotowe!" tylko gdy krytyczne elementy sa OK (pamiec + czas). Inaczej informacja.
+  // v4: hosting jest zrodlem prawdy — czekamy na odebranie danych (mirror) przed
+  // wejsciem do aplikacji. Pasek postepu i status na ekranie startowym.
+  syncOnBoot();
+
+  // Backup dzienny po synchronizacji — mirror jest swiezy, wiec kopia i wysylka
+  // na Telegram nie wysla starego/ucietego pliku (wczesniej wykonywano to przed
+  // odebraniem danych z hostingu).
+  appendBackupIfDue();
+
+  // "Gotowe!" tylko gdy krytyczne elementy sa OK (pamiec + czas + dane WWW). Inaczej informacja.
   if (bootStatusLabel) {
-    if (storageReady && timeIsValid) lv_label_set_text(bootStatusLabel, "Gotowe!");
+    if (storageReady && timeIsValid && hostRevisionLocal >= 0)
+      lv_label_set_text(bootStatusLabel, "Gotowe!");
+    else if (hostRevisionLocal < 0)
+      lv_label_set_text(bootStatusLabel, "Brak danych WWW — start mimo to");
     else if (!timeIsValid) lv_label_set_text(bootStatusLabel, "Brak czasu — start mimo to");
     else lv_label_set_text(bootStatusLabel, "Start...");
   }
@@ -6251,6 +6405,8 @@ void setup() {
     bootScreen = nullptr;
     for (uint8_t i = 0; i < BOOT_STEP_COUNT; ++i) bootStepLabel[i] = nullptr;
     bootStatusLabel = nullptr;
+    bootSyncBar = nullptr;
+    bootSyncPctLabel = nullptr;
   }
   // Start w trybie zegara: czekamy na pierwsze dotkniecie ekranu.
   enterScreensaver();
