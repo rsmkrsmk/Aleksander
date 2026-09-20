@@ -36,12 +36,13 @@ req() { # req <method> <path> [--data-urlencode ...] -> HTTP code, body w $TMP
   curl "${args[@]}"
 }
 
-json_val() { # json_val <key> -> wartosc (python3 lub sed)
+json_val() { # json_val <key> -> wartosc (python3 z fallbackiem na sed)
   if command -v python3 >/dev/null 2>&1; then
-    python3 -c "import json,sys; d=json.load(open('$TMP')); print(d.get('$1',''))" 2>/dev/null
-  else
-    sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^,\"}\"]*\)\"\{0,1\}.*/\1/p" "$TMP" | head -1
+    local r
+    r=$(python3 -c "import json,sys; d=json.load(open('$TMP')); print(d.get('$1',''))" 2>/dev/null)
+    if [ -n "$r" ]; then echo "$r"; return; fi
   fi
+  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^,\"}\"]*\)\"\{0,1\}.*/\1/p" "$TMP" | head -1
 }
 
 echo "==> Testy API (BASE=$BASE, TEST_WRITE=$TEST_WRITE)"
