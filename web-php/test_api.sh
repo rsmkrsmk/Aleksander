@@ -12,6 +12,8 @@
 # TEST_WRITE=1 dopisuje testowy wpis (typ WAGA, ml=3700, "when"=teraz), a nastepnie
 # USUWA go po weryfikacji, wiec dane produkcyjne nie sa trwale zmieniane.
 # TOKEN — opcjonalny naglowek X-Upload-Token dla endpointow zapisu.
+# UWAGA: -k (insecure) odpowiada setInsecure() na urzadzeniu — hosting webd.pro
+# ma certyfikat, ktoremu Windows Schannel nie ufa, a urzadzenie i tak nie weryfikuje.
 # ============================================================================
 set -u
 
@@ -19,6 +21,7 @@ BASE="${BASE:-https://phpmapy1.webd.pro}"
 TEST_WRITE="${TEST_WRITE:-0}"
 TOKEN="${TOKEN:-}"
 TMP=/tmp/pinat_test_body
+INSECURE="${INSECURE:--k}"   # -k = nie weryfikuj certyfikatu (jak urzadzenie)
 
 PASS=0
 FAIL=0
@@ -27,7 +30,7 @@ bad()  { echo "  BLAD: $1"; FAIL=$((FAIL+1)); }
 
 req() { # req <method> <path> [--data-urlencode ...] -> HTTP code, body w $TMP
   local method="$1" path="$2"; shift 2
-  local args=(-s -o "$TMP" -w '%{http_code}' -X "$method" "$BASE$path")
+  local args=(-s -o "$TMP" -w '%{http_code}' -X "$method" $INSECURE "$BASE$path")
   [ -n "$TOKEN" ] && args+=(-H "X-Upload-Token: $TOKEN")
   [ "$#" -gt 0 ] && args+=("$@")
   curl "${args[@]}"
@@ -76,45 +79,56 @@ code=$(req GET "/api/entries?date=$TODAY")
 # --- 5. Cykl zapisu/usuniecia (tylko gdy TEST_WRITE=1) -----------------------
 if [ "$TEST_WRITE" = "1" ]; then
   echo "==> Cykl zapisu/usuniecia"
-  NOW=$(date +%s)
-  code=$(req POST /api/entry --data-urlencode "type=WAGA" --data-urlencode "when=$NOW" --data-urlencode "ml=3700")
-  [ "$code" = "201" ] && ok "POST /api/entry HTTP 201" || bad "POST /api/entry HTTP $code ($(cat "$TMP" 2>/dev/null))"
+  # 'when' w formacie YYYY-MM-DDTHH:MM (strefa Europy/Warszawy), jak przyjmuje API.
+  WHEN=$(TZ='Europe/Warsaw' date +'%Y-%m-%dT%H:%M')
+  code=$(req POST /api/entry --data-urlencode "type=WAGA" --data-urlencode "when=$WHEN" --data-urlencode "ml=3700")
+  if [ "$code" = "201" ]; then
+    ok "POST /api/entry HTTP 201 (when=$WHEN)"
 
-  code=$(req GET /api/revision)
-  REV2=$(json_val rev)
-  echo "    rev przed: $REV1, po zapisie: $REV2"
-  [ -n "$REV1" ] && [ -n "$REV2" ] && [ "$REV2" -gt "$REV1" ] && ok "rewizja wzrosla po zapisie" || bad "rewizja nie wzrosla ($REV1 -> $REV2)"
+    code=$(req GET /api/revision)
+    REV2=$(json_val rev)
+    echo "    rev przed: $REV1, po zapisie: $REV2"
+    [ -n "$REV1" ] && [ -n "$REV2" ] && [ "$REV2" -gt "$REV1" ] && ok "rewizja wzrosla po zapisie" || bad "rewizja nie wzrosla ($REV1 -> $REV2)"
 
-  # Znajdz lineIndex dodanego wpisu (WAGA, ml=3700, when=teraz) w dzisiejszych wpisach.
-  code=$(req GET "/api/entries?date=$TODAY")
-  LINE=$(python3 - "$TMP" "$NOW" <<'EOF'
+    # Znajdz lineIndex DOPISANEGO wpisu: WAGA o ml=3700 (znacznik testowy) o najwiekszym
+    # lineIndex. UWAGA: usuwamy TYLKO wpis o ml=3700, nigdy inny (realne wagi sa inne).
+    code=$(req GET "/api/entries?date=$TODAY")
+    LINE=""
+    if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" 2>/dev/null; then
+      LINE=$(python3 - "$TMP" <<'EOF'
 import json,sys
 data=json.load(open(sys.argv[1]))
-t=int(sys.argv[2])
-# wpis WAGA o naszym when — ostatni pasujacy
 cand=None
 for e in data.get('entries',[]):
-    if e.get('type')=='WAGA':
-        et=e.get('timestamp') or e.get('epoch')
-        # fallback: dopasuj po 'ml'==3700 i godzine (przyblizona)
-        if e.get('ml')==3700 and ('when' in e or True):
-            cand=e.get('lineIndex')
-# ostatni WAGA z ml=3700 w dzien
+    if e.get('type')=='WAGA' and e.get('ml')==3700:
+        cand=e.get('lineIndex')
 print(cand if cand is not None else -1)
 EOF
 )
-  echo "    lineIndex testowego wpisu: $LINE"
-  if [ -n "$LINE" ] && [ "$LINE" -ge 0 ]; then
-    code=$(req POST /api/delete-entry --data-urlencode "line=$LINE")
-    [ "$code" = "200" ] && ok "POST /api/delete-entry HTTP 200" || bad "POST /api/delete-entry HTTP $code ($(cat "$TMP" 2>/dev/null))"
-  else
-    bad "nie znaleziono lineIndex testowego wpisu — usuń go ręcznie w panelu"
-  fi
+    else
+      LINE=$(grep -oE '"type":"WAGA"[^}]*"ml":3700[^}]*"lineIndex":[0-9]+' "$TMP" | tail -1 | grep -oE '[0-9]+$')
+      [ -z "$LINE" ] && LINE=-1
+    fi
+    echo "    lineIndex testowego wpisu: $LINE"
+    if [ -n "$LINE" ] && [ "$LINE" -ge 0 ]; then
+      code=$(req POST /api/delete-entry --data-urlencode "line=$LINE")
+      [ "$code" = "200" ] && ok "POST /api/delete-entry HTTP 200" || bad "POST /api/delete-entry HTTP $code ($(cat "$TMP" 2>/dev/null))"
+      # weryfikacja: wpis 3700 nie powinien juz istniec
+      code=$(req GET "/api/entries?date=$TODAY")
+      LEFT=$(grep -c '"ml":3700' "$TMP" 2>/dev/null)
+      [ -z "$LEFT" ] && LEFT=0
+      [ "$LEFT" = "0" ] && ok "testowy wpis usuniety z danych" || bad "testowy wpis 3700 pozostal ($LEFT)"
+    else
+      bad "nie znaleziono lineIndex testowego wpisu (ml=3700) — NIE usuwam zadnego innego wpisu"
+    fi
 
-  code=$(req GET /api/revision)
-  REV3=$(json_val rev)
-  echo "    rev po usunieciu: $REV3"
-  [ -n "$REV2" ] && [ -n "$REV3" ] && [ "$REV3" -gt "$REV2" ] && ok "rewizja wzrosla po usunieciu" || bad "rewizja nie wzrosla po usunieciu ($REV2 -> $REV3)"
+    code=$(req GET /api/revision)
+    REV3=$(json_val rev)
+    echo "    rev po usunieciu: $REV3"
+    [ -n "$REV2" ] && [ -n "$REV3" ] && [ "$REV3" -gt "$REV2" ] && ok "rewizja wzrosla po usunieciu" || bad "rewizja nie wzrosla po usunieciu ($REV2 -> $REV3)"
+  else
+    bad "POST /api/entry HTTP $code (when=$WHEN) — pomijam usuwanie"
+  fi
 else
   echo "==> Pominieto cykl zapisu (TEST_WRITE=1 aby wykonac)"
 fi
