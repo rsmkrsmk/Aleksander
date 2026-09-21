@@ -985,6 +985,66 @@ async function postEvent(type,ml=0){
   catch(e){toast(e.message,'err');return false}
 }
 
+/* ---------- Wspomnienia (v4): raport dnia + kalendarz ---------- */
+const memFmtMin=m=>{if(!m&&m!==0)return '-';const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}min`:`${mm}min`};
+async function openMemory(){
+  show('memoryModal');
+  const datesHost=$('memoryDates'),rep=$('memoryReport');
+  datesHost.replaceChildren();rep.replaceChildren();
+  try{
+    const d=await request('/api/memories');const dates=(d&&d.dates)||[];
+    if(!dates.length){const p=document.createElement('p');p.className='hint';p.textContent='Brak zapisanych dni.';datesHost.append(p);return}
+    dates.forEach(ds=>{
+      const b=document.createElement('button');b.type='button';b.className='btn ghost';
+      b.style.cssText='padding:8px 12px;font-size:.78rem;font-weight:800';b.textContent=dateLabel(ds);
+      b.addEventListener('click',()=>renderMemoryReport(ds));
+      datesHost.append(b);
+    });
+    renderMemoryReport(dates[0]);
+  }catch(e){const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p)}
+}
+async function renderMemoryReport(date){
+  const rep=$('memoryReport');rep.replaceChildren();
+  const wait=document.createElement('p');wait.className='hint';wait.textContent='Ładowanie...';rep.append(wait);
+  let r;try{r=await request(`/api/memory?date=${encodeURIComponent(date)}`)}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
+  rep.replaceChildren();
+  const s=r.summary||{};
+  const head=document.createElement('div');head.className='sec';
+  head.innerHTML=`<h2>${dateLabel(date)}</h2><span class="muted-note">dzień życia ${r.dayOfLife!=null?r.dayOfLife:'-'}</span>`;rep.append(head);
+  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px';
+  const card=(k,v)=>{const c=document.createElement('div');c.className='card';c.style.cssText='padding:12px;margin:0';c.innerHTML=`<div class="eyebrow">${k}</div><div style="font-size:1.15rem;font-weight:800">${v}</div>`;return c};
+  grid.append(card('Karmienia',s.feedingCount||0));
+  grid.append(card('Mleko',(s.milkMl||0)+' ml'));
+  grid.append(card('Pierś',`L ${s.piersLeftMin||0} / P ${s.piersRightMin||0} min`));
+  grid.append(card('Sen dzień/noc',`${memFmtMin(s.sleepDayMin)} / ${memFmtMin(s.sleepNightMin)}`));
+  grid.append(card('Drzemki',s.napCount||0));
+  grid.append(card('Kąpiel',s.bathCount?'Tak':'Nie'));
+  grid.append(card('Waga',s.weightG?s.weightG+' g':'-'));
+  grid.append(card('Wit. D',s.vitaminD?'Tak':'Nie'));
+  rep.append(grid);
+  if((r.sleepSpans||[]).length){
+    const toMin=t=>{const p=t.split(':');return (+p[0])*60+(+p[1])};
+    const sl=document.createElement('div');sl.className='card';sl.style.cssText='padding:12px;margin:0 0 12px';
+    sl.innerHTML=`<div class="eyebrow">Sen</div><div style="margin:0 8px"><div style="position:relative;height:18px;border-radius:8px;background:var(--card-2);overflow:hidden;margin-top:8px"></div><div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--muted);margin-top:3px"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div></div>`;
+    const bar=sl.querySelector('div>div');
+    (r.sleepSpans||[]).forEach(sp=>{
+      const st=toMin(sp.from),en=toMin(sp.to);
+      const seg=document.createElement('div');seg.style.cssText=`position:absolute;top:0;bottom:0;background:var(--sleep);border-radius:4px;opacity:.85;left:${(st/1440*100).toFixed(2)}%;width:${Math.max(1,(en-st)/1440*100).toFixed(2)}%`;
+      seg.title=`${sp.from}–${sp.to} (${memFmtMin(sp.min)})`;bar.append(seg);
+    });
+    rep.append(sl);
+  }
+  const list=document.createElement('div');
+  (r.entries||[]).forEach(e=>{
+    const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px solid var(--brd)';
+    const left=document.createElement('div');left.innerHTML=`<b style="font-size:.8rem">${e.time}</b> <span style="font-size:.8rem;color:var(--muted)">${e.label||e.type}</span>`;
+    const amt=document.createElement('div');amt.style.cssText='font-size:.8rem;font-weight:800';
+    amt.textContent=e.type==='KARMIENIE'?(((e.piersLeftMin||0)+(e.piersRightMin||0))?`L${e.piersLeftMin||0}/P${e.piersRightMin||0}`:''):(e.ml?e.ml+' ml':'');
+    row.append(left,amt);list.append(row);
+  });
+  if((r.entries||[]).length)rep.append(list);
+}
+
 /* ---------- Delegacja kliknięć ---------- */
 document.addEventListener('click',async ev=>{
   // Nawigacja podstron (dolny pasek)
@@ -1022,6 +1082,7 @@ document.addEventListener('click',async ev=>{
     case 'w-plus':{const w=$('weightG');w.value=Math.min(15000,(Number(w.value)||3700)+10);break;}
     case 'w-save':saveWeight();break;
     case 'bath':openBath();break;
+    case 'memories':openMemory();break;
     case 'bath-save':await saveBath();break;
   }
 });

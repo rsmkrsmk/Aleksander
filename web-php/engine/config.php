@@ -108,6 +108,9 @@ final class Config
     public static function dataFile(): string    { return getenv('DATA_FILE') ?: (self::dataDir() . '/karmienia.csv'); }
     public static function backupFile(): string  { return getenv('BACKUP_FILE') ?: (self::dataDir() . '/karmienia_backup.csv'); }
     public static function settingsFile(): string{ return getenv('SETTINGS_FILE') ?: (self::dataDir() . '/ustawienia.cfg'); }
+    // Katalog wspomnien (cache raportow dnia, v4). Mozna nadpisac zmienna MEMORY_DIR.
+    public static function memoryDir(): string  { return getenv('MEMORY_DIR') ?: (self::dataDir() . '/wspomnienia'); }
+    public static function memoryFile(string $isoDate): string { return self::memoryDir() . '/' . $isoDate . '.json'; }
     // Plik z licznikiem rewizji danych — uzywa go polling urzadzenia (v4), aby wykryc
     // zmiane bez pobierania calej historii. Mozna nadpisac zmienna REV_FILE.
     public static function revisionFile(): string{ return getenv('REV_FILE') ?: (self::dataDir() . '/karmienia.rev'); }
