@@ -636,6 +636,10 @@ lv_obj_t *createButton(lv_obj_t *parent, const char *caption, int x, int y, int 
 }
 
 // --------------------------- Sterownik ekranu i dotyku ---------------------------
+// Motyw domyslny LVGL (v4.1): Widgets Demo look. Glowny kolor = zielen (dzien/noc),
+// wiec przyciski i widzety bez jawnych stylow dostaja domyslne wykończenie LVGL.
+// Tryb nocny = ciemny motyw (re-init default theme z dark=true). Explicit style
+// (COLOR_* / createButton / createCard) nadal nadpisuja motyw per-widget.
 void applyTheme(bool night) {
   if (night) {
     COLOR_BACKGROUND = lv_color_hex(0x1C2420);
@@ -662,6 +666,14 @@ void applyTheme(bool night) {
     COLOR_BORDER = lv_color_hex(0xCBDFC4);
     COLOR_TONAL_GREEN = lv_color_hex(0xE6F1E0);
   }
+  // Motyw domyslny LVGL (Widgets Demo look) z zielonym kolorem glownym.
+  // Dzien/noc: re-init z dark=true/false (LVGL 9.3 nie ma settera runtime).
+  // Ekrany przebudowywane po zmianie motywu (updateNightMode) dostaja nowy motyw.
+  if (lv_theme_default_is_inited()) lv_theme_default_deinit();
+  lv_theme_default_init(displayDriver,
+      night ? lv_color_hex(0x7FB88A) : lv_color_hex(0x356D43),   // primary: zielen
+      night ? lv_color_hex(0x7C9BD1) : lv_color_hex(0x3E5E9B),   // secondary: niebieski akcent
+      night, nullptr);
 }
 
 // Wymagana sekwencja ekspandera TCA9554 z oficjalnego demo Waveshare.
@@ -5525,6 +5537,11 @@ void setup() {
   // renderami). Bez tego (domyslny MODE_TIMER) lv_timer_handler czytalby dotyk
   // po swojemu, a nasze reczne odczyty dokladalyby sie, mieszajac stan press/click.
   lv_indev_set_mode(touchDriver, LV_INDEV_MODE_EVENT);
+
+  // Motyw domyslny LVGL (v4.1) inicjalizowany PRZED pierwszym ekranem, aby widzety
+  // od startu korzystaly z motywu (Widgets Demo look, zielony). Ppozniej noc
+  // przelacza dark=true przez applyTheme (updateNightMode).
+  applyTheme(nightModeActive);
 
   createReusableScreenRoots();
   Serial.println("INIT: korzenie ekranow utworzone");
