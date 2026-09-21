@@ -12,7 +12,7 @@ const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:
   // uzywany gdy tylko JEDEN rodzaj; przy obu rodzajach uzywamy tych dwoch pol.
   milkMotherMl:60, milkModifiedMl:60, mlPopKind:null };
 const $ = id => document.getElementById(id);
-const MODALS = ['formModal','otherModal','diaperModal','bathModal'];
+const MODALS = ['formModal','bathModal'];
 const PAGES = ['start','diary','stats','weight','sleep'];
 const PAGE_TITLES = {start:'Leśny Dziennik',diary:'Dziennik',stats:'Statystyki',weight:'Waga',sleep:'Sen'};
 
@@ -931,22 +931,6 @@ function openEditFeeding(feed, milks){
   $('milkRemoveBtn').classList.toggle('hidden',!milks.length);
   setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
 }
-function openPumping(){
-  state.pumpMode=true;
-  ['timeField','nudgeBox','quickNotice','bottleToggle','nursingBox'].forEach(id=>$(id).classList.add('hidden'));
-  $('extraMilkOptions').classList.remove('hidden');$('kindField').classList.add('hidden');
-  $('milkRemoveBtn').classList.add('hidden');
-  // Odciaganie uzywa pojedynczego suwaka (bez trybu mieszanego).
-  $('mlField').classList.remove('hidden');$('dualMlField').classList.add('hidden');
-  setText('formTitle','Odciąganie mleka');
-  $('mlField').querySelector('label').innerHTML='Ilość';
-  // Odciaganie NIE zmienia sie — uzywa starego zakresu ml (10..120 z minMl/maxMl/defaultMl).
-  const d=state.data||{};$('milkMl').min=d.minMl||10;$('milkMl').max=d.maxMl||120;$('milkMl').step=5;$('milkMl').value=d.defaultMl||30;
-  // przywracamy pole czasu dla odciągania (musimy wysłać when)
-  $('timeField').classList.remove('hidden');$('nudgeBox').classList.add('hidden');
-  $('entryTime').value=dateTimeInput(state.data&&state.data.nowIso);
-  setText('milkAmount',`${$('milkMl').value} ml`);setText('formNotice','');openFormModal();
-}
 function nudge(min){const i=$('entryTime');const d=new Date(i.value);if(Number.isNaN(d.getTime()))return;d.setMinutes(d.getMinutes()+min);i.value=dateTimeInput(d)}
 
 /* ============================================================================
@@ -979,7 +963,6 @@ document.addEventListener('click',async ev=>{
     case 'sleep-open':navTo('sleep');break;
     case 'sleep':{const t=(state.data&&state.data.sleepInProgress)?'SEN_STOP':'SEN_START';if(await postEvent(t)){toast(t==='SEN_START'?'Zaznaczono zaśnięcie':'Zaznaczono pobudkę');renderSleep()}break;}
     case 'weight':navTo('weight');break;
-    case 'other':show('otherModal');break;
     case 'calendar':navTo('diary');break;
     case 'today-detail':{navTo('diary');const c=(state.data&&state.data.calendar&&state.data.calendar[0]);openDay(c?c.date:isoDaysAgo(0),c?c.label:null);break;}
     case 'chart':navTo('stats');break;
@@ -991,10 +974,6 @@ document.addEventListener('click',async ev=>{
     case 'cancel-form':{const rd=state.activeDay;closeFormModal();rd?openDay(rd,state.detailLabel):clearPanels();break;}
     case 'minus5':nudge(-5);break;
     case 'plus5':nudge(5);break;
-    case 'diaper':show('diaperModal');break;
-    case 'diaper-wet':if(await postEvent('PIELUCHA_MOKRA')){toast('Zapisano: pielucha mokra');clearPanels()}break;
-    case 'diaper-dirty':if(await postEvent('PIELUCHA_BRUDNA')){toast('Zapisano: pielucha brudna');clearPanels()}break;
-    case 'pumping':openPumping();break;
     case 'vitamin':{const ok=await postEvent('WITAMINA_D');if(ok){toast('Zapisano witaminę D');renderSummary()}break;}
     case 'import':$('importFile').click();break;
     case 'upload-data':$('uploadDataFile').click();break;
