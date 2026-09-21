@@ -863,34 +863,33 @@ async function renderGainChart(){
   if(ws.length){
     let seq=[{day:A_D,g:A_G,date:''}];ws.forEach(p=>seq.push({day:p.day,g:p.g,date:p.date}));
     if(ws[0].day===A_D)seq[1]={day:ws[0].day,g:A_G,date:ws[0].date};
-    for(let i=1;i<seq.length;i++){const d1=seq[i-1].day,w1=seq[i-1].g,d2=seq[i].day,w2=seq[i].g;if(d2<=d1)continue;gains.push({day:d2,date:seq[i].date,gain:Math.round((w2-w1)/(d2-d1))})}
+    for(let i=1;i<seq.length;i++){const d1=seq[i-1].day,w1=seq[i-1].g,d2=seq[i].day,w2=seq[i].g;if(d2<=d1)continue;gains.push({from:d1,day:d2,date:seq[i].date,gain:Math.round((w2-w1)/(d2-d1))})}
   }
-  setText('weightGainNote', gains.length
-    ? 'Krzywa = przyrost między pomiarami (kotwica dzień 2 = 2850 g). Pasy = typowy przyrost (25–30 g/d przez 3 mies., 15–20 g przez 3–6 mies.).'
-    : 'Dodaj co najmniej dwa pomiary wagi, aby zobaczyć przyrost dzienny.');
-  if(!gains.length)return;
+  if(!gains.length){setText('weightGainNote','Dodaj co najmniej dwa pomiary wagi, aby zobaczyć przyrost dzienny.');return}
   const lg=document.createElement('div');lg.style.cssText='display:flex;gap:10px;align-items:center;font-size:.68rem;color:var(--muted);margin-bottom:6px';
-  const it=(c,txt)=>{const s=document.createElement('span');s.style.cssText='display:inline-flex;align-items:center;gap:5px';const d=document.createElement('span');d.style.cssText='width:9px;height:9px;border-radius:50%;background:'+c;s.append(d);const l=document.createElement('span');l.textContent=txt;s.append(l);return s};
+  const it=(c,txt)=>{const s=document.createElement('span');s.style.cssText='display:inline-flex;align-items:center;gap:5px';const dd=document.createElement('span');dd.style.cssText='width:9px;height:9px;border-radius:50%;background:'+c;s.append(dd);const l=document.createElement('span');l.textContent=txt;s.append(l);return s};
   lg.append(it('#0f8a5f','w normie'),it('#e0742e','poza normą'),it('#e0483c','spadek'));
   host.append(lg);
   const today=(state.data&&state.data.developmentDay!=null&&state.data.developmentDay>=0)?state.data.developmentDay:gains[gains.length-1].day;
-  const maxDay=Math.max(today,gains[gains.length-1].day,A_D+1);
+  const dataMax=gains[gains.length-1].day;
+  const maxDay=Math.max(today,dataMax,A_D+1);
   let maxG=Math.max(40,Math.max.apply(null,gains.map(p=>p.gain))+12);
   maxG=Math.ceil(maxG/20)*20;
-  const W=440,H=240,padL=42,padR=12,padT=16,padB=26,plotW=W-padL-padR,plotH=H-padT-padB;
+  const W=440,H=250,padL=42,padR=12,padT=16,padB=26,plotW=W-padL-padR,plotH=H-padT-padB;
   const x=d=>padL+(maxDay<=A_D?0:(d-A_D)/(maxDay-A_D)*plotW);
   const y=g=>padT+plotH-(g/maxG)*plotH;
   const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg'});
   for(let gv=0;gv<=maxG;gv+=20){const yy=y(gv);svg.append(svgEl('line',{class:'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:6,y:yy+3});t.textContent=gv;svg.append(t)}
   const bands=[[A_D,Math.min(91,maxDay),25,30],[Math.min(91,maxDay),Math.min(183,maxDay),15,20],[Math.min(183,maxDay),maxDay,10,15]];
   bands.forEach(b=>{if(b[1]<=b[0])return;const bx1=x(b[0]),bx2=x(b[1]),yyHi=y(b[2]),yyLo=y(b[3]);svg.append(svgEl('rect',{x:bx1,y:yyLo,width:Math.max(1,bx2-bx1),height:Math.max(1,yyHi-yyLo),fill:'#12b877',opacity:'0.12',rx:2}));const med=(b[2]+b[3])/2;svg.append(svgEl('line',{x1:bx1,y1:y(med),x2:bx2,y2:y(med),stroke:'#0f8a5f','stroke-width':1.2,'stroke-dasharray':'5 4',opacity:.5}))});
-  if(gains.length>1){
-    let area='M'+x(gains[0].day).toFixed(1)+' '+y(0).toFixed(1);gains.forEach(p=>{area+=' L'+x(p.day).toFixed(1)+' '+y(Math.max(0,p.gain)).toFixed(1)});area+=' L'+x(gains[gains.length-1].day).toFixed(1)+' '+y(0).toFixed(1)+' Z';
-    svg.append(svgEl('path',{d:area,fill:'#0f8a5f',opacity:.18,stroke:'none'}));
-    let line='';gains.forEach((p,i)=>{line+=(i?'L':'M')+x(p.day).toFixed(1)+' '+y(p.gain).toFixed(1)+' '});
-    svg.append(svgEl('path',{d:line.trim(),fill:'none',stroke:'#0f8a5f','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));
+  const daily=[];for(let d=A_D;d<=dataMax;d++){let val=0;for(let i=0;i<gains.length;i++){if(d>gains[i].from&&d<=gains[i].day){val=gains[i].gain;break}}daily.push({day:d,gain:val})}
+  if(daily.length>1){
+    let area='M'+x(daily[0].day).toFixed(1)+' '+y(0).toFixed(1);daily.forEach(p=>{area+=' L'+x(p.day).toFixed(1)+' '+y(Math.max(0,p.gain)).toFixed(1)});area+=' L'+x(daily[daily.length-1].day).toFixed(1)+' '+y(0).toFixed(1)+' Z';
+    svg.append(svgEl('path',{d:area,fill:'#0f8a5f',opacity:.16,stroke:'none'}));
+    let line='';daily.forEach((p,i)=>{line+=(i?'L':'M')+x(p.day).toFixed(1)+' '+y(p.gain).toFixed(1)+' '});
+    svg.append(svgEl('path',{d:line.trim(),fill:'none',stroke:'#0f8a5f','stroke-width':2.4,'stroke-linecap':'round','stroke-linejoin':'round'}));
   }
-  gains.forEach(p=>{const b=gainBandPerDay(p.day);const col=p.gain<=0?'#e0483c':(b&&p.gain>=b.lo&&p.gain<=b.hi?'#0f8a5f':'#e0742e');const c=svgEl('circle',{cx:x(p.day),cy:y(p.gain),r:4.6,fill:col,stroke:'#fff','stroke-width':1.6});const ti=svgEl('title',{});ti.textContent='dzień '+p.day+': '+p.gain+' g/dzień';c.append(ti);svg.append(c)});
+  gains.forEach(p=>{const b=gainBandPerDay(p.day);const col=p.gain<=0?'#e0483c':(b&&p.gain>=b.lo&&p.gain<=b.hi?'#0f8a5f':'#e0742e');const c=svgEl('circle',{cx:x(p.day),cy:y(p.gain),r:4.6,fill:col,stroke:'#fff','stroke-width':1.6});const ti=svgEl('title',{});ti.textContent='dzień '+p.day+': '+p.gain+' g/dzień (od dnia '+p.from+')';c.append(ti);svg.append(c)});
   const xt=[A_D].concat(gains.map(p=>p.day));const uniq=[...new Set(xt)];const lab=Math.min(uniq.length,5);const stepX=(maxDay-A_D)/Math.max(1,(lab-1));
   for(let i=0;i<lab;i++){const d=Math.round(A_D+stepX*i);const t=svgEl('text',{class:'axis-txt',x:x(d)-9,y:H-7});t.textContent='d'+d;svg.append(t)}
   host.append(svg);
@@ -898,6 +897,7 @@ async function renderGainChart(){
   const status=last.gain<=0?'<b style="color:#e0483c">spadek</b>':(last.gain>=b.lo&&last.gain<=b.hi?'<b style="color:#0f8a5f">w normie</b>':'<b style="color:#e0742e">poza normą</b>');
   const gn=$('weightGainNote');if(gn)gn.innerHTML='Ostatni przyrost: <b>'+last.gain+' g/dzień</b> (norma '+b.lo+'–'+b.hi+') · średnio '+avg+' g/dzień · '+status;
 }
+
 
 
 
@@ -1108,17 +1108,17 @@ function memPostcard(date,r){
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;
   const g=cv.getContext('2d');
   const gr=g.createLinearGradient(0,0,0,H);
-  gr.addColorStop(0,'#f7f2e9');gr.addColorStop(.5,'#eef2e3');gr.addColorStop(1,'#dbe7d2');
+  gr.addColorStop(0,'#f8f4ec');gr.addColorStop(.45,'#f0f4e6');gr.addColorStop(1,'#d9e9d2');
   g.fillStyle=gr;g.fillRect(0,0,W,H);
   const blob=(cx,cy,rr,col)=>{g.fillStyle=col;g.beginPath();g.arc(cx,cy,rr,0,Math.PI*2);g.fill()};
-  blob(80,90,150,'rgba(47,86,56,.07)');blob(1000,140,90,'rgba(47,86,56,.06)');blob(60,1020,120,'rgba(20,184,166,.06)');blob(1010,950,170,'rgba(47,86,56,.07)');
-  g.strokeStyle='rgba(47,86,56,.28)';g.lineWidth=6;g.strokeRect(22,22,W-44,H-44);
+  blob(90,60,160,'rgba(47,86,56,.06)');blob(1020,70,110,'rgba(20,184,166,.05)');blob(60,1030,130,'rgba(20,184,166,.05)');blob(1010,1000,180,'rgba(47,86,56,.06)');
+  g.fillStyle='rgba(53,109,67,.85)';memRoundRect(g,60,44,W-120,10,5);
   g.textAlign='center';g.textBaseline='middle';
-  g.fillStyle='#7a8d7f';g.font='700 36px sans-serif';g.fillText('W S P O M N I E N I E', W/2, 92);
-  g.fillStyle='#97a593';g.font='700 30px sans-serif';g.fillText('DZIEŃ ŻYCIA '+(r.dayOfLife!=null?r.dayOfLife:'-'), W/2, 138);
-  g.fillStyle='#243528';g.font='900 96px sans-serif';g.fillText(dateLabel(date), W/2, 236);
-  g.strokeStyle='rgba(53,109,67,.4)';g.lineWidth=3;g.beginPath();g.moveTo(W/2-150,262);g.lineTo(W/2+150,262);g.stroke();
-  g.fillStyle='#356D43';g.font='800 46px sans-serif';g.fillText('ALEKSANDER', W/2, 310);
+  g.fillStyle='#8a9780';g.font='700 32px sans-serif';g.fillText('W S P O M N I E N I E',W/2,96);
+  g.fillStyle='#a4b1a5';g.font='600 28px sans-serif';g.fillText('DZIEŃ ŻYCIA '+(r.dayOfLife!=null?r.dayOfLife:'-'),W/2,140);
+  g.fillStyle='#243528';g.font='900 96px sans-serif';g.fillText(dateLabel(date),W/2,234);
+  g.strokeStyle='rgba(53,109,67,.35)';g.lineWidth=3;g.beginPath();g.moveTo(W/2-160,266);g.lineTo(W/2+160,266);g.stroke();
+  g.fillStyle='#356D43';g.font='800 46px sans-serif';g.fillText('ALEKSANDER',W/2,310);
   const s=r.summary||{};
   const sleepMin=(s.sleepDayMin||0)+(s.sleepNightMin||0);
   const fmtMin=m=>{if(!m&&m!==0)return '-';const h=Math.floor(m/60),mm=m%60;return h?h+'h '+mm+'min':mm+'min'};
@@ -1130,39 +1130,34 @@ function memPostcard(date,r){
     {v:s.bathCount?'TAK':'—',k:'KĄPIEL',c:'#14B8A6'},
     {v:s.weightG?(s.weightG)+' g':'—',k:'WAGA',c:'#0f8a5f'},
   ];
-  const mW=152,mH=112,mGap=12,startX=(W-6*mW-5*mGap)/2;
-  stats.forEach((st,i)=>{const x=startX+i*(mW+mGap),y=356;
-    g.fillStyle='rgba(255,255,255,.88)';memRoundRect(g,x,y,mW,mH,18);
-    g.fillStyle=st.c;g.font='900 42px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(st.v,x+mW/2,y+48);
-    g.fillStyle='#5f6f63';g.font='700 22px sans-serif';g.fillText(st.k,x+mW/2,y+88);
-  });
-  const sy=516,sh=26,sw=W-160;
-  g.fillStyle='rgba(255,255,255,.88)';memRoundRect(g,80,sy,sw,sh+16,14);
+  const cardW=280,cardH=150,gap=30,startX=(W-3*cardW-2*gap)/2;
+  const drawCard=(st,i,row)=>{
+    const x=startX+(i%3)*(cardW+gap), y=row?500:330;
+    g.fillStyle='rgba(255,255,255,.9)';memRoundRect(g,x,y,cardW,cardH,22);
+    g.fillStyle=st.c;g.font='900 58px sans-serif';g.textAlign='center';g.fillText(st.v,x+cardW/2,y+62);
+    g.fillStyle='#7a8d7f';g.font='700 24px sans-serif';g.fillText(st.k.toUpperCase(),x+cardW/2,y+118);
+  };
+  stats.forEach((st,i)=>drawCard(st,i,i<3?0:1));
+  g.fillStyle='#7a8d7f';g.font='700 26px sans-serif';g.textAlign='left';g.fillText('PRZEBIEG DNIA',84,690);
+  const rx=120,rw=W-240,ry=706,rh=10;
+  g.fillStyle='rgba(255,255,255,.78)';memRoundRect(g,rx,ry-6,rw,rh+12,9);
+  g.fillStyle='rgba(130,150,160,.4)';g.fillRect(rx,ry,rw,rh);
   const toMin=t=>{const p=t.split(':');return(+p[0])*60+(+p[1])};
-  const spans=(r.sleepSpans||[]);
-  if(spans.length){g.fillStyle='rgba(123,88,212,.9)';spans.forEach(sp=>{const st0=toMin(sp.from),en=toMin(sp.to);const x1=80+(st0/1440)*sw,x2=80+(en/1440)*sw;g.fillRect(x1,sy,Math.max(3,x2-x1),sh)})}
-  g.fillStyle='#97a593';g.font='600 20px sans-serif';
-  ['0','6','12','18','24'].forEach((h,i)=>{g.textAlign='center';g.fillText(h,80+(i/4)*sw,sy+sh+11)});
-  g.fillStyle='#5f6f63';g.font='800 26px sans-serif';g.textAlign='left';g.fillText('SEN',84,sy+sh+40);
-  const byTime={};
-  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='SEN_START'||t==='SEN_STOP')return;(byTime[e.time]=byTime[e.time]||[]).push(e)});
-  const times=Object.keys(byTime).sort((a,b)=>a.localeCompare(b));
-  let ty=614,cnt=0,cut=0;
-  times.forEach(t=>{
-    const group=byTime[t];
-    const feed=group.find(e=>e.type==='KARMIENIE');
-    const milks=group.filter(e=>(e.type||'').startsWith('MLEKO'));
-    const others=group.filter(e=>e.type!=='KARMIENIE'&&!(e.type||'').startsWith('MLEKO'));
-    if(ty>H-170){cut+=1+Math.max(milks.length,others.length?1:0);return}
-    g.fillStyle=feed?'#e0742e':'#8a9780';g.font=(feed?'900 42px':'700 30px')+' sans-serif';g.textAlign='left';g.textBaseline='middle';g.fillText(t,118,ty);
-    g.fillStyle=feed?'#e0742e':'#9aa79c';g.beginPath();g.arc(94,ty,feed?13:8,0,Math.PI*2);g.fill();
-    let ex=164,base=ty;
-    if(feed){g.fillStyle='#c05a1c';g.font='900 38px sans-serif';g.fillText('Karmienie',ex,base)}
-    milks.forEach(m=>{const label=(m.type==='MLEKO_MATKI')?'mleko matki':(m.type==='MLEKO_MODYFIKOWANE')?'mleko modyfikowane':(m.label||m.type);g.fillStyle='#3f77d6';g.font='700 26px sans-serif';g.fillText('└ '+label+' · '+(m.ml||0)+' ml',ex,base+34)});
-    if(others.length&&!milks.length){const o=others[0];g.fillStyle='#243528';g.font='700 28px sans-serif';g.fillText((o.label||o.type)+(o.ml?(' · '+(o.ml||0)+' ml'):''),ex,base+34)}
-    ty += (feed?70:(milks.length||others.length)?52:42);
+  const dot=(min,rr,col)=>{const cx=rx+(min/1440)*rw;g.fillStyle=col;g.beginPath();g.arc(cx,ry+rh/2,rr,0,Math.PI*2);g.fill()};
+  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='SEN_START'||t==='SEN_STOP')return;const m=toMin(e.time);if(m==null)return;if(t==='KARMIENIE')dot(m,12,'#e0742e');else if(t.startsWith('MLEKO'))dot(m,8,'#3f77d6');else if(t==='KAPIEL')dot(m,9,'#14B8A6');else if(t==='WAGA')dot(m,9,'#0f8a5f')});
+  g.fillStyle='#a4b1a5';g.font='600 20px sans-serif';['0','6','12','18','24'].forEach((h,i)=>{g.textAlign='center';g.fillText(h,rx+(i/4)*rw,ry+rh+18)});
+  const feeds=(r.entries||[]).filter(e=>e.type==='KARMIENIE').map(e=>e.time);
+  g.fillStyle='#7a8d7f';g.font='700 26px sans-serif';g.textAlign='left';g.fillText('KARMIENIA',84,810);
+  let cy=810,cx2=84;
+  feeds.forEach(t=>{
+    const tw=Math.max(92,g.measureText(t)+30);
+    if(cx2+tw>W-60){cx2=84;cy+=56}
+    g.fillStyle='rgba(224,116,46,.16)';memRoundRect(g,cx2,cy-32,tw,42,21);
+    g.fillStyle='#c05a1c';g.font='800 30px sans-serif';g.textAlign='center';g.fillText(t,cx2+tw/2,cy-11);
+    cx2+=tw+12;
   });
-  if(cut){g.fillStyle='#8a9780';g.font='600 28px sans-serif';g.textAlign='left';g.fillText('... i jeszcze '+cut+' zdarzen',120,H-168)}
+  const milkTxt='MLEKO: '+(s.milkMl||0)+' ml'+(s.motherMilkMl?(' · matki '+(s.motherMilkMl||0)):'')+(s.modifiedMilkMl?(' · modyfikowane '+(s.modifiedMilkMl||0)):'');
+  g.fillStyle='#3f77d6';g.font='700 28px sans-serif';g.textAlign='left';g.fillText(milkTxt,84,cy+52);
   let hit='';
   if((s.milkMl||0)>=250)hit='Rekord mleka: '+(s.milkMl)+' ml!';
   else if(s.bathCount)hit='Dzień kąpieli!';
@@ -1170,10 +1165,11 @@ function memPostcard(date,r){
   else if((s.feedingCount||0)>=6)hit=(s.feedingCount)+' karmień — dzielny maluch!';
   else if(sleepMin>=360)hit='Bardzo spokojny dzień: '+fmtMin(sleepMin)+' snu';
   else hit='Piękny dzień pełen wrażeń';
-  g.fillStyle='#0f8a5f';g.font='800 40px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText('★  '+hit,W/2,H-120);
-  g.fillStyle='#9aa793';g.font='600 26px sans-serif';g.fillText('Leśny Dziennik Aleksandra · '+dateLabel(date),W/2,H-64);
+  g.fillStyle='#0f8a5f';g.font='800 40px sans-serif';g.textAlign='center';g.fillText('★  '+hit,W/2,990);
+  g.fillStyle='#a4b1a5';g.font='600 26px sans-serif';g.fillText('Leśny Dziennik Aleksandra · '+dateLabel(date),W/2,1040);
   return cv.toDataURL('image/png');
 }
+
 async function downloadPostcard(){
   const date=state.memDate;if(!date)return;
   let r=state.memReport;
