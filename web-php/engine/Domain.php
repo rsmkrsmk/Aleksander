@@ -337,4 +337,44 @@ final class Domain
         }
         return $points;
     }
+
+    /**
+     * Dzienny przyrost wagi (v4): między kolejnymi pomiarami g/dzień.
+     * Punkt startowy: 2. dzień życia = 2850 g (powrót do wagi urodzeniowej,
+     * typowy spadek po urodzeniu). Dla każdego segmentu (pomiar i -> i+1):
+     *   gain = round((w2 - w1) / (dzień2 - dzień1))
+     * Przypisywane do dnia pomiaru końcowego. Zwraca:
+     *   ['anchorDay'=>2, 'anchorG'=>2850, 'points'=>[['day','date','gain'],...]]
+     */
+    public static function weightGainSeries(array $entries): array
+    {
+        $ANCHOR_DAY = 2; $ANCHOR_G = 2850;
+        $pts = [];
+        foreach ($entries as $e) {
+            if ($e['type'] !== 'WAGA') continue;
+            $dol = self::dayOfLifeForDate($e['date']); if ($dol < 0) continue;
+            $pts[] = ['day' => $dol, 'date' => $e['date'], 'g' => $e['ml']];
+        }
+        if (count($pts) < 2) {
+            // Za malo pomiarow — brak mozliwosci liczenia przyrostu.
+            return ['anchorDay' => $ANCHOR_DAY, 'anchorG' => $ANCHOR_G, 'points' => []];
+        }
+        usort($pts, static fn($a, $b) => $a['day'] <=> $b['day']);
+        // Punkt startowy: najwczesniejszy pomiar >= ANCHOR_DAY; przed nim kotwica.
+        $first = $pts[0];
+        if ($first['day'] > $ANCHOR_DAY) {
+            array_unshift($pts, ['day' => $ANCHOR_DAY, 'date' => '', 'g' => $ANCHOR_G]);
+        } elseif ($first['day'] === $ANCHOR_DAY) {
+            $pts[0]['g'] = $ANCHOR_G; // pomiar z dnia 2 = kotwica (2850 g)
+        }
+        $out = [];
+        for ($i = 1; $i < count($pts); $i++) {
+            $d1 = $pts[$i - 1]['day']; $w1 = $pts[$i - 1]['g'];
+            $d2 = $pts[$i]['day'];     $w2 = $pts[$i]['g'];
+            if ($d2 <= $d1) continue; // pomiary tego samego dnia — pomijamy segment
+            $gain = (int)round(($w2 - $w1) / ($d2 - $d1));
+            $out[] = ['day' => $d2, 'date' => $pts[$i]['date'], 'gain' => $gain];
+        }
+        return ['anchorDay' => $ANCHOR_DAY, 'anchorG' => $ANCHOR_G, 'points' => $out];
+    }
 }

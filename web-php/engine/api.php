@@ -202,6 +202,10 @@ function handle_api(string $route, string $method, Repository $repo): void
         sendJson(200, ['birthWeightG' => Config::BIRTH_WEIGHT_G, 'points' => Domain::weightSeries($repo->allEntries())]);
     }
 
+    if ($route === 'weight-gain' && $method === 'GET') {
+        sendJson(200, Domain::weightGainSeries($repo->allEntries()));
+    }
+
     if ($route === 'entry' && $method === 'POST') {
         $type = param('type');
         if ($type === null || param('when') === null || param('ml') === null) sendJson(400, ['message' => 'Niepelne dane formularza.']);

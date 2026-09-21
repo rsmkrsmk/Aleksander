@@ -82,7 +82,7 @@ function navTo(page){
 function renderPage(page){
   if(page==='diary'){state.activeDay=null;const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');if(state.data)renderCalendarPreview(state.data.calendar)}
   else if(page==='stats'){renderStatView(state.statView)}
-  else if(page==='weight'){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');renderWeightChart()}
+  else if(page==='weight'){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');renderWeightChart();renderGainChart()}
   else if(page==='sleep'){renderSleep()}
 }
 /* Przełącznik widoków w Statystykach: summary | charts | rhythm | history */
@@ -844,6 +844,46 @@ async function renderWeightChart(){
   if(pts.length){const last=pts[pts.length-1],b=expectedWeightBand(last.day,birthG),diff=last.g-b.med;let stan=last.g<b.min?'poniżej normy':last.g>b.max?'powyżej normy':'w normie';
     setText('weightNote',`Ostatni pomiar: ${last.g} g (dzień ${last.day}). Zakres WHO: ${b.min}–${b.max} g (mediana ${b.med} g, ${diff>=0?'+':''}${diff} g). Status: ${stan}.`)}
   else setText('weightNote','Brak pomiarów. Dodaj pierwszy — pojawi się na tle oczekiwanego zakresu WHO.');
+}
+
+/* Referencyjne pasmo dziennego przyrostu (g/dzień): 25-30 przez 0-3 mies.,
+   15-20 przez 3-6 mies., potem 10-15. Zwraca {lo, hi} dla danego dnia życia. */
+function gainBandPerDay(day){
+  if(day<DISCHARGE_DAY)return null;
+  if(day<GAIN_P1_END)return{lo:25,hi:30};
+  if(day<GAIN_P2_END)return{lo:15,hi:20};
+  return{lo:10,hi:15};
+}
+/* Wykres słupkowy: rzeczywisty przyrost g/dzień (segmenty między pomiarami,
+   kotwica dzień 2 = 2850 g) na tle pasma referencyjnego. */
+async function renderGainChart(){
+  const host=$('weightGainChart');if(!host)return;host.replaceChildren();
+  let pts=[];try{const d=await request('/api/weight-gain');pts=(d&&d.points)||[]}catch(e){}
+  setText('weightGainNote', pts.length
+    ? 'Słupki = rzeczywisty przyrost między pomiarami. Pasmo = typowy przyrost (25–30 g/dzień przez 3 mies., 15–20 g przez 3–6 mies.).'
+    : 'Brak wystarczających pomiarów. Dodaj co najmniej dwa pomiary wagi, aby zobaczyć przyrost dzienny.');
+  if(!pts.length)return;
+  const maxGain=Math.max(20,Math.ceil((Math.max.apply(null,pts.map(p=>p.gain))+15)/10)*10);
+  const W=440,H=190,padL=40,padR=10,padT=14,padB=24,plotW=W-padL-padR,plotH=H-padT-padB;
+  const dayMax=Math.max.apply(null,pts.map(p=>p.day));
+  const x=d=>padL+(dayMax<=0?0:d/dayMax*plotW), y=g=>padT+plotH-(g/maxGain)*plotH;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg'});
+  for(let i=0;i<=4;i++){const gv=maxGain*i/4,yy=y(gv);svg.append(svgEl('line',{class:'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:4,y:yy+3});t.textContent=Math.round(gv)+'g/d';svg.append(t)}
+  // Pasmo referencyjne (szary pasek na wysokosci g/dzień wg wieku).
+  let band=null;pts.forEach(p=>{const b=gainBandPerDay(p.day);if(!b)return;band=band||[];band.push({x:x(p.day),lo:y(b.hi),hi:y(b.lo)})});
+  if(band&&band.length){let path='';band.forEach((b,i)=>{path+=(i?'L':'M')+b.x.toFixed(1)+' '+b.lo.toFixed(1)+' '});for(let i=band.length-1;i>=0;i--)path+='L'+band[i].x.toFixed(1)+' '+band[i].hi.toFixed(1)+' ';path+='Z';svg.append(svgEl('path',{d:path.trim(),fill:'#a85432',opacity:'0.15',stroke:'none'}))}
+  // Słupki przyrostu.
+  const bw=Math.max(6,Math.min(28,plotW/(pts.length*1.6)));
+  pts.forEach(p=>{
+    const g=p.gain,col=g<0?'var(--danger)':(g>=gainBandPerDay(p.day)&&g<=gainBandPerDay(p.day).hi?'var(--acc)':'var(--feed)');
+    const bx=x(p.day),by=y(Math.max(0,g));
+    const r=svgEl('rect',{x:bx-bw/2,y:by,width:bw,height:Math.max(1,y(0)-by),rx:3,fill:col});
+    const ti=svgEl('title',{});ti.textContent=`dzień ${p.day}: ${g} g/dzień`;r.append(ti);svg.append(r);
+  });
+  // Etykiety dni.
+  const days=[...new Set(pts.map(p=>p.day))];const lab=Math.min(days.length,6);
+  for(let i=0;i<lab;i++){const d=days[Math.round(i*(days.length-1)/(lab-1))];const t=svgEl('text',{class:'axis-txt',x:x(d)-8,y:H-6});t.textContent='d'+d;svg.append(t)}
+  host.append(svg);
 }
 
 /* ============================================================================
