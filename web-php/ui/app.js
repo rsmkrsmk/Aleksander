@@ -12,7 +12,7 @@ const state = { data:null, page:'start', view:null, activeDay:null, detailLabel:
   // uzywany gdy tylko JEDEN rodzaj; przy obu rodzajach uzywamy tych dwoch pol.
   milkMotherMl:60, milkModifiedMl:60, mlPopKind:null };
 const $ = id => document.getElementById(id);
-const MODALS = ['formModal','bathModal'];
+const MODALS = ['formModal','bathModal','memoryModal'];
 const PAGES = ['start','diary','stats','weight','sleep'];
 const PAGE_TITLES = {start:'Leśny Dziennik',diary:'Dziennik',stats:'Statystyki',weight:'Waga',sleep:'Sen'};
 
@@ -1028,45 +1028,65 @@ async function openMemory(){
 }
 
 async function renderMemoryReport(date){
-  const rep=$('memoryReport');rep.replaceChildren();
+  const rep=$('memoryReport');if(!rep)return;rep.replaceChildren();
   const wait=document.createElement('p');wait.className='hint';wait.textContent='Ładowanie...';rep.append(wait);
   let r;try{r=memAgg((await request(`/api/entries?date=${encodeURIComponent(date)}`).catch(()=>({entries:[]}))).entries||[]);const ti=(state.data&&state.data.nowIso||'').slice(0,10);r.dayOfLife=ti?((state.data&&state.data.developmentDay||0)-Math.round((new Date(ti)-new Date(date))/86400000)):null}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
   rep.replaceChildren();
   const s=r.summary||{};
-  const head=document.createElement('div');head.className='sec';
-  head.innerHTML=`<h2>${dateLabel(date)}</h2><span class="muted-note">dzień życia ${r.dayOfLife!=null?r.dayOfLife:'-'}</span>`;rep.append(head);
-  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px';
-  const card=(k,v)=>{const c=document.createElement('div');c.className='card';c.style.cssText='padding:12px;margin:0';c.innerHTML=`<div class="eyebrow">${k}</div><div style="font-size:1.15rem;font-weight:800">${v}</div>`;return c};
-  grid.append(card('Karmienia',s.feedingCount||0));
-  grid.append(card('Mleko',(s.milkMl||0)+' ml'));
-  grid.append(card('Pierś',`L ${s.piersLeftMin||0} / P ${s.piersRightMin||0} min`));
-  grid.append(card('Sen dzień/noc',`${memFmtMin(s.sleepDayMin)} / ${memFmtMin(s.sleepNightMin)}`));
-  grid.append(card('Drzemki',s.napCount||0));
-  grid.append(card('Kąpiel',s.bathCount?'Tak':'Nie'));
-  grid.append(card('Waga',s.weightG?s.weightG+' g':'-'));
-  grid.append(card('Wit. D',s.vitaminD?'Tak':'Nie'));
-  rep.append(grid);
+  const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:baseline;margin:2px 0 14px';
+  const hd=document.createElement('h2');hd.style.cssText='margin:0;font-size:1.35rem;letter-spacing:-.02em';hd.textContent=dateLabel(date);
+  const hd2=document.createElement('span');hd2.style.cssText='font-size:.78rem;color:var(--muted);font-weight:800';hd2.textContent='dzień życia '+(r.dayOfLife!=null?r.dayOfLife:'-');
+  head.append(hd,hd2);rep.append(head);
+  const pill=(k,v,c)=>{const p=document.createElement('div');p.style.cssText='flex:1 1 0;min-width:0;border-radius:16px;padding:10px 6px;text-align:center;box-shadow:var(--sh-1)';p.style.background='color-mix(in srgb,'+c+' 16%,transparent)';p.style.border='1px solid '+c;p.innerHTML='<div style="font-size:1.25rem;font-weight:800;line-height:1.1;color:'+c+'">'+v+'</div><div style="font-size:.62rem;color:var(--muted);font-weight:700;margin-top:3px">'+k+'</div>';return p};
+  const wrap=document.createElement('div');wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px';
+  wrap.append(pill('Karmienia',s.feedingCount||0,'var(--feed)'));
+  wrap.append(pill('Mleko',(s.milkMl||0)+' ml','var(--milk)'));
+  wrap.append(pill('Sen',memFmtMin((s.sleepDayMin||0)+(s.sleepNightMin||0)),'var(--sleep)'));
+  wrap.append(pill('Drzemki',s.napCount||0,'var(--sleep)'));
+  wrap.append(pill('Kąpiel',s.bathCount?'✓':'–','var(--bath)'));
+  wrap.append(pill('Waga',s.weightG?s.weightG+' g':'–','var(--acc)'));
+  rep.append(wrap);
   if((r.sleepSpans||[]).length){
     const toMin=t=>{const p=t.split(':');return (+p[0])*60+(+p[1])};
-    const sl=document.createElement('div');sl.className='card';sl.style.cssText='padding:12px;margin:0 0 12px';
-    sl.innerHTML=`<div class="eyebrow">Sen</div><div style="margin:0 8px"><div style="position:relative;height:18px;border-radius:8px;background:var(--card-2);overflow:hidden;margin-top:8px"></div><div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--muted);margin-top:3px"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div></div>`;
-    const bar=sl.querySelector('div>div');
-    (r.sleepSpans||[]).forEach(sp=>{
-      const st=toMin(sp.from),en=toMin(sp.to);
-      const seg=document.createElement('div');seg.style.cssText=`position:absolute;top:0;bottom:0;background:var(--sleep);border-radius:4px;opacity:.85;left:${(st/1440*100).toFixed(2)}%;width:${Math.max(1,(en-st)/1440*100).toFixed(2)}%`;
-      seg.title=`${sp.from}–${sp.to} (${memFmtMin(sp.min)})`;bar.append(seg);
-    });
+    const sl=document.createElement('div');sl.style.cssText='border-radius:18px;padding:12px 14px;background:var(--card);border:1px solid var(--brd);margin-bottom:14px';
+    const slt=document.createElement('div');slt.className='eyebrow';slt.textContent='Sen';sl.append(slt);
+    const bar=document.createElement('div');bar.style.cssText='position:relative;height:18px;border-radius:9px;background:var(--card-2);overflow:hidden;margin:8px 6px';
+    (r.sleepSpans||[]).forEach(sp=>{const st=toMin(sp.from),en=toMin(sp.to);const seg=document.createElement('div');seg.style.cssText='position:absolute;top:0;bottom:0;background:var(--sleep);border-radius:5px;opacity:.85;left:'+(st/1440*100).toFixed(2)+'%;width:'+Math.max(1,(en-st)/1440*100).toFixed(2)+'%';seg.title=sp.from+'–'+sp.to+' ('+memFmtMin(sp.min)+')';bar.append(seg)});
+    sl.append(bar);
+    const hh=document.createElement('div');hh.style.cssText='display:flex;justify-content:space-between;font-size:.6rem;color:var(--muted);margin-top:2px;padding:0 6px';['0','6','12','18','24'].forEach(h=>{const s2=document.createElement('span');s2.textContent=h;hh.append(s2)});sl.append(hh);
     rep.append(sl);
   }
-  const list=document.createElement('div');
-  (r.entries||[]).forEach(e=>{
-    const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px solid var(--brd)';
-    const left=document.createElement('div');left.innerHTML=`<b style="font-size:.8rem">${e.time}</b> <span style="font-size:.8rem;color:var(--muted)">${e.label||e.type}</span>`;
-    const amt=document.createElement('div');amt.style.cssText='font-size:.8rem;font-weight:800';
-    amt.textContent=e.type==='KARMIENIE'?(((e.piersLeftMin||0)+(e.piersRightMin||0))?`L${e.piersLeftMin||0}/P${e.piersRightMin||0}`:''):(e.ml?e.ml+' ml':'');
-    row.append(left,amt);list.append(row);
-  });
-  if((r.entries||[]).length)rep.append(list);
+  const byTime={};
+  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='SEN_START'||t==='SEN_STOP')return;(byTime[e.time]=byTime[e.time]||[]).push(e)});
+  const times=Object.keys(byTime).sort((a,b)=>a.localeCompare(b));
+  if(times.length){
+    const tl=document.createElement('div');tl.style.cssText='display:flex;flex-direction:column;gap:8px';
+    times.forEach(t=>{
+      const group=byTime[t];
+      const feed=group.find(e=>e.type==='KARMIENIE');
+      const milks=group.filter(e=>(e.type||'').startsWith('MLEKO'));
+      const others=group.filter(e=>e.type!=='KARMIENIE'&&!(e.type||'').startsWith('MLEKO'));
+      const row=document.createElement('div');row.style.cssText='display:flex;align-items:flex-start;gap:12px;padding:12px 12px;border-radius:16px;background:var(--card);border:1px solid var(--brd);box-shadow:var(--sh-1)';
+      const node=document.createElement('div');node.style.cssText='width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-top:'+(feed?'7px':'5px')+';background:'+(feed?'var(--feed)':'var(--muted)');
+      const body=document.createElement('div');body.style.cssText='flex:1;min-width:0';
+      const tm=document.createElement('div');tm.style.cssText='font-size:.74rem;color:var(--muted);font-weight:700';tm.textContent=t;body.append(tm);
+      if(feed){const f=document.createElement('div');f.style.cssText='font-size:1.12rem;font-weight:800;color:var(--feed);letter-spacing:.01em';f.textContent='Karmienie';body.append(f)}
+      milks.forEach(m=>{
+        const mk=document.createElement('div');mk.style.cssText='display:flex;align-items:center;gap:8px;font-size:.84rem;color:var(--milk);font-weight:700;margin-top:4px';
+        const branch=document.createElement('span');branch.style.cssText='width:10px;height:10px;border-radius:3px;background:var(--milk);flex-shrink:0';
+        const label=(m.type==='MLEKO_MATKI')?'mleko matki':(m.type==='MLEKO_MODYFIKOWANE')?'mleko modyfikowane':(m.label||m.type);
+        mk.append(branch);const tx=document.createElement('span');tx.textContent=label+' · '+(m.ml||0)+' ml';mk.append(tx);body.append(mk);
+      });
+      others.forEach(o=>{
+        const ov=document.createElement('div');ov.style.cssText='font-size:.9rem;font-weight:700;color:var(--ink);margin-top:4px';
+        ov.textContent=(o.label||o.type)+(o.ml?(' · '+(o.ml||0)+' ml'):'');body.append(ov);
+      });
+      row.append(node,body);tl.append(row);
+    });
+    rep.append(tl);
+  } else {
+    const em=document.createElement('p');em.className='hint';em.textContent='Brak wpisów w tym dniu.';rep.append(em);
+  }
 }
 
 /* ---------- Delegacja kliknięć ---------- */
