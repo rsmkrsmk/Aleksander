@@ -882,7 +882,7 @@ async function renderGainChart(){
     const g=p.gain,b=gainBandPerDay(p.day),col=g<0?'#e0483c':(b&&g>=b.lo&&g<=b.hi?'#0f8a5f':'#e0742e');
     const bx=x(p.day),by=y(Math.max(0,g));
     const r=svgEl('rect',{x:bx-bw/2,y:by,width:bw,height:Math.max(1,y(0)-by),rx:3,fill:col});
-    const ti=svgEl('title',{});ti.textContent=dzień +p.day+: +g+ g/dzień;r.append(ti);svg.append(r);
+    const ti=svgEl('title',{});ti.textContent='dzien '+p.day+': '+g+' g/dzien';r.append(ti);svg.append(r);
   });
   const days=[...new Set(gains.map(p=>p.day))];const lab=Math.min(days.length,6);
   for(let i=0;i<lab;i++){const d=days[Math.round(i*(days.length-1)/(lab-1))];const t=svgEl('text',{class:'axis-txt',x:x(d)-8,y:H-6});t.textContent='d'+d;svg.append(t)}
@@ -1030,7 +1030,7 @@ async function openMemory(){
 async function renderMemoryReport(date){
   const rep=$('memoryReport');rep.replaceChildren();
   const wait=document.createElement('p');wait.className='hint';wait.textContent='Ładowanie...';rep.append(wait);
-  let r;try{r=memAgg((await request(`/api/entries?date=${encodeURIComponent(date)}`).catch(()=>({entries:[]}))).entries||[])}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
+  let r;try{r=memAgg((await request(`/api/entries?date=${encodeURIComponent(date)}`).catch(()=>({entries:[]}))).entries||[]);const ti=(state.data&&state.data.nowIso||'').slice(0,10);r.dayOfLife=ti?((state.data&&state.data.developmentDay||0)-Math.round((new Date(ti)-new Date(date))/86400000)):null}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
   rep.replaceChildren();
   const s=r.summary||{};
   const head=document.createElement('div');head.className='sec';
