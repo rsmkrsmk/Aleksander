@@ -170,11 +170,6 @@ function render(data){
   // motyw wg pory (o ile użytkownik nie wybrał ręcznie)
   if(!themeManual)applyTheme(data.night?'night':'day');
 
-  // status
-  const sdot=ok=>`<span class="dot ${ok?'':'err'}"></span>`;
-  $('statusline').innerHTML=
-    `<span class="s">${sdot(data.storage)}Pamięć ${data.storage?'OK':'błąd'}</span>`+
-    `<span class="s">${sdot(data.timeValid)}Czas ${data.timeValid?'OK':'—'}</span>`;
   setText('dockSleep',data.sleepInProgress?'Śpi':'Sen');
 
   // ostatnia kąpiel (data z /api/status)
@@ -999,7 +994,7 @@ function nudge(min){const i=$('entryTime');const d=new Date(i.value);if(Number.i
    ============================================================================ */
 async function refresh(){
   try{render(await request('/api/status'));}
-  catch(e){$('statusline').innerHTML=`<span class="s"><span class="dot err"></span>${e.message}</span>`}
+  catch(e){toast(e.message,'err')}
 }
 async function postEvent(type,ml=0){
   try{await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type,ml:String(ml)})});await refresh();return true}
