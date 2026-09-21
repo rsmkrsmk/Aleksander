@@ -319,6 +319,13 @@ lv_obj_t *otherScreen = nullptr;   // ekran INNE: pielucha + odciag pokarmu
 lv_obj_t *weightScreen = nullptr;  // ekran WAGA: wybor wagi w gramach
 lv_obj_t *sleepScreen = nullptr;   // ekran SEN: wake windows, predykcja drzemki, bilans
 lv_obj_t *diagnosticsScreen = nullptr; // ekran DIAGNOSTYKA (stan urzadzenia)
+// v4.1: ekran z zakladkami (lv_tabview) — zakladki to glowne ekrany urzadzenia:
+// KARMIENIE/SEN/INNE/WAGA/KALENDARZ/PODSUMOWANIE. Otwierany z pulpitu; po
+// HOME_RETURN_TIMEOUT_MS wraca na pulpit (istniejacy mechanizm w loop()).
+lv_obj_t *tabsScreen = nullptr;   // host lv_tabview
+lv_obj_t *tabview = nullptr;      // lv_tabview z zakladkami
+int8_t  activeTab = 0;            // ostatnio aktywna zakladka (0=KARMIENIE ... 5=PODSUMOWANIE)
+lv_obj_t *tabBtn[6] = {nullptr};  // kontenery tresci zakladek (zwracane przez lv_tabview_add_tab)
 lv_obj_t *homeLedWifi = nullptr;
 lv_obj_t *homeLedMemory = nullptr;
 lv_obj_t *homeLedTime = nullptr;
@@ -432,12 +439,13 @@ void updateCounterAlarmVisuals();
 void counterAlarmTickCb(lv_timer_t *timer);
 void updateHomeInformation();
 void createHomeScreen();
-void createCalendarScreen();
+void openTabs(int8_t idx);
+void buildCalendarTab(lv_obj_t *parent);
 void createDayDetailScreen(time_t day);
-void createFeedingChartScreen();
+void buildChartTab(lv_obj_t *parent);
 void openEntryForm();
 void openEntryFormForDay(time_t day);
-void createFormScreen();
+void buildFeedTab(lv_obj_t *parent);
 void showFormConfirm();
 void hideFormConfirm();
 void performSaveForm();
@@ -456,17 +464,17 @@ void pumpingSaveEvent(lv_event_t *event);
 void vitaminToggleEvent(lv_event_t *event);
 void createDiaperScreen();
 void createPumpingScreen();
-void createOtherScreen();
+void buildOtherTab(lv_obj_t *parent);
 void otherOpenEvent(lv_event_t *event);
 void backToOtherEvent(lv_event_t *event);
-void createSleepScreen();
+void buildSleepTab(lv_obj_t *parent);
 void sleepOpenEvent(lv_event_t *event);
 String formatDurationShort(long minutes);
 void createDiagnosticsScreen();
 void diagnosticsOpenEvent(lv_event_t *event);
 void sleepTelegramSwitchEvent(lv_event_t *event);
 const char *resetReasonText(int reason);
-void createWeightScreen();
+void buildWeightTab(lv_obj_t *parent);
 void weightOpenEvent(lv_event_t *event);
 void weightSaveEvent(lv_event_t *event);
 void weightStepEvent(lv_event_t *event);
@@ -2291,13 +2299,16 @@ void feedingButtonEvent(lv_event_t *event) {
 }
 
 void calendarButtonEvent(lv_event_t *event) {
-  createCalendarScreen();
+  openTabs(4);
 }
 
 void backHomeEvent(lv_event_t *event) {
   deleteModeActive = false;
   pendingDeleteIndex = -1;
-  createHomeScreen();
+  // v4.1: sub-ekrany (formularz/pumping/pielucha/diagnostyka) otwierane sa z
+  // zakladek — POWROT wraca do aktywnej zakladki (albo na pulpit, gdy brak zakladek).
+  if (tabsScreen) openTabs(activeTab);
+  else createHomeScreen();
 }
 
 // Wlacza/wylacza tryb wyboru wpisu do usuniecia.
@@ -2310,14 +2321,14 @@ void deleteToggleEvent(lv_event_t *event) {
     }
     pendingDeleteIndex = -1;
     updateHomeInformation();
-    createFeedingChartScreen();
+    openTabs(5);
     return;
   }
   // Przełącz tryb zaznaczania
   deleteModeActive = !deleteModeActive;
   pendingDeleteIndex = -1;
   deletedEntryDescription = "";
-  createFeedingChartScreen();
+  openTabs(5);
 }
 
 // Zaznacza wpis do usuniecia (pierwsze klikniecie) lub go usuwa (jesli juz potwierdzony).
@@ -2333,12 +2344,12 @@ void deleteEntryEvent(lv_event_t *event) {
     pendingDeleteIndex = -1;
     deleteModeActive = false;
     updateHomeInformation();
-    createFeedingChartScreen();
+    openTabs(5);
     return;
   }
   // Ustaw indeks oczekujacy na potwierdzenie i odrysuj
   pendingDeleteIndex = entryIndex;
-  createFeedingChartScreen();
+  openTabs(5);
 }
 
 void diaperOpenEvent(lv_event_t *event) {
@@ -2359,7 +2370,7 @@ void vitaminToggleEvent(lv_event_t *event) {
   dayStats(dayOffsetFromToday(0), s);
   if (s.vitaminD) return; // juz podano dzisiaj
   appendEntry("WITAMINA_D", time(nullptr), 0);
-  createFeedingChartScreen(); // odswiez etykiete WIT.D
+  openTabs(5); // odswiez etykiete WIT.D
 }
 
 void calendarEditEvent(lv_event_t *event) {
@@ -2373,12 +2384,12 @@ void addFeedingForDayEvent(lv_event_t *event) {
 
 void chartButtonEvent(lv_event_t *event) {
   summaryExtraDays = 0;
-  createFeedingChartScreen();
+  openTabs(5);
 }
 
 void moreDaysEvent(lv_event_t *event) {
   summaryExtraDays = min(summaryExtraDays + 7, SUMMARY_MAX_EXTRA_DAYS);
-  createFeedingChartScreen();
+  openTabs(5);
 }
 
 void pumpingOpenEvent(lv_event_t *event) {
@@ -2399,20 +2410,20 @@ void pumpingSaveEvent(lv_event_t *event) {
   createHomeScreen();
 }
 
-void createFeedingChartScreen() {
-  resetReusableScreen(chartScreen);
+void buildChartTab(lv_obj_t *parent) {
+  // resetReusableScreen(parent) - tresc budowana do zakladki PODSUMOWANIE
 
   // Naglowek: tryb usuwania lub normalny
   if (pendingDeleteIndex >= 0) {
-    createLabel(chartScreen, "DOTKNIJ PONOWNIE ABY USUNAC", COLOR_RED, LV_ALIGN_TOP_MID, 0, 10);
+    createLabel(parent, "DOTKNIJ PONOWNIE ABY USUNAC", COLOR_RED, LV_ALIGN_TOP_MID, 0, 10);
   } else if (deleteModeActive) {
-    createLabel(chartScreen, "DOTKNIJ WPIS DO USUNIECIA", COLOR_RED, LV_ALIGN_TOP_MID, 0, 10);
+    createLabel(parent, "DOTKNIJ WPIS DO USUNIECIA", COLOR_RED, LV_ALIGN_TOP_MID, 0, 10);
   } else if (deletedEntryDescription.length() > 0) {
-    createLabel(chartScreen, ("USUNIETO: " + deletedEntryDescription).c_str(), COLOR_RED, LV_ALIGN_TOP_MID, 0, 10);
+    createLabel(parent, ("USUNIETO: " + deletedEntryDescription).c_str(), COLOR_RED, LV_ALIGN_TOP_MID, 0, 10);
   } else {
-    createLabel(chartScreen, "PODSUMOWANIE - DZIS I WCZORAJ", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+    createLabel(parent, "PODSUMOWANIE - DZIS I WCZORAJ", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
   }
-  lv_obj_t *backButton = createButton(chartScreen, "POWROT", 14, 42, 110, 36, COLOR_MUTED);
+  lv_obj_t *backButton = createButton(parent, "POWROT", 14, 42, 110, 36, COLOR_MUTED);
   lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
   // Guzik glowny: POTWIERDZ (jesli pending) / ANULUJ (tryb) / USUN WPIS (normalny)
   const char *deleteBtnText;
@@ -2427,16 +2438,16 @@ void createFeedingChartScreen() {
     deleteBtnText = "USUN WPIS";
     deleteBtnColor = COLOR_RED;
   }
-  lv_obj_t *deleteBtn = createButton(chartScreen, deleteBtnText, 132, 42, 160, 36, deleteBtnColor);
+  lv_obj_t *deleteBtn = createButton(parent, deleteBtnText, 132, 42, 160, 36, deleteBtnColor);
   lv_obj_add_event_cb(deleteBtn, deleteToggleEvent, LV_EVENT_CLICKED, nullptr);
   DaySummary todaySummary;
   dayStats(dayOffsetFromToday(0), todaySummary);
-  lv_obj_t *vitButton = createButton(chartScreen, todaySummary.vitaminD ? "WIT.D OK" : "+ WIT.D",
+  lv_obj_t *vitButton = createButton(parent, todaySummary.vitaminD ? "WIT.D OK" : "+ WIT.D",
                                      300, 42, 152, 36, todaySummary.vitaminD ? COLOR_GREEN : COLOR_ORANGE);
   lv_obj_add_event_cb(vitButton, vitaminToggleEvent, LV_EVENT_CLICKED, nullptr);
 
   // Przewijana lista: naglowek dnia + podsumowanie + kazde karmienie osobno.
-  lv_obj_t *listCard = createCard(chartScreen, 14, 94, 452, 360);
+  lv_obj_t *listCard = createCard(parent, 14, 94, 452, 360);
   lv_obj_add_flag(listCard, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_scroll_dir(listCard, LV_DIR_VER);
 
@@ -2571,7 +2582,7 @@ void createFeedingChartScreen() {
   lv_obj_t *moreButton = createButton(listCard, "+ WCZYTAJ STARSZE DNI", 84, rowY + 4, 260, 40, COLOR_MUTED);
   lv_obj_add_event_cb(moreButton, moreDaysEvent, LV_EVENT_CLICKED, nullptr);
 
-  loadReusableScreen(chartScreen);
+  
 }
 
 void createPumpingScreen() {
@@ -2623,33 +2634,22 @@ void createDiaperScreen() {
   loadReusableScreen(diaperScreen);
 }
 
-// Powrot z ekranow PIELUCHA/ODCIAGANIE do wspolnego ekranu INNE.
+// Powrot z ekranow PIELUCHA/ODCIAGANIE do wspolnego ekranu INNE (zakladka 2).
 void backToOtherEvent(lv_event_t *event) {
-  createOtherScreen();
+  openTabs(2);
 }
 
 // Ekran INNE: grupuje szybkie akcje PIELUCHA i ODCIAG POKARMU pod jednym miejscem.
-// (Sen ma dedykowany przycisk SEN na ekranie glownym i wlasny ekran.)
-void createOtherScreen() {
-  resetReusableScreen(otherScreen);
-
-  createLabel(otherScreen, "INNE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_t *backButton = createButton(otherScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
-
-  lv_obj_t *diaperBtn = createButton(otherScreen, "PIELUCHA", 14, 90, 452, 58, COLOR_BLUE);
+void buildOtherTab(lv_obj_t *parent) {
+  createLabel(parent, "INNE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_t *diaperBtn = createButton(parent, "PIELUCHA", 14, 90, 452, 58, COLOR_BLUE);
   lv_obj_add_event_cb(diaperBtn, diaperOpenEvent, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *pumpingBtn = createButton(otherScreen, "ODCIAG POKARMU", 14, 156, 452, 58, COLOR_ORANGE);
+  lv_obj_t *pumpingBtn = createButton(parent, "ODCIAG POKARMU", 14, 156, 452, 58, COLOR_ORANGE);
   lv_obj_add_event_cb(pumpingBtn, pumpingOpenEvent, LV_EVENT_CLICKED, nullptr);
-  // Sen ma wlasny przycisk SEN na ekranie glownym — tutaj juz go nie dublujemy.
-  lv_obj_t *diagBtn = createButton(otherScreen, "DIAGNOSTYKA", 14, 222, 452, 58, COLOR_MUTED);
+  lv_obj_t *diagBtn = createButton(parent, "DIAGNOSTYKA", 14, 222, 452, 58, COLOR_MUTED);
   lv_obj_add_event_cb(diagBtn, diagnosticsOpenEvent, LV_EVENT_CLICKED, nullptr);
-  createLabel(otherScreen, "Pielucha, odciaganie, diagnostyka.",
-              COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 300);
-
-  loadReusableScreen(otherScreen);
+  createLabel(parent, "Pielucha, odciaganie, diagnostyka.", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 300);
 }
-
 // ------------------------------- Ekran SEN (Napper) -----------------------------
 // Format "Xh Ymin" / "Ymin" dla czasu trwania (min).
 String formatDurationShort(long minutes) {
@@ -2674,7 +2674,7 @@ void applyAutoSleepForFeeding(time_t feedingWhen) {
 }
 
 void sleepOpenEvent(lv_event_t *event) {
-  createSleepScreen();
+  openTabs(1);
 }
 
 // Przelacznik ZASNIJ/OBUDZ na ekranie SEN — po zapisie odswieza ekran SEN (nie home).
@@ -2682,22 +2682,18 @@ void sleepScreenToggleEvent(lv_event_t *event) {
   if (!timeIsValid || !storageReady) return;
   appendEntry(sleepInProgress ? "SEN_STOP" : "SEN_START", time(nullptr), 0);
   loadLatestEntries(); // odswiez globale snu (sleepInProgress/sleepStartedTime/lastWakeTime)
-  createSleepScreen();
+  openTabs(1);
 }
 
-void createSleepScreen() {
-  resetReusableScreen(sleepScreen);
-
-  createLabel(sleepScreen, "SEN", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_t *backButton = createButton(sleepScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+void buildSleepTab(lv_obj_t *parent) {
+  createLabel(parent, "SEN", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
 
   const long ageDays = calculateAgeDays();
   const WakeWindow ww = wakeWindowMinutes(ageDays);
   const time_t nowT = time(nullptr);
 
   // --- Karta STANU (spi / czuwa + okno drzemki) ---
-  lv_obj_t *stateCard = createCard(sleepScreen, 14, 88, 452, 120);
+  lv_obj_t *stateCard = createCard(parent, 14, 88, 452, 120);
   lv_color_t stateColor = COLOR_MUTED;
   String bigText, subText;
   if (sleepInProgress && sleepStartedTime) {
@@ -2742,7 +2738,7 @@ void createSleepScreen() {
 
   // --- Duzy przycisk (opisuje fakt: co dziecko wlasnie zrobilo) ---
   // Gdy czuwa -> klik = "ZASNAL"; gdy spi -> klik = "OBUDZIL SIE".
-  lv_obj_t *toggleBtn = createButton(sleepScreen,
+  lv_obj_t *toggleBtn = createButton(parent,
                                      sleepInProgress ? "OBUDZIL SIE" : "ZASNAL",
                                      14, 220, 452, 66,
                                      sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
@@ -2755,7 +2751,7 @@ void createSleepScreen() {
   int needNight = 0, needDay = 0; sleepNeedMinutes(ageDays, needNight, needDay);
   const int napTgt = napTargetCount(ageDays);
   // Wysokosc 140 (wnetrze 116): 4 linie montserrat_14 od y=26 mieszcza sie z zapasem.
-  lv_obj_t *balCard = createCard(sleepScreen, 14, 298, 452, 140);
+  lv_obj_t *balCard = createCard(parent, 14, 298, 452, 140);
   lv_obj_set_style_bg_color(balCard, lv_color_mix(COLOR_CARD, lv_color_hex(0x6E5FA6), 12), 0);
   createLabel(balCard, "BILANS DNIA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
   String balText;
@@ -2769,7 +2765,7 @@ void createSleepScreen() {
   lv_obj_set_style_text_align(balLabel, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_set_style_text_font(balLabel, &lv_font_montserrat_14, 0);
 
-  loadReusableScreen(sleepScreen);
+  
 }
 
 // ---------------------------- Ekran DIAGNOSTYKA ----------------------------
@@ -2918,15 +2914,12 @@ void weightSaveEvent(lv_event_t *event) {
   createHomeScreen();
 }
 
-void createWeightScreen() {
-  resetReusableScreen(weightScreen);
+void buildWeightTab(lv_obj_t *parent) {
   weightValueLabel = nullptr;
 
-  createLabel(weightScreen, "WAGA DZIECKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_t *backButton = createButton(weightScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+  createLabel(parent, "WAGA DZIECKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
 
-  lv_obj_t *card = createCard(weightScreen, 14, 96, 452, 168);
+  lv_obj_t *card = createCard(parent, 14, 96, 452, 168);
   weightValueLabel = createLabel(card, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_set_style_text_font(weightValueLabel, &lv_font_montserrat_36, 0);
   lv_label_set_text_fmt(weightValueLabel, "%d g", selectedWeightG);
@@ -2949,31 +2942,25 @@ void createWeightScreen() {
   createLabel(card, "2000 g", COLOR_MUTED, LV_ALIGN_BOTTOM_LEFT, 12, -6);
   createLabel(card, "15000 g", COLOR_MUTED, LV_ALIGN_BOTTOM_RIGHT, -12, -6);
 
-  lv_obj_t *saveButton = createButton(weightScreen, "ZAPISZ WAGE", 14, 280, 290, 50, COLOR_GREEN);
+  lv_obj_t *saveButton = createButton(parent, "ZAPISZ WAGE", 14, 280, 290, 50, COLOR_GREEN);
   lv_obj_add_event_cb(saveButton, weightSaveEvent, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *cancelButton = createButton(weightScreen, "ANULUJ", 316, 280, 150, 50, COLOR_MUTED);
+  lv_obj_t *cancelButton = createButton(parent, "ANULUJ", 316, 280, 150, 50, COLOR_MUTED);
   lv_obj_add_event_cb(cancelButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
-
-  loadReusableScreen(weightScreen);
 }
 
 void otherOpenEvent(lv_event_t *event) {
-  createOtherScreen();
+  openTabs(2);
 }
 
 void weightOpenEvent(lv_event_t *event) {
   // Zacznij od ostatniej znanej wagi (jesli jest), inaczej wartosc domyslna.
   if (lastWeightG > 0) selectedWeightG = constrain(lastWeightG, WEIGHT_MIN_G, WEIGHT_MAX_G);
   else selectedWeightG = DEFAULT_WEIGHT_G;
-  createWeightScreen();
+  openTabs(3);
 }
 
-void createCalendarScreen() {
-  resetReusableScreen(calendarScreen);
-
-  createLabel(calendarScreen, "LESNY KALENDARZ - 3 DNI", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_t *backButton = createButton(calendarScreen, "POWROT", 14, 42, 124, 36, COLOR_MUTED);
-  lv_obj_add_event_cb(backButton, backHomeEvent, LV_EVENT_CLICKED, nullptr);
+void buildCalendarTab(lv_obj_t *parent) {
+  createLabel(parent, "LESNY KALENDARZ - 3 DNI", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 10);
 
   const time_t now = time(nullptr);
   const int cardY[3] = {92, 212, 332};
@@ -2986,7 +2973,7 @@ void createCalendarScreen() {
     dayInfo.tm_sec = 0;
     dayInfo.tm_isdst = -1;
     calendarDays[i] = beginningOfDay(mktime(&dayInfo));
-    lv_obj_t *card = createCard(calendarScreen, 14, cardY[i], 452, 108);
+    lv_obj_t *card = createCard(parent, 14, cardY[i], 452, 108);
 
     lv_obj_t *title = lv_label_create(card);
     lv_label_set_text(title, calendarDayTitle(calendarDays[i], i).c_str());
@@ -3007,7 +2994,7 @@ void createCalendarScreen() {
     lv_obj_set_size(summary, 422, 56);
   }
 
-  loadReusableScreen(calendarScreen);
+
 }
 
 void createDayDetailScreen(time_t day) {
@@ -3034,6 +3021,62 @@ void createDayDetailScreen(time_t day) {
 
   loadReusableScreen(dayDetailScreen);
 }
+
+// ===================== ZAKŁADKI (v4.1) =====================
+// Glowne ekrany urzadzenia jako zakladki lv_tabview: KARMIENIE/SEN/INNE/WAGA/
+// KALENDARZ/PODSUMOWANIE. Otwierane z pulpitu (przyciski home); aktywna zakladka
+// budowana na nowo przy kazdym otwarciu (swieze dane). Powrot na pulpit: 30 s
+// bezczynnosci (istniejacy mechanizm w loop) lub przycisk POWROT w rogu.
+void backToDashboardEvent(lv_event_t *event) {
+  createHomeScreen();
+}
+
+void buildTabsScreen() {
+  tabsScreen = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(tabsScreen, COLOR_BACKGROUND, 0);
+  lv_obj_set_style_bg_opa(tabsScreen, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(tabsScreen, LV_OBJ_FLAG_SCROLLABLE);
+  lv_screen_load(tabsScreen);
+
+  tabview = lv_tabview_create(tabsScreen);
+  lv_obj_set_size(tabview, 480, 480);
+  lv_obj_set_pos(tabview, 0, 0);
+  lv_tabview_set_tab_bar_position(tabview, LV_DIR_TOP);
+  lv_tabview_set_tab_bar_size(tabview, 38);
+  lv_obj_set_style_bg_color(tabview, COLOR_BACKGROUND, 0);
+  lv_obj_set_style_bg_opa(tabview, LV_OPA_COVER, 0);
+
+  tabBtn[0] = lv_tabview_add_tab(tabview, "KARMIENIE");
+  tabBtn[1] = lv_tabview_add_tab(tabview, "SEN");
+  tabBtn[2] = lv_tabview_add_tab(tabview, "INNE");
+  tabBtn[3] = lv_tabview_add_tab(tabview, "WAGA");
+  tabBtn[4] = lv_tabview_add_tab(tabview, "KALENDARZ");
+  tabBtn[5] = lv_tabview_add_tab(tabview, "PODSUM");
+
+  lv_obj_t *back = createButton(tabsScreen, "POWROT", 378, 434, 98, 40, COLOR_MUTED);
+  lv_obj_set_style_z_index(back, LV_Z_INDEX_MAX, 0);
+  lv_obj_add_event_cb(back, backToDashboardEvent, LV_EVENT_CLICKED, nullptr);
+}
+
+void openTabs(int8_t idx) {
+  if (idx < 0) idx = 0;
+  if (idx > 5) idx = 5;
+  activeTab = idx;
+  if (!tabsScreen) buildTabsScreen();
+  lv_screen_load(tabsScreen);
+  lv_tabview_set_active(tabview, idx, LV_ANIM_OFF);
+  lv_obj_t *content = tabBtn[idx];
+  lv_obj_clean(content);
+  switch (idx) {
+    case 0: buildFeedTab(content); break;
+    case 1: buildSleepTab(content); break;
+    case 2: buildOtherTab(content); break;
+    case 3: buildWeightTab(content); break;
+    case 4: buildCalendarTab(content); break;
+    case 5: buildChartTab(content); break;
+  }
+}
+
 
 void createHomeScreen() {
   resetReusableScreen(homeScreen);
@@ -3492,7 +3535,7 @@ void showFormConfirm() {
   if (formConfirmOverlay) return;
 
   // Przymglenie tla
-  lv_obj_t *overlay = lv_obj_create(formScreen);
+  lv_obj_t *overlay = lv_obj_create(parent);
   lv_obj_remove_style_all(overlay);
   lv_obj_set_size(overlay, 480, 480);
   lv_obj_set_pos(overlay, 0, 0);
@@ -3531,7 +3574,7 @@ void saveFormEvent(lv_event_t *event) {
   showFormConfirm();
 }
 
-void createFormScreen() {
+void buildFeedTab(lv_obj_t *parent) {
   formDateTimeLabel = nullptr;
   formMlLabel = nullptr;
   formMilkMlLabel = nullptr;
@@ -3549,16 +3592,13 @@ void createFormScreen() {
   piersLeftCtl.label = nullptr;
   piersRightCtl.label = nullptr;
 
-  resetReusableScreen(formScreen);
-  lv_obj_add_flag(formScreen, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_scroll_dir(formScreen, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(formScreen, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_add_flag(parent, LV_OBJ_FLAG_SCROLLABLE); lv_obj_set_scroll_dir(parent, LV_DIR_VER); lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_AUTO);
 
-  createLabel(formScreen, formReturnToCalendar ? "DODAJ KARMIENIE" : "NOWE KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 6);
+  createLabel(parent, formReturnToCalendar ? "DODAJ KARMIENIE" : "NOWE KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 6);
 
   // CZAS w jednej linii: data i godzina razem, bez osobnego podpisu sekcji.
   // Wysokosc 104: etykieta daty + przyciski ±5 MIN mieszcza sie w obramowaniu.
-  lv_obj_t *timeCard = createCard(formScreen, 14, 34, 452, 104);
+  lv_obj_t *timeCard = createCard(parent, 14, 34, 452, 104);
   formDateTimeLabel = createLabel(timeCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 6);
   lv_obj_t *minusButton = createButton(timeCard, "-5 MIN", 18, 38, 198, 40, COLOR_MUTED);
   lv_obj_add_event_cb(minusButton, minus5Event, LV_EVENT_CLICKED, nullptr);
@@ -3566,7 +3606,7 @@ void createFormScreen() {
   lv_obj_add_event_cb(plusButton, plus5Event, LV_EVENT_CLICKED, nullptr);
 
   // PIERS: minuty karmienia osobno dla lewej i prawej strony.
-  lv_obj_t *piersCard = createCard(formScreen, 14, 150, 452, 118);
+  lv_obj_t *piersCard = createCard(parent, 14, 150, 452, 118);
   createLabel(piersCard, "PIERS - CZAS KARMIENIA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
   lv_obj_t *leftName = createLabel(piersCard, "LEWA", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 14, 26);
   lv_obj_set_width(leftName, 204);
@@ -3595,13 +3635,13 @@ void createFormScreen() {
   lv_obj_set_user_data(plusRightBtn, &piersRightCtl);
   lv_obj_add_event_cb(plusRightBtn, piersStepEvent, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(5)));
 
-  formBottleToggleButton = createButton(formScreen, "SZCZEGOLY", 14, 278, 452, 44, COLOR_BLUE);
+  formBottleToggleButton = createButton(parent, "SZCZEGOLY", 14, 278, 452, 44, COLOR_BLUE);
   formBottleToggleLabel = lv_obj_get_child(formBottleToggleButton, 0);
   lv_obj_add_event_cb(formBottleToggleButton, toggleBottleEvent, LV_EVENT_CLICKED, nullptr);
 
   // Wysokosc 144: obszar wewnetrzny (144 - 2*12 padding = 120) miesci suwak, podpisy
   // i rzad przyciskow MATKI/MODYFIKOWANE (dol na y=114) bez wychodzenia poza karte.
-  formMilkCard = createCard(formScreen, 14, 330, 452, 144);
+  formMilkCard = createCard(parent, 14, 330, 452, 144);
   lv_obj_set_style_bg_color(formMilkCard, lv_color_mix(COLOR_CARD, COLOR_BLUE, 12), 0);
   createLabel(formMilkCard, "BUTELKA - ILOSC I RODZAJ", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
   formMilkMlLabel = createLabel(formMilkCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 24);
@@ -3625,17 +3665,17 @@ void createFormScreen() {
   formMilkModifiedLabel = lv_obj_get_child(formMilkModifiedButton, 0);
   lv_obj_add_event_cb(formMilkModifiedButton, milkModifiedEvent, LV_EVENT_CLICKED, nullptr);
 
-  formStatusLabel = createLabel(formScreen, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 25, 384);
+  formStatusLabel = createLabel(parent, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 25, 384);
   lv_obj_set_width(formStatusLabel, 430);
   lv_label_set_long_mode(formStatusLabel, LV_LABEL_LONG_WRAP);
-  formSaveButton = createButton(formScreen, "ZAPISZ KARMIENIE", 14, 330, 290, 50, COLOR_ORANGE);
+  formSaveButton = createButton(parent, "ZAPISZ KARMIENIE", 14, 330, 290, 50, COLOR_ORANGE);
   lv_obj_add_event_cb(formSaveButton, saveFormEvent, LV_EVENT_CLICKED, nullptr);
-  formCancelButton = createButton(formScreen, "ANULUJ", 316, 330, 150, 50, COLOR_MUTED);
+  formCancelButton = createButton(parent, "ANULUJ", 316, 330, 150, 50, COLOR_MUTED);
   lv_obj_add_event_cb(formCancelButton, cancelFormEvent, LV_EVENT_CLICKED, nullptr);
 
   updateFormValues();
   updateExtraMilkVisibility();
-  loadReusableScreen(formScreen);
+  
 }
 
 void openEntryForm() {
@@ -3647,7 +3687,7 @@ void openEntryForm() {
   piersLeftCtl.value = 0;
   piersRightCtl.value = 0;
   selectedEntryTime = time(nullptr);
-  createFormScreen();
+  openTabs(0);
 }
 
 void openEntryFormForDay(time_t day) {
@@ -3667,7 +3707,7 @@ void openEntryFormForDay(time_t day) {
   dayInfo.tm_sec = 0;
   dayInfo.tm_isdst = -1;
   selectedEntryTime = mktime(&dayInfo);
-  createFormScreen();
+  openTabs(0);
 }
 
 // ----------------------- Usługi okresowe i opcjonalne ---------------------------
@@ -3739,14 +3779,10 @@ void updateNightMode() {
 
   lv_obj_t *active = lv_screen_active();
   if (active == homeScreen) createHomeScreen();
-  else if (active == formScreen) createFormScreen();
-  else if (active == calendarScreen) createCalendarScreen();
+  else if (active == tabsScreen) openTabs(activeTab);
   else if (active == dayDetailScreen) createDayDetailScreen(selectedCalendarDay);
-  else if (active == chartScreen) createFeedingChartScreen();
   else if (active == pumpingScreen) createPumpingScreen();
   else if (active == diaperScreen) createDiaperScreen();
-  else if (active == otherScreen) createOtherScreen();
-  else if (active == weightScreen) createWeightScreen();
   else if (active == diagnosticsScreen) createDiagnosticsScreen();
 }
 
