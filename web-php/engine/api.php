@@ -202,34 +202,6 @@ function handle_api(string $route, string $method, Repository $repo): void
         sendJson(200, ['birthWeightG' => Config::BIRTH_WEIGHT_G, 'points' => Domain::weightSeries($repo->allEntries())]);
     }
 
-    if ($route === 'weight-gain' && $method === 'GET') {
-        sendJson(200, Domain::weightGainSeries($repo->allEntries()));
-    }
-
-    // Wspomnienia (v4): raport dnia generowany na żądanie + cache w data/wspomnienia/.
-    if ($route === 'memory' && $method === 'GET') {
-        $date = (string)param('date', '');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) sendJson(400, ['message' => 'Nieprawidlowy format daty (YYYY-MM-DD).']);
-        $report = Domain::dayMemory($repo->allEntries(), $date);
-        // Hybryda: zapis snapshotu do cache (dane dnia "zamrozone" do historii).
-        try {
-            $dir = Config::memoryDir();
-            if (!is_dir($dir)) @mkdir($dir, 0775, true);
-            file_put_contents(Config::memoryFile($date), json_encode($report, JSON_UNESCAPED_UNICODE), LOCK_EX);
-        } catch (Throwable $ex) { /* cache opcjonalny */ }
-        sendJson(200, $report);
-    }
-
-    if ($route === 'memories' && $method === 'GET') {
-        $dates = []; $seen = [];
-        foreach ($repo->allEntries() as $e) {
-            if (!isset($e['date']) || $e['date'] === '') continue;
-            if (in_array($e['date'], $seen)) continue;
-            $seen[] = $e['date']; $dates[] = $e['date'];
-        }
-        sendJson(200, ['dates' => $dates]);
-    }
-
     if ($route === 'entry' && $method === 'POST') {
         $type = param('type');
         if ($type === null || param('when') === null || param('ml') === null) sendJson(400, ['message' => 'Niepelne dane formularza.']);

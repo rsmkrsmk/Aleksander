@@ -858,33 +858,37 @@ function gainBandPerDay(day){
    kotwica dzień 2 = 2850 g) na tle pasma referencyjnego. */
 async function renderGainChart(){
   const host=$('weightGainChart');if(!host)return;host.replaceChildren();
-  let pts=[];try{const d=await request('/api/weight-gain');pts=(d&&d.points)||[]}catch(e){}
-  setText('weightGainNote', pts.length
-    ? 'Słupki = rzeczywisty przyrost między pomiarami. Pasmo = typowy przyrost (25–30 g/dzień przez 3 mies., 15–20 g przez 3–6 mies.).'
+  let ws=[];try{const d=await request('/api/weight-series');ws=(d.points||[]).filter(p=>p&&p.g>0).sort((a,b)=>a.day-b.day)}catch(e){}
+  const A_D=2,A_G=2850;let gains=[];
+  if(ws.length){
+    let seq=[{day:A_D,g:A_G,date:''}];ws.forEach(p=>seq.push({day:p.day,g:p.g,date:p.date}));
+    if(ws[0].day===A_D)seq[1]={day:ws[0].day,g:A_G,date:ws[0].date};
+    for(let i=1;i<seq.length;i++){const d1=seq[i-1].day,w1=seq[i-1].g,d2=seq[i].day,w2=seq[i].g;if(d2<=d1)continue;gains.push({day:d2,date:seq[i].date,gain:Math.round((w2-w1)/(d2-d1))})}
+  }
+  setText('weightGainNote', gains.length
+    ? 'Słupki = rzeczywisty przyrost między pomiarami (kotwica dzień 2 = 2850 g). Pasmo = typowy przyrost (25–30 g/dzień przez 3 mies., 15–20 g przez 3–6 mies.).'
     : 'Brak wystarczających pomiarów. Dodaj co najmniej dwa pomiary wagi, aby zobaczyć przyrost dzienny.');
-  if(!pts.length)return;
-  const maxGain=Math.max(20,Math.ceil((Math.max.apply(null,pts.map(p=>p.gain))+15)/10)*10);
+  if(!gains.length)return;
+  const maxGain=Math.max(20,Math.ceil((Math.max.apply(null,gains.map(p=>p.gain))+15)/10)*10);
   const W=440,H=190,padL=40,padR=10,padT=14,padB=24,plotW=W-padL-padR,plotH=H-padT-padB;
-  const dayMax=Math.max.apply(null,pts.map(p=>p.day));
+  const dayMax=Math.max.apply(null,gains.map(p=>p.day));
   const x=d=>padL+(dayMax<=0?0:d/dayMax*plotW), y=g=>padT+plotH-(g/maxGain)*plotH;
-  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg'});
+  const svg=svgEl('svg',{viewBox:"0 0 " + W + " " + H, class:'weight-svg'});
   for(let i=0;i<=4;i++){const gv=maxGain*i/4,yy=y(gv);svg.append(svgEl('line',{class:'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:4,y:yy+3});t.textContent=Math.round(gv)+'g/d';svg.append(t)}
-  // Pasmo referencyjne (szary pasek na wysokosci g/dzień wg wieku).
-  let band=null;pts.forEach(p=>{const b=gainBandPerDay(p.day);if(!b)return;band=band||[];band.push({x:x(p.day),lo:y(b.hi),hi:y(b.lo)})});
+  let band=null;gains.forEach(p=>{const b=gainBandPerDay(p.day);if(!b)return;band=band||[];band.push({x:x(p.day),lo:y(b.hi),hi:y(b.lo)})});
   if(band&&band.length){let path='';band.forEach((b,i)=>{path+=(i?'L':'M')+b.x.toFixed(1)+' '+b.lo.toFixed(1)+' '});for(let i=band.length-1;i>=0;i--)path+='L'+band[i].x.toFixed(1)+' '+band[i].hi.toFixed(1)+' ';path+='Z';svg.append(svgEl('path',{d:path.trim(),fill:'#a85432',opacity:'0.15',stroke:'none'}))}
-  // Słupki przyrostu.
-  const bw=Math.max(6,Math.min(28,plotW/(pts.length*1.6)));
-  pts.forEach(p=>{
-    const g=p.gain,col=g<0?'var(--danger)':(g>=gainBandPerDay(p.day)&&g<=gainBandPerDay(p.day).hi?'var(--acc)':'var(--feed)');
+  const bw=Math.max(6,Math.min(28,plotW/(gains.length*1.6)));
+  gains.forEach(p=>{
+    const g=p.gain,b=gainBandPerDay(p.day),col=g<0?'#e0483c':(b&&g>=b.lo&&g<=b.hi?'#0f8a5f':'#e0742e');
     const bx=x(p.day),by=y(Math.max(0,g));
     const r=svgEl('rect',{x:bx-bw/2,y:by,width:bw,height:Math.max(1,y(0)-by),rx:3,fill:col});
-    const ti=svgEl('title',{});ti.textContent=`dzień ${p.day}: ${g} g/dzień`;r.append(ti);svg.append(r);
+    const ti=svgEl('title',{});ti.textContent=dzień +p.day+: +g+ g/dzień;r.append(ti);svg.append(r);
   });
-  // Etykiety dni.
-  const days=[...new Set(pts.map(p=>p.day))];const lab=Math.min(days.length,6);
+  const days=[...new Set(gains.map(p=>p.day))];const lab=Math.min(days.length,6);
   for(let i=0;i<lab;i++){const d=days[Math.round(i*(days.length-1)/(lab-1))];const t=svgEl('text',{class:'axis-txt',x:x(d)-8,y:H-6});t.textContent='d'+d;svg.append(t)}
   host.append(svg);
 }
+
 
 /* ============================================================================
    Formularz karmienia / odciągania
@@ -987,26 +991,46 @@ async function postEvent(type,ml=0){
 
 /* ---------- Wspomnienia (v4): raport dnia + kalendarz ---------- */
 const memFmtMin=m=>{if(!m&&m!==0)return '-';const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}min`:`${mm}min`};
+function memAgg(es){
+  const s={feedingCount:0,milkMl:0,motherMilkMl:0,modifiedMilkMl:0,mixedMilkMl:0,piersLeftMin:0,piersRightMin:0,vitaminD:false,weightG:0,bathCount:0,sleepDayMin:0,sleepNightMin:0,napCount:0};
+  const spans=[];let open=null;
+  const toMin=tm=>{const p=tm.split(':');return (+p[0])*60+(+p[1])};
+  (es||[]).forEach(e=>{const t=e.type||'';
+    if(t==='KARMIENIE'){s.feedingCount++;s.piersLeftMin+=e.piersLeftMin||0;s.piersRightMin+=e.piersRightMin||0}
+    else if(t.startsWith('MLEKO')){s.milkMl+=e.ml||0;if(t==='MLEKO_MATKI')s.motherMilkMl+=e.ml||0;else if(t==='MLEKO_MODYFIKOWANE')s.modifiedMilkMl+=e.ml||0;else if(t==='MLEKO_MIESZANE')s.mixedMilkMl+=e.ml||0}
+    else if(t==='WITAMINA_D')s.vitaminD=true;
+    else if(t==='WAGA')s.weightG=e.ml||0;
+    else if(t==='KAPIEL')s.bathCount++;
+    else if(t==='SEN_START')open=e.time;
+    else if(t==='SEN_STOP'&&open){let d=toMin(e.time)-toMin(open);if(d<0)d+=1440;spans.push({from:open,to:e.time,min:d});open=null}
+  });
+  spans.forEach(sp=>{const h=+sp.from.slice(0,2);if(h>=21||h<7)s.sleepNightMin+=sp.min;else s.sleepDayMin+=sp.min});
+  s.napCount=spans.length;
+  return {summary:s,sleepSpans:spans,entries:(es||[]).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''))};
+}
 async function openMemory(){
   show('memoryModal');
   const datesHost=$('memoryDates'),rep=$('memoryReport');
   datesHost.replaceChildren();rep.replaceChildren();
-  try{
-    const d=await request('/api/memories');const dates=(d&&d.dates)||[];dates.sort((a,b)=>b.localeCompare(a));
-    if(!dates.length){const p=document.createElement('p');p.className='hint';p.textContent='Brak zapisanych dni.';datesHost.append(p);return}
-    dates.forEach(ds=>{
-      const b=document.createElement('button');b.type='button';b.className='btn ghost';
-      b.style.cssText='padding:8px 12px;font-size:.78rem;font-weight:800';b.textContent=dateLabel(ds);
-      b.addEventListener('click',()=>renderMemoryReport(ds));
-      datesHost.append(b);
-    });
-    renderMemoryReport(dates[0]);
-  }catch(e){const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p)}
+  const cal=(state.data&&state.data.calendar)||[];
+  const dates=cal.map(c=>c.date).filter(Boolean);
+  dates.forEach(ds=>{
+    const b=document.createElement('button');b.type='button';b.className='btn ghost';
+    b.style.cssText='padding:8px 12px;font-size:.78rem;font-weight:800';b.textContent=dateLabel(ds);
+    b.addEventListener('click',()=>renderMemoryReport(ds));
+    datesHost.append(b);
+  });
+  const inp=document.createElement('input');inp.type='date';inp.style.cssText='padding:8px;border:1px solid var(--brd);border-radius:10px;background:var(--card-solid);color:var(--ink);font:inherit';
+  const go=document.createElement('button');go.type='button';go.className='btn ghost';go.textContent='Pokaż dzień';
+  go.addEventListener('click',()=>{if(inp.value)renderMemoryReport(inp.value)});
+  datesHost.append(inp);datesHost.append(go);
+  renderMemoryReport(dates.length?dates[0]:(state.data&&state.data.nowIso?state.data.nowIso.slice(0,10):''));
 }
+
 async function renderMemoryReport(date){
   const rep=$('memoryReport');rep.replaceChildren();
   const wait=document.createElement('p');wait.className='hint';wait.textContent='Ładowanie...';rep.append(wait);
-  let r;try{r=await request(`/api/memory?date=${encodeURIComponent(date)}`)}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
+  let r;try{r=memAgg((await request(`/api/entries?date=${encodeURIComponent(date)}`).catch(()=>({entries:[]}))).entries||[])}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
   rep.replaceChildren();
   const s=r.summary||{};
   const head=document.createElement('div');head.className='sec';
