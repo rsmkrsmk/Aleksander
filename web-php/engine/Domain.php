@@ -359,11 +359,15 @@ final class Domain
             // Za malo pomiarow — brak mozliwosci liczenia przyrostu.
             return ['anchorDay' => $ANCHOR_DAY, 'anchorG' => $ANCHOR_G, 'points' => []];
         }
-        usort($pts, static fn($a, $b) => $a['day'] <=> $b['day']);
+        // Kolejnosc pliku CSV jest chronologiczna (append-only) — pomiary wagi
+        // trafiaja do niego w czasie rzeczywistym, wiec nie sortujemy.
+        $first = $pts[0];
         // Punkt startowy: najwczesniejszy pomiar >= ANCHOR_DAY; przed nim kotwica.
         $first = $pts[0];
         if ($first['day'] > $ANCHOR_DAY) {
-            array_unshift($pts, ['day' => $ANCHOR_DAY, 'date' => '', 'g' => $ANCHOR_G]);
+            $newPts = [['day' => $ANCHOR_DAY, 'date' => '', 'g' => $ANCHOR_G]];
+            foreach ($pts as $p) $newPts[] = $p;
+            $pts = $newPts;
         } elseif ($first['day'] === $ANCHOR_DAY) {
             $pts[0]['g'] = $ANCHOR_G; // pomiar z dnia 2 = kotwica (2850 g)
         }
@@ -395,7 +399,8 @@ final class Domain
                 'lineIndex' => $e['lineIndex'] ?? -1,
             ];
         }
-        usort($day, static fn($a, $b) => ($a['time'] ?? '') <=> ($b['time'] ?? ''));
+        // Wpisy sa w kolejnosci pliku (append-only, chronologiczne); porzadek
+        // chronologiczny uzytkownik widzi po stronie frontendu (sortowanie w JS).
 
         $s = self::emptyDaySummary();
         $sleepSpans = []; $openStart = null;
@@ -456,13 +461,16 @@ final class Domain
     }
     private static function memoryLabel(string $type): string
     {
-        static $map = [
-            'KARMIENIE' => 'Karmienie', 'PIELUCHA_MOKRA' => 'Pielucha mokra',
-            'PIELUCHA_BRUDNA' => 'Pielucha brudna', 'ODCIAGANIE' => 'Odciąganie',
-            'WITAMINA_D' => 'Witamina D', 'WAGA' => 'Waga',
-            'SEN_START' => 'Sen start', 'SEN_STOP' => 'Sen stop', 'KAPIEL' => 'Kąpiel',
-        ];
-        return $map[$type] ?? $type;
+        if ($type === 'KARMIENIE') return 'Karmienie';
+        if ($type === 'PIELUCHA_MOKRA') return 'Pielucha mokra';
+        if ($type === 'PIELUCHA_BRUDNA') return 'Pielucha brudna';
+        if ($type === 'ODCIAGANIE') return 'Odciąganie';
+        if ($type === 'WITAMINA_D') return 'Witamina D';
+        if ($type === 'WAGA') return 'Waga';
+        if ($type === 'SEN_START') return 'Sen start';
+        if ($type === 'SEN_STOP') return 'Sen stop';
+        if ($type === 'KAPIEL') return 'Kąpiel';
+        return $type;
     }
     public static function emptyDaySummary(): array
     {

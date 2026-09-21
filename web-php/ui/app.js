@@ -992,7 +992,7 @@ async function openMemory(){
   const datesHost=$('memoryDates'),rep=$('memoryReport');
   datesHost.replaceChildren();rep.replaceChildren();
   try{
-    const d=await request('/api/memories');const dates=(d&&d.dates)||[];
+    const d=await request('/api/memories');const dates=(d&&d.dates)||[];dates.sort((a,b)=>b.localeCompare(a));
     if(!dates.length){const p=document.createElement('p');p.className='hint';p.textContent='Brak zapisanych dni.';datesHost.append(p);return}
     dates.forEach(ds=>{
       const b=document.createElement('button');b.type='button';b.className='btn ghost';

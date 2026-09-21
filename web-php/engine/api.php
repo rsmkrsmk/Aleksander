@@ -221,14 +221,13 @@ function handle_api(string $route, string $method, Repository $repo): void
     }
 
     if ($route === 'memories' && $method === 'GET') {
-        $dates = [];
+        $dates = []; $seen = [];
         foreach ($repo->allEntries() as $e) {
             if (!isset($e['date']) || $e['date'] === '') continue;
-            $dates[$e['date']] = true;
+            if (in_array($e['date'], $seen)) continue;
+            $seen[] = $e['date']; $dates[] = $e['date'];
         }
-        $list = array_keys($dates);
-        rsort($list);
-        sendJson(200, ['dates' => $list]);
+        sendJson(200, ['dates' => $dates]);
     }
 
     if ($route === 'entry' && $method === 'POST') {
