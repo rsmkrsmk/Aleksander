@@ -779,16 +779,16 @@ bool initialiseNativeRgbPanel() {
   config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
   // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × linie × 480 × 2 B.
-  //   48 linii => 2 × 48 × 480 × 2 =  90 KB (v4: serwer WWW wylaczony — wiecej RAM wewn.)
-  //   40 linii => 2 × 40 × 480 × 2 =  75 KB (wczesniej, pod presja serwera WWW)
-  // POWOD ZMIANY: w v3 serwer WWW urzadzenia dzialal na tasku loop/LVGL i zabieral RAM
-  // wewnetrzny (obiekt + bufory klienta). Przy 80 liniach po starcie Wi-Fi zostawalo
-  // ~20 KB wolnego heapu i pierwsze zadanie HTTP przepychalo heap za granice -> panic.
-  // W v4 serwer WWW jest WYLACZONY (web_server_disabled.h) — zwalniamy ~kilka KB,
-  // wiec mozemy bezpiecznie podniesc bounce do 48 linii: wieksze paczki DMA = mniej
-  // restartow DMA na klatke = gladszy obraz. Liczba linii musi dzielic 230400 bez
-  // reszty (48 dzieli: 230400 / (480×48) = 10; dozwolone tez 60/80/96/120).
-  config.bounce_buffer_size_px = SCREEN_WIDTH * 48;
+  //   80 linii => 2 × 80 × 480 × 2 = 150 KB (v4: serwer WWW wylaczony, RAM jest)
+  //   48 linii => 2 × 48 × 480 × 2 =  90 KB (poprzedni krok po wylaczeniu WWW)
+  // POWOD ZMIANY: w v3 serwer WWW urzadzenia dzialal na tasku loop/LVGL i przy 80
+  // liniach po starcie Wi-Fi zostawalo ~20 KB wolnego heapu -> panic. W v4 serwer
+  // WWW jest WYLACZONY (web_server_disabled.h): pomiar po Wi-Fi daje ~166 KB wolnego
+  // RAM wewn. (przy 48 liniach). Podniesienie do 80 linii daje WIEKSZE paczki DMA
+  // (mniej transferow na klatke) => szybszy render i gladszy obraz. Zapas po TLS
+  // Telegrama (~45 KB) i tak pozostaje bezpieczny. Linie musza dzielic 230400
+  // bez reszty (80 dzieli: 230400 / (480×80) = 6; dozwolone tez 96/120).
+  config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
   // Nie zwiekszamy: glowna bronia przeciw artefaktom jest wiekszy bounce buffer,
@@ -5770,52 +5770,30 @@ void loop() {
   }
 #endif
 
-  uint32_t lvglNowMs = millis();
-  lv_tick_inc(lvglNowMs - lastLvglTickMs);
-  lastLvglTickMs = lvglNowMs;
-  lv_timer_handler(); // pelny cykl: render + odczyt dotyku
+uint32_t lvglNowMs = millis();
 
-  // --- Szybkie, geste probkowanie SAMEGO dotyku (T1+T2) ---------------------------
-  // Pelny render (powyzej) jest ciezki i rzadki, przez co krotkie tapniecia bywaly
-  // gubione. Tu, zamiast jednego sztywnego delay(8), robimy kilka KROTKICH odczytow
-  // wylacznie urzadzenia wejsciowego: lv_indev_read() wola touchRead + przetwarza
-  // zdarzenie (press/click) BEZ pelnego odrysu ekranu. Dzieki temu GT911 jest
-  // odpytywany znacznie czesciej niz render => reakcja na dotyk jest natychmiastowa.
-  // v4: serwer WWW wylaczony — petla jest lzejsza, wiec zwiekszamy gestosc
-  // probkowania dotyku (6×1 ms zamiast 4×2 ms): GT911 czytany czesciej na
-  // jednostke czasu => krotkie tapniecia nie sa gubione, reakcja na dotyk
-  // jest bardziej naturalna. Calkowity czas (~6 ms + odczyty) podobny.
-  const uint32_t busyBeforeDelayUs = micros() - loopStart; // czas pracy przed przerwami
-  uint32_t samplingWorkUs = 0; // czas PRACY w petli probkowania (bez delay-ow)
-  for (uint8_t s = 0; s < 6; ++s) {
+  // --- Geste probkowanie dotyku PRZED renderem (v4) --------------------------------
+  // Dotyk czytamy NAJPIERW, render PO: lv_indev_read() przetwarza press/release i
+  // moze wyslac zdarzenie CLICKED, ktore odrysowuje sie w TEJ SAMEJ iteracji.
+  // Przy wolnym renderze (DIRECT, pelny redraw) to skraca latencje dotyk->obraz
+  // (wczesniej render byl przed probkowaniem, wiec efekt tapu czekal na nastepny
+  // obieg petli). 8 probek x 1 ms; serwer WWW wylaczony => wiecej RAMU/CPU,
+  // wiec stac nas na gestszy odczyt GT911 niz wczesniejsze 4x2 ms.
+  const uint32_t busyBeforeDelayUs = micros() - loopStart;
+  uint32_t samplingWorkUs = 0;
+  for (uint8_t s = 0; s < 8; ++s) {
     delay(1);
     const uint32_t workStart = micros();
-    // Tick z realnego czasu (bez sztucznego +), zeby nie rozjechal sie zegar LVGL.
     lvglNowMs = millis();
     lv_tick_inc(lvglNowMs - lastLvglTickMs);
     lastLvglTickMs = lvglNowMs;
-    if (touchDriver) lv_indev_read(touchDriver); // sam dotyk, bez pelnego renderu
-#if FEATURE_DEVICE_WEB
-    // OBSLUGA SERWERA WWW MIEDZY PROBKAMI DOTYKU: serwer Arduino WebServer czesto
-    // potrzebuje KILKU wywolan handleClient() na jedno zadanie (accept -> naglowki ->
-    // wysylka). Przy jednym wywolaniu na iteracje petli (a iteracja to ciezki render
-    // + ~8 ms probkowania) kazde zadanie czekalo na kolejny obieg => serwer byl ospaly.
-    // Tu dokladamy obsluge w oknach probkowania — gdy klient byl aktywny na starcie
-    // iteracji LUB wlasnie sie polaczyl w jej trakcie, by nie marnowac cykli, gdy nikt
-    // nie jest polaczony.
-    if (webServerStarted && (httpClientActive || (webServer.client() && webServer.client().connected()))) {
-      // Po dlugiej wysylce poprzedniego handlera resetujemy WDT TUZ PRZED kolejna
-      // obsluga: handleClient() moze czytac cale zadanie (np. upload CSV), a na
-      // wolnym laczach to trwa. Feed w tym miejscu oznacza, ze loop() "nadal zyje"
-      // nawet gdy pojedyncze proszenie o request zabierze sporo czasu.
-      feedWatchdog();
-      webServer.handleClient();
-      httpClientActive = true;
-    }
-#endif
+    if (touchDriver) lv_indev_read(touchDriver);
     samplingWorkUs += micros() - workStart;
   }
   const uint32_t afterDelayStartUs = micros();
+
+  // Pelny render LVGL: timery + odrysowanie zmian wywolanych dotykiem.
+  lv_timer_handler();
 
   // Nie ma okresowego odrysowywania ekranu. Dane widoku zmieniają się tylko po zapisie,
   // wejściu na ekran albo rzeczywistej zmianie stanu Wi-Fi.

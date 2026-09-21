@@ -77,10 +77,10 @@
 #define LV_STDARG_INCLUDE       <stdarg.h>
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
-    /** Rozmiar puli lv_malloc(). 96 KB (v4: serwer WWW wylaczony, wiecej RAMU w PSRAM)
-     *  zmniejsza fragmentacje i realloc-e widgetow przy budowie/zamykaniu ekranow
-     *  (pula jest pobierana z PSRAM — nie obciaza deficytowego RAM wewnetrznego). */
-    #define LV_MEM_SIZE (96U * 1024U)          /**< [bytes] */
+    /** Rozmiar puli lv_malloc(). 128 KB (v4: serwer WWW wylaczony, PSRAM jest duzy)
+     *  minimalizuje fragmentacje i realloc-e widgetow przy budowie/zamykaniu ekranow;
+     *  pula pobierana z PSRAM (LV_MEM_POOL_ALLOC), nie obciaza RAM wewnetrznego. */
+    #define LV_MEM_SIZE (128U * 1024U)          /**< [bytes] */
 
     /** Size of the memory expand for `lv_malloc()` in bytes */
     #define LV_MEM_POOL_EXPAND_SIZE 0
