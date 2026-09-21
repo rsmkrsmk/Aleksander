@@ -873,30 +873,36 @@ async function renderGainChart(){
   const today=(state.data&&state.data.developmentDay!=null&&state.data.developmentDay>=0)?state.data.developmentDay:gains[gains.length-1].day;
   const dataMax=gains[gains.length-1].day;
   const maxDay=Math.max(today,dataMax,A_D+1);
-  let maxG=Math.max(40,Math.max.apply(null,gains.map(p=>p.gain))+12);
-  maxG=Math.ceil(maxG/20)*20;
+  const daily=[];const byDay={};
+  for(let i=0;i<gains.length;i++){const g=gains[i];const s=(i===0)?g.from:(g.from+1);for(let d=s;d<=g.day;d++)byDay[d]=g.gain}
+  byDay[A_D]=gains[0].gain;
+  for(let d=A_D;d<=dataMax;d++)daily.push({day:d,gain:byDay[d]||0});
+  const RAD=3;
+  const smooth=daily.map(p=>{const lo=Math.max(0,p.day-A_D-RAD),hi=Math.min(daily.length-1,p.day-A_D+RAD);let sum=0,cnt=0;for(let i=lo;i<=hi;i++){sum+=daily[i].gain;cnt++}return {day:p.day,gain:sum/cnt}});
+  let maxS=Math.max.apply(null,smooth.map(p=>p.gain));
+  let maxG=Math.max(40,Math.ceil((maxS+8)/10)*10);
   const W=440,H=250,padL=42,padR=12,padT=16,padB=26,plotW=W-padL-padR,plotH=H-padT-padB;
   const x=d=>padL+(maxDay<=A_D?0:(d-A_D)/(maxDay-A_D)*plotW);
   const y=g=>padT+plotH-(g/maxG)*plotH;
   const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg'});
-  for(let gv=0;gv<=maxG;gv+=20){const yy=y(gv);svg.append(svgEl('line',{class:'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:6,y:yy+3});t.textContent=gv;svg.append(t)}
+  for(let gv=0;gv<=maxG;gv+=10){const yy=y(gv);svg.append(svgEl('line',{class:'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:6,y:yy+3});t.textContent=gv;svg.append(t)}
   const bands=[[A_D,Math.min(91,maxDay),25,30],[Math.min(91,maxDay),Math.min(183,maxDay),15,20],[Math.min(183,maxDay),maxDay,10,15]];
   bands.forEach(b=>{if(b[1]<=b[0])return;const bx1=x(b[0]),bx2=x(b[1]),yyHi=y(b[2]),yyLo=y(b[3]);svg.append(svgEl('rect',{x:bx1,y:yyLo,width:Math.max(1,bx2-bx1),height:Math.max(1,yyHi-yyLo),fill:'#12b877',opacity:'0.12',rx:2}));const med=(b[2]+b[3])/2;svg.append(svgEl('line',{x1:bx1,y1:y(med),x2:bx2,y2:y(med),stroke:'#0f8a5f','stroke-width':1.2,'stroke-dasharray':'5 4',opacity:.5}))});
-  const daily=[];for(let d=A_D;d<=dataMax;d++){let val=0;for(let i=0;i<gains.length;i++){if(d>gains[i].from&&d<=gains[i].day){val=gains[i].gain;break}}daily.push({day:d,gain:val})}
-  if(daily.length>1){
-    let area='M'+x(daily[0].day).toFixed(1)+' '+y(0).toFixed(1);daily.forEach(p=>{area+=' L'+x(p.day).toFixed(1)+' '+y(Math.max(0,p.gain)).toFixed(1)});area+=' L'+x(daily[daily.length-1].day).toFixed(1)+' '+y(0).toFixed(1)+' Z';
-    svg.append(svgEl('path',{d:area,fill:'#0f8a5f',opacity:.16,stroke:'none'}));
-    let line='';daily.forEach((p,i)=>{line+=(i?'L':'M')+x(p.day).toFixed(1)+' '+y(p.gain).toFixed(1)+' '});
-    svg.append(svgEl('path',{d:line.trim(),fill:'none',stroke:'#0f8a5f','stroke-width':2.4,'stroke-linecap':'round','stroke-linejoin':'round'}));
+  if(smooth.length>1){
+    let area='M'+x(smooth[0].day).toFixed(1)+' '+y(0).toFixed(1);smooth.forEach(p=>{area+=' L'+x(p.day).toFixed(1)+' '+y(Math.max(0,p.gain)).toFixed(1)});area+=' L'+x(smooth[smooth.length-1].day).toFixed(1)+' '+y(0).toFixed(1)+' Z';
+    svg.append(svgEl('path',{d:area,fill:'#0f8a5f',opacity:.14,stroke:'none'}));
+    let line='';smooth.forEach((p,i)=>{line+=(i?'L':'M')+x(p.day).toFixed(1)+' '+y(p.gain).toFixed(1)+' '});
+    svg.append(svgEl('path',{d:line.trim(),fill:'none',stroke:'#0f8a5f','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));
   }
-  gains.forEach(p=>{const b=gainBandPerDay(p.day);const col=p.gain<=0?'#e0483c':(b&&p.gain>=b.lo&&p.gain<=b.hi?'#0f8a5f':'#e0742e');const c=svgEl('circle',{cx:x(p.day),cy:y(p.gain),r:4.6,fill:col,stroke:'#fff','stroke-width':1.6});const ti=svgEl('title',{});ti.textContent='dzień '+p.day+': '+p.gain+' g/dzień (od dnia '+p.from+')';c.append(ti);svg.append(c)});
+  gains.forEach(p=>{const b=gainBandPerDay(p.day);const col=p.gain<=0?'#e0483c':(b&&p.gain>=b.lo&&p.gain<=b.hi?'#0f8a5f':'#e0742e');const c=svgEl('circle',{cx:x(p.day),cy:y(Math.min(p.gain,maxG)),r:4.6,fill:col,stroke:'#fff','stroke-width':1.6});const ti=svgEl('title',{});ti.textContent='dzień '+p.day+': średnio '+p.gain+' g/dzień (od dnia '+p.from+')';c.append(ti);svg.append(c)});
   const xt=[A_D].concat(gains.map(p=>p.day));const uniq=[...new Set(xt)];const lab=Math.min(uniq.length,5);const stepX=(maxDay-A_D)/Math.max(1,(lab-1));
   for(let i=0;i<lab;i++){const d=Math.round(A_D+stepX*i);const t=svgEl('text',{class:'axis-txt',x:x(d)-9,y:H-7});t.textContent='d'+d;svg.append(t)}
   host.append(svg);
-  const last=gains[gains.length-1];const b=gainBandPerDay(last.day);const avg=Math.round(gains.reduce((a,p)=>a+p.gain,0)/gains.length);
+  const last=gains[gains.length-1];const b=gainBandPerDay(last.day);const avg=Math.round(smooth[smooth.length-1].gain);
   const status=last.gain<=0?'<b style="color:#e0483c">spadek</b>':(last.gain>=b.lo&&last.gain<=b.hi?'<b style="color:#0f8a5f">w normie</b>':'<b style="color:#e0742e">poza normą</b>');
-  const gn=$('weightGainNote');if(gn)gn.innerHTML='Ostatni przyrost: <b>'+last.gain+' g/dzień</b> (norma '+b.lo+'–'+b.hi+') · średnio '+avg+' g/dzień · '+status;
+  const gn=$('weightGainNote');if(gn)gn.innerHTML='Ostatni przyrost: <b>'+last.gain+' g/dzień</b> (norma '+b.lo+'–'+b.hi+') · średnio ostatnich dni: '+avg+' g/dzień · '+status+'<br><span style="opacity:.75">Krzywa = średnia ruchoma 7 dni (wygładzona); kropki = faktyczne pomiary.</span>';
 }
+
 
 
 
