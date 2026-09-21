@@ -199,7 +199,7 @@ struct DaySummary {
   int bathCount;     // liczba kapieli danego dnia (typ KAPIEL, ml=0)
 };
 
-// Grupa pogody dla ikony/opisu wygaszacza (kody wttr.in mapowane na WMO).
+// Grupa pogody dla ikony/opisu wygaszacza (kody WMO z Open-Meteo).
 // Musi być przed pierwszą funkcją pliku — patrz uwaga o prototypach Arduino.
 enum WeatherKind : uint8_t { W_SUN, W_PARTLY, W_CLOUD, W_FOG, W_RAIN, W_SNOW, W_STORM };
 time_t selectedEntryTime = 0;
