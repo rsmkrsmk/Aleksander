@@ -779,17 +779,16 @@ bool initialiseNativeRgbPanel() {
   config.num_fbs = 2;
   // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
   // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × linie × 480 × 2 B.
-  //   80 linii => 2 × 80 × 480 × 2 = 150 KB (poprzednia wartosc — za duzo)
-  //   40 linii => 2 × 40 × 480 × 2 =  75 KB (obecnie: odzyskujemy ~75 KB RAM wewn.)
-  // POWOD ZMIANY: RAM wewnetrzny jest deficytowy i wspoldzielony z Wi-Fi/TLS/LVGL/
-  // stosami zadan oraz serwerem WWW (dziala na tasku loop/LVGL). Przy 80 liniach po
-  // starcie Wi-Fi zostawalo tylko ~20 KB wolnego heapu wewn., przez co pierwsze
-  // zadanie HTTP (streaming strony + rezerwacje String w API) przepychalo heap za
-  // granice -> panic/restart. Glownym zabezpieczeniem przed DRYFEM obrazu jest i tak
-  // restart DMA panelu przy kazdym VSYNC (rgbVsyncCallback), a NIE rozmiar bounce —
-  // dlatego mozemy bezpiecznie zejsc do 40 linii. Liczba linii musi dzielic 230400
-  // bez reszty (40 dzieli: 230400 / (480×40) = 12; dozwolone tez 48/60/80/96/120).
-  config.bounce_buffer_size_px = SCREEN_WIDTH * 40;
+  //   48 linii => 2 × 48 × 480 × 2 =  90 KB (v4: serwer WWW wylaczony — wiecej RAM wewn.)
+  //   40 linii => 2 × 40 × 480 × 2 =  75 KB (wczesniej, pod presja serwera WWW)
+  // POWOD ZMIANY: w v3 serwer WWW urzadzenia dzialal na tasku loop/LVGL i zabieral RAM
+  // wewnetrzny (obiekt + bufory klienta). Przy 80 liniach po starcie Wi-Fi zostawalo
+  // ~20 KB wolnego heapu i pierwsze zadanie HTTP przepychalo heap za granice -> panic.
+  // W v4 serwer WWW jest WYLACZONY (web_server_disabled.h) — zwalniamy ~kilka KB,
+  // wiec mozemy bezpiecznie podniesc bounce do 48 linii: wieksze paczki DMA = mniej
+  // restartow DMA na klatke = gladszy obraz. Liczba linii musi dzielic 230400 bez
+  // reszty (48 dzieli: 230400 / (480×48) = 10; dozwolone tez 60/80/96/120).
+  config.bounce_buffer_size_px = SCREEN_WIDTH * 48;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
   // Nie zwiekszamy: glowna bronia przeciw artefaktom jest wiekszy bounce buffer,
@@ -5782,11 +5781,14 @@ void loop() {
   // wylacznie urzadzenia wejsciowego: lv_indev_read() wola touchRead + przetwarza
   // zdarzenie (press/click) BEZ pelnego odrysu ekranu. Dzieki temu GT911 jest
   // odpytywany znacznie czesciej niz render => reakcja na dotyk jest natychmiastowa.
-  // Sumaryczna przerwa (~8 ms) zblizona do poprzedniej, ale rozbita na 4 probki.
+  // v4: serwer WWW wylaczony — petla jest lzejsza, wiec zwiekszamy gestosc
+  // probkowania dotyku (6×1 ms zamiast 4×2 ms): GT911 czytany czesciej na
+  // jednostke czasu => krotkie tapniecia nie sa gubione, reakcja na dotyk
+  // jest bardziej naturalna. Calkowity czas (~6 ms + odczyty) podobny.
   const uint32_t busyBeforeDelayUs = micros() - loopStart; // czas pracy przed przerwami
   uint32_t samplingWorkUs = 0; // czas PRACY w petli probkowania (bez delay-ow)
-  for (uint8_t s = 0; s < 4; ++s) {
-    delay(2);
+  for (uint8_t s = 0; s < 6; ++s) {
+    delay(1);
     const uint32_t workStart = micros();
     // Tick z realnego czasu (bez sztucznego +), zeby nie rozjechal sie zegar LVGL.
     lvglNowMs = millis();

@@ -77,10 +77,10 @@
 #define LV_STDARG_INCLUDE       <stdarg.h>
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
-    /** Rozmiar puli lv_malloc(). 64 KB wystarcza dla tego UI (etykiety, karty,
-     *  suwaki, kilka ekranow). Pula jest pobierana z PSRAM (LV_MEM_POOL_ALLOC nizej),
-     *  wiec te 64 KB NIE obciazaja deficytowego RAM wewnetrznego. */
-    #define LV_MEM_SIZE (64U * 1024U)          /**< [bytes] */
+    /** Rozmiar puli lv_malloc(). 96 KB (v4: serwer WWW wylaczony, wiecej RAMU w PSRAM)
+     *  zmniejsza fragmentacje i realloc-e widgetow przy budowie/zamykaniu ekranow
+     *  (pula jest pobierana z PSRAM — nie obciaza deficytowego RAM wewnetrznego). */
+    #define LV_MEM_SIZE (96U * 1024U)          /**< [bytes] */
 
     /** Size of the memory expand for `lv_malloc()` in bytes */
     #define LV_MEM_POOL_EXPAND_SIZE 0
