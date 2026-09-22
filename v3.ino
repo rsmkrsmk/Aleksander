@@ -676,12 +676,15 @@ void applyTheme(bool night) {
   }
   // Motyw domyslny LVGL (Widgets Demo look) z zielonym kolorem glownym.
   // Dzien/noc: re-init z dark=true/false (LVGL 9.3 nie ma settera runtime).
-  // Ekrany przebudowywane po zmianie motywu (updateNightMode) dostaja nowy motyw.
+  // UWAGA: lv_theme_default_init WYMAGA nie-NULL fontu (LV_CHECK_ARG font!=NULL);
+  // nullptr => theme nie jest inicjalizowane, a style z NULL-fontami potrafia
+  // wywolac InstructionFetchError przy pierwszym widzecie. Uzywamy montserrat_14.
   if (lv_theme_default_is_inited()) lv_theme_default_deinit();
-  lv_theme_default_init(displayDriver,
+  lv_theme_t *th = lv_theme_default_init(displayDriver,
       night ? lv_color_hex(0x7FB88A) : lv_color_hex(0x356D43),   // primary: zielen
       night ? lv_color_hex(0x7C9BD1) : lv_color_hex(0x3E5E9B),   // secondary: niebieski akcent
-      night, nullptr);
+      night, &lv_font_montserrat_14);
+  if (!th) Serial.println("Motyw: lv_theme_default_init zwrocil NULL (font niedostepny?).");
 }
 
 // Wymagana sekwencja ekspandera TCA9554 z oficjalnego demo Waveshare.
