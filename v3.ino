@@ -624,16 +624,14 @@ lv_obj_t *createButton(lv_obj_t *parent, const char *caption, int x, int y, int 
   lv_obj_t *button = lv_button_create(parent);
   lv_obj_set_pos(button, x, y);
   lv_obj_set_size(button, width, height);
+  // v4.1: styl jak Widgets Demo — motyw domyslny LVGL nadaje kształt (radius,
+  // cień, stan wciśnięcia), a kolor akcji zostaje jako wypelnienie (zawsze widoczny).
   lv_obj_set_style_bg_color(button, color, 0);
   lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(button, 18, 0);
-  lv_obj_set_style_border_width(button, 0, 0);
-  lv_obj_set_style_shadow_color(button, lv_color_mix(color, COLOR_TEXT, 65), 0);
-  lv_obj_set_style_shadow_width(button, 5, 0);
-  lv_obj_set_style_shadow_opa(button, LV_OPA_20, 0);
-  // Efekt wciśnięcia używa wyłącznie stylów dostępnych w LVGL 9.3.
-  lv_obj_set_style_shadow_width(button, 1, LV_STATE_PRESSED);
-  lv_obj_set_style_bg_opa(button, LV_OPA_90, LV_STATE_PRESSED);
+  // Nie ustawiamy radius/cienia recznie — bierzemy je z motywu (jak w demie).
+  // Stan wciśnięcia: ciemniejszy odcień koloru akcji.
+  lv_obj_set_style_bg_color(button, lv_color_mix(color, lv_color_black(), 25), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
 
   lv_obj_t *label = lv_label_create(button);
   lv_label_set_text(label, caption);
@@ -684,7 +682,14 @@ void applyTheme(bool night) {
       night ? lv_color_hex(0x7FB88A) : lv_color_hex(0x356D43),   // primary: zielen
       night ? lv_color_hex(0x7C9BD1) : lv_color_hex(0x3E5E9B),   // secondary: niebieski akcent
       night, &lv_font_montserrat_14);
-  if (!th) Serial.println("Motyw: lv_theme_default_init zwrocil NULL (font niedostepny?).");
+  if (th) {
+    // KLUCZOWE: lv_theme_default_init NIE ustawia motywu na wyswietlaczu —
+    // trzeba to zrobic recznie, inaczej motyw nie zadziala na widgetach
+    // (przyciski/zakladki/suwaki zostalyby bez stylu motywu).
+    lv_display_set_theme(displayDriver, th);
+  } else {
+    Serial.println("Motyw: lv_theme_default_init zwrocil NULL (font niedostepny?).");
+  }
 }
 
 // Wymagana sekwencja ekspandera TCA9554 z oficjalnego demo Waveshare.
