@@ -3038,11 +3038,18 @@ void buildTabsScreen() {
   lv_obj_clear_flag(tabsScreen, LV_OBJ_FLAG_SCROLLABLE);
   lv_screen_load(tabsScreen);
 
+  // Gorny pasek: przycisk POWROT na pulpit (bez pływającego elementu — brak
+  // lv_obj_set_style_z_index w tym buildzie LVGL; pasek nie koliduje z trescia).
+  lv_obj_t *back = createButton(tabsScreen, "POWROT", 8, 2, 92, 30, COLOR_MUTED);
+  lv_obj_add_event_cb(back, backToDashboardEvent, LV_EVENT_CLICKED, nullptr);
+  createLabel(tabsScreen, "ZAKLADKI", COLOR_MUTED, LV_ALIGN_TOP_MID, 0, 10);
+
+  // Tabview ponizej paska (tresc zakladek przewijalna w pionie — lv_obj_clean/scroll).
   tabview = lv_tabview_create(tabsScreen);
-  lv_obj_set_size(tabview, 480, 480);
-  lv_obj_set_pos(tabview, 0, 0);
+  lv_obj_set_size(tabview, 480, 444);
+  lv_obj_set_pos(tabview, 0, 34);
   lv_tabview_set_tab_bar_position(tabview, LV_DIR_TOP);
-  lv_tabview_set_tab_bar_size(tabview, 38);
+  lv_tabview_set_tab_bar_size(tabview, 36);
   lv_obj_set_style_bg_color(tabview, COLOR_BACKGROUND, 0);
   lv_obj_set_style_bg_opa(tabview, LV_OPA_COVER, 0);
 
@@ -3052,10 +3059,6 @@ void buildTabsScreen() {
   tabBtn[3] = lv_tabview_add_tab(tabview, "WAGA");
   tabBtn[4] = lv_tabview_add_tab(tabview, "KALENDARZ");
   tabBtn[5] = lv_tabview_add_tab(tabview, "PODSUM");
-
-  lv_obj_t *back = createButton(tabsScreen, "POWROT", 378, 434, 98, 40, COLOR_MUTED);
-  lv_obj_set_style_z_index(back, LV_Z_INDEX_MAX, 0);
-  lv_obj_add_event_cb(back, backToDashboardEvent, LV_EVENT_CLICKED, nullptr);
 }
 
 void openTabs(int8_t idx) {
@@ -3067,6 +3070,7 @@ void openTabs(int8_t idx) {
   lv_tabview_set_active(tabview, idx, LV_ANIM_OFF);
   lv_obj_t *content = tabBtn[idx];
   lv_obj_clean(content);
+  lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE); lv_obj_set_scroll_dir(content, LV_DIR_VER); lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
   switch (idx) {
     case 0: buildFeedTab(content); break;
     case 1: buildSleepTab(content); break;
@@ -3534,8 +3538,9 @@ void confirmFormSave(lv_event_t *event) {
 void showFormConfirm() {
   if (formConfirmOverlay) return;
 
-  // Przymglenie tla
-  lv_obj_t *overlay = lv_obj_create(parent);
+  // Przymglenie tla — overlay na CAŁYM ekranie zakładek (tabsScreen), bo formularz
+  // zyje teraz w zakladce KARMIENIE; kolejne dziecko jest rysowane na wierzchu.
+  lv_obj_t *overlay = lv_obj_create(tabsScreen);
   lv_obj_remove_style_all(overlay);
   lv_obj_set_size(overlay, 480, 480);
   lv_obj_set_pos(overlay, 0, 0);
