@@ -1138,31 +1138,34 @@ async function openMemory(){
   const cal=(state.data&&state.data.calendar)||[];
   const dates=cal.map(c=>c.date).filter(Boolean);
   dates.forEach(ds=>{
-    const b=document.createElement('button');b.type='button';b.className='btn ghost';
-    b.style.cssText='padding:8px 12px;font-size:.78rem;font-weight:800';b.textContent=dateLabel(ds);
+    const b=document.createElement('button');b.type='button';b.className='mem-chip';b.dataset.date=ds;b.textContent=dateLabel(ds);
     b.addEventListener('click',()=>renderMemoryReport(ds));
     datesHost.append(b);
   });
-  const inp=document.createElement('input');inp.type='date';inp.style.cssText='padding:8px;border:1px solid var(--brd);border-radius:10px;background:var(--card-solid);color:var(--ink);font:inherit';
-  const go=document.createElement('button');go.type='button';go.className='btn ghost';go.textContent='Pokaż dzień';
-  go.addEventListener('click',()=>{if(inp.value)renderMemoryReport(inp.value)});
-  datesHost.append(inp);datesHost.append(go);
+  const inp=document.createElement('input');inp.type='date';inp.className='mem-date-in';inp.setAttribute('aria-label','Wybierz dzień');
+  inp.addEventListener('change',()=>{if(inp.value)renderMemoryReport(inp.value)});
+  datesHost.append(inp);
   renderMemoryReport(dates.length?dates[0]:(state.data&&state.data.nowIso?state.data.nowIso.slice(0,10):''));
 }
 
+function memShowPreview(date,r){
+  document.querySelectorAll('#memoryDates .mem-chip').forEach(c=>c.classList.toggle('on',c.dataset.date===date));
+  const img=$('pcPreview'),sk=$('pcSkel');if(!img)return;
+  try{img.src=memPostcard(date,r);img.hidden=false;if(sk)sk.hidden=true}catch(e){img.hidden=true;if(sk){sk.hidden=false;sk.textContent='Nie udało się wygenerować podglądu.'}}
+}
 async function renderMemoryReport(date){
   const rep=$('memoryReport');if(!rep)return;rep.replaceChildren();
   const wait=document.createElement('p');wait.className='hint';wait.textContent='Ładowanie...';rep.append(wait);
   let r;try{r=memAgg((await request(`/api/entries?date=${encodeURIComponent(date)}`).catch(()=>({entries:[]}))).entries||[]);const ti=(state.data&&state.data.nowIso||'').slice(0,10);r.dayOfLife=ti?((state.data&&state.data.developmentDay||0)-Math.round((new Date(ti)-new Date(date))/86400000)):null}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
   rep.replaceChildren();
   const s=r.summary||{};
-  state.memDate=date;state.memReport=r;
+  state.memDate=date;state.memReport=r;memShowPreview(date,r);
   const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:baseline;margin:2px 0 14px';
   const hd=document.createElement('h2');hd.style.cssText='margin:0;font-size:1.35rem;letter-spacing:-.02em';hd.textContent=dateLabel(date);
   const hd2=document.createElement('span');hd2.style.cssText='font-size:.78rem;color:var(--muted);font-weight:800';hd2.textContent='dzień życia '+(r.dayOfLife!=null?r.dayOfLife:'-');
   head.append(hd,hd2);rep.append(head);
-  const pill=(k,v,c)=>{const p=document.createElement('div');p.style.cssText='flex:1 1 0;min-width:0;border-radius:16px;padding:10px 6px;text-align:center;box-shadow:var(--sh-1)';p.style.background='color-mix(in srgb,'+c+' 16%,transparent)';p.style.border='1px solid '+c;p.innerHTML='<div style="font-size:1.25rem;font-weight:800;line-height:1.1;color:'+c+'">'+v+'</div><div style="font-size:.62rem;color:var(--muted);font-weight:700;margin-top:3px">'+k+'</div>';return p};
-  const wrap=document.createElement('div');wrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px';
+  const pill=(k,v,c)=>{const p=document.createElement('div');p.style.cssText='min-width:0;border-radius:16px;padding:10px 6px;text-align:center;box-shadow:var(--sh-1)';p.style.background='color-mix(in srgb,'+c+' 16%,transparent)';p.style.border='1px solid '+c;p.innerHTML='<div style="font-size:1.25rem;font-weight:800;line-height:1.1;color:'+c+'">'+v+'</div><div style="font-size:.62rem;color:var(--muted);font-weight:700;margin-top:3px">'+k+'</div>';return p};
+  const wrap=document.createElement('div');wrap.style.cssText='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px';
   wrap.append(pill('Karmienia',s.feedingCount||0,'var(--feed)'));
   wrap.append(pill('Mleko',(s.milkMl||0)+' ml','var(--milk)'));
   wrap.append(pill('Sen',memFmtMin((s.sleepDayMin||0)+(s.sleepNightMin||0)),'var(--sleep)'));

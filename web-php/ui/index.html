@@ -71,7 +71,7 @@ body{
   background-attachment:fixed;min-height:100dvh;overflow-x:hidden;
   transition:background .5s ease,color .35s ease;
 }
-.wrap{width:min(100%,960px);margin:0 auto;padding:max(16px,env(safe-area-inset-top)) clamp(12px,3.5vw,24px) calc(104px + env(safe-area-inset-bottom))}
+.wrap{width:min(100%,960px);margin:0 auto;padding:max(16px,env(safe-area-inset-top)) clamp(12px,3.5vw,24px) calc(176px + env(safe-area-inset-bottom))}
 @media(min-width:860px){.wrap{padding-bottom:40px}}
 
 h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;line-height:1.1}
@@ -362,6 +362,17 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .wg-stat.wg-ok .wg-v{color:var(--acc-ink)} .wg-stat.wg-low .wg-v{color:var(--feed)} .wg-stat.wg-high .wg-v{color:var(--milk)} .wg-stat.wg-neg .wg-v{color:var(--danger)}
 .wg-foot{margin:12px 2px 0;text-align:left}
 @media(max-width:380px){.wg-stats{grid-template-columns:1fr}}
+/* okno wspomnień */
+.mem-dates{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 10px;margin:0 -2px 10px;scrollbar-width:none;align-items:center}
+.mem-dates::-webkit-scrollbar{display:none}
+.mem-chip{flex:0 0 auto;padding:9px 14px;border-radius:999px;border:1px solid var(--brd);background:var(--card-2);color:var(--ink-2);font:inherit;font-size:.78rem;font-weight:800;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.mem-chip.on{background:var(--acc);border-color:var(--acc);color:#fff;box-shadow:0 6px 16px -8px var(--acc)}
+.mem-date-in{flex:0 0 auto;padding:8px 10px;border:1px solid var(--brd);border-radius:12px;background:var(--card-solid);color:var(--ink);font:inherit;font-size:.78rem}
+.pc-wrap{position:relative;border-radius:22px;overflow:hidden;background:var(--card-2);border:1px solid var(--brd);box-shadow:var(--sh-1);aspect-ratio:1080/1400;max-height:62dvh;margin:0 auto 14px;width:auto;max-width:100%}
+.pc-img{display:block;width:100%;height:100%;object-fit:contain}
+.pc-skel{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-weight:700;font-size:.85rem}
+.pc-skel[hidden]{display:none}
+.pc-dl{margin-bottom:18px}
 /* mini kalendarz kąpieli */
 .bcal-sum{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
 .bcal-pill{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:16px;background:rgba(20,184,166,.12);border:1px solid rgba(20,184,166,.30)}
@@ -858,8 +869,9 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 <div class="modal" id="memoryModal" aria-hidden="true"><div class="sheet" role="dialog" aria-modal="true">
   <div class="grip"></div>
   <div class="m-head"><h2>Wspomnienia</h2><button class="x" data-action="home" aria-label="Zamknij"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-  <div id="memoryDates" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
-  <button type="button" class="btn acc" data-action="memory-postcard" style="margin-bottom:12px;width:100%"><svg viewBox="0 0 24 24" fill="none" style="vertical-align:-4px;margin-right:6px"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 9h10M7 12h10M7 15h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".7"/></svg>Pobierz pocztówkę (PNG)</button>
+  <div id="memoryDates" class="mem-dates"></div>
+  <div class="pc-wrap"><div class="pc-skel" id="pcSkel">Przygotowuję pocztówkę…</div><img id="pcPreview" class="pc-img" alt="Pocztówka wspomnienia z wybranego dnia" hidden></div>
+  <button type="button" class="btn acc pc-dl" data-action="memory-postcard"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Pobierz pocztówkę (PNG)</button>
   <div id="memoryReport"></div>
 </div></div>
 <script>
