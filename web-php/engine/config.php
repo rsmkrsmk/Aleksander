@@ -31,6 +31,9 @@ final class Config
     const DEFAULT_WEIGHT_G = 3700;
     const BIRTH_WEIGHT_G = 3080;
 
+    // Planowany odstep miedzy kapielami (dni) — uzywany przez mini kalendarz kapieli.
+    const BATH_INTERVAL_DAYS = 3;
+
     // Progi belki licznika (minuty od ostatniego karmienia).
     const COUNTER_WARN_MIN = 180;
     const COUNTER_BLINK_MIN = 240;

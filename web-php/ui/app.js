@@ -179,7 +179,9 @@ function render(data){
       const pb=data.lastBath.split('-');const then=new Date(+pb[0],+pb[1]-1,+pb[2]);
       const nowN=new Date();const nowD=new Date(nowN.getFullYear(),nowN.getMonth(),nowN.getDate());
       const days=Math.max(0,Math.round((nowD-then)/86400000));
-      bathEl.textContent=days===0?'Ostatnia kąpiel: dzisiaj':`Ostatnia kąpiel: ${days} dni temu`;
+      const iv=data.bathIntervalDays||3;const dn=iv-days; // dni do planowanej kąpieli
+      const nextTxt=dn<0?`zaległa o ${-dn} ${-dn===1?'dzień':'dni'}`:dn===0?'dziś':dn===1?'jutro':`za ${dn} dni`;
+      bathEl.textContent=(days===0?'Ostatnia kąpiel: dzisiaj':`Ostatnia kąpiel: ${days} dni temu`)+` · następna: ${nextTxt}`;
     }else{bathEl.textContent='Ostatnia kąpiel: brak'}
   }
 
@@ -517,10 +519,13 @@ function renderChart(cal){
   let html='<table class="dtable"><tr><th>Dzień</th><th>Karm.</th><th>Matki</th><th>Mod.</th>'+(anyMixed?'<th>Miesz.</th>':'')+'<th>Suma</th></tr>';
   cal.forEach(d=>{const label=(d.label||'').split(' - ')[0];html+=`<tr><td>${label}</td><td>${d.feedingCount}</td><td>${d.motherMilkMl} ml</td><td>${d.modifiedMilkMl} ml</td>`+(anyMixed?`<td>${d.mixedMilkMl||0} ml</td>`:'')+`<td class="ok">${d.milkMl||0} ml</td></tr>`});
   html+='</table>';$('extraTable').innerHTML=html;
-  // --- Kąpiele (5 dni) ---
-  const anyBath=cal.some(d=>(d.bathCount||0)>0);
-  const bathHtml=anyBath?'<div class="bath5-title" style="margin-top:14px;font-size:.72rem;font-weight:800;letter-spacing:.05em;color:var(--muted);text-transform:uppercase">Kąpiele — 5 dni</div><div style="display:flex;gap:6px;align-items:flex-end;height:70px;margin-top:6px">'+cal.map(d=>{const n=d.bathCount||0;const maxB=Math.max(1,...cal.map(x=>x.bathCount||0));const h=n?Math.max(6,Math.round(n/maxB*60)):2;return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end"><div style="width:60%;border-radius:6px 6px 2px 2px;height:${h}px;background:linear-gradient(180deg,var(--bath-2),var(--bath))"></div><div style="font-size:.58rem;color:var(--muted);margin-top:3px">${(d.label||'').split(' - ')[0]}</div></div>`}).join('')+'</div>':'';
-  const extraEl=$('extraTable');extraEl.insertAdjacentHTML('beforeend',bathHtml);
+  // --- Kąpiele: mini kalendarz (zamiast słupków z 5 dni) ---
+  const extraEl=$('extraTable');
+  const bathBox=document.createElement('div');bathBox.style.marginTop='14px';
+  bathBox.append(bcalElem('div','bath5-title','Kąpiele'));
+  bathBox.firstChild.style.cssText='font-size:.72rem;font-weight:800;letter-spacing:.05em;color:var(--muted);text-transform:uppercase;margin-bottom:8px';
+  const bathHost=document.createElement('div');bathBox.append(bathHost);extraEl.append(bathBox);
+  renderBathCalendar(bathHost);
 }
 /* Odstępy karmień dziś — renderowane w widoku "Wykresy". */
 async function renderGaps(){
@@ -702,7 +707,7 @@ async function renderHistory(period){
   host.append(histBarChart('Pieluchy w czasie',B,b=>b.wet+b.dirty,'diaper',''));
   if(B.some(b=>b.sleepMin>0))host.append(histBarChart('Sen (godziny) w czasie',B,b=>Math.round(b.sleepMin/60*10)/10,'sleep',' h'));
   if(B.some(b=>b.pump>0))host.append(histBarChart('Odciąganie (ml) w czasie',B,b=>b.pump,'milk',' ml'));
-  if(B.some(b=>b.baths>0))host.append(histBarChart('Kąpiele w czasie',B,b=>b.baths,'bath',''));
+  host.append(bathCalendarCard());
 
   // --- WAGA w okresie ---
   try{
@@ -801,6 +806,85 @@ async function saveWeight(){
   n.textContent='Zapisywanie…';
   try{const r=await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type:'WAGA',ml:String(grams)})});n.className='notice ok';n.textContent=r.message||'Zapisano.';toast('Zapisano wagę');await refresh();renderWeightChart()}
   catch(e){n.className='notice error';n.textContent=e.message}
+}
+/* ---------- Kąpiele: mini kalendarz (ostatnia + planowana co N dni) ---------- */
+const BCAL_MONTHS=['styczeń','luty','marzec','kwiecień','maj','czerwiec','lipiec','sierpień','wrzesień','październik','listopad','grudzień'];
+const BCAL_DOW=['Pn','Wt','Śr','Cz','Pt','So','Nd'];
+const BCAL_DOW_SHORT=['nd','pn','wt','śr','cz','pt','sb'];
+const bcalState={info:null,y:null,m:null};
+function bcalParse(iso){const p=String(iso).split('-');return new Date(+p[0],+p[1]-1,+p[2])}
+function bcalIso(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
+function bcalShort(iso){const d=bcalParse(iso);return `${BCAL_DOW_SHORT[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`}
+function bcalAgo(n){return n<=0?'dzisiaj':n===1?'wczoraj':`${n} dni temu`}
+function bcalIn(n){return n<=0?'dzisiaj':n===1?'jutro':`za ${n} dni`}
+function bcalElem(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+async function renderBathCalendar(host){
+  if(!host)return;
+  if(!bcalState.info)host.replaceChildren(bcalElem('p','empty','Wczytywanie…'));
+  try{
+    const info=await request('/api/bath-calendar');
+    bcalState.info=info;
+    if(bcalState.y==null){const t=bcalParse(info.today);bcalState.y=t.getFullYear();bcalState.m=t.getMonth()}
+    drawBathCalendar(host);
+  }catch(e){host.replaceChildren(bcalElem('p','empty','Nie udało się wczytać kalendarza kąpieli.'))}
+}
+function drawBathCalendar(host){
+  const info=bcalState.info;if(!info)return;
+  const baths=new Set(info.dates||[]);
+  const late=info.next!=null&&info.daysToNext<0;
+  const due=info.next?(late?info.today:info.next):null; // zaległa kąpiel = „dziś”
+  const root=bcalElem('div','bcal');
+
+  const sum=bcalElem('div','bcal-sum');
+  const a=bcalElem('div','bcal-pill');
+  a.append(bcalElem('span','bcal-k','OSTATNIA'),
+           bcalElem('span','bcal-v',info.last?bcalShort(info.last):'brak'),
+           bcalElem('span','bcal-s',info.last?bcalAgo(info.daysSinceLast):'nie zapisano jeszcze kąpieli'));
+  const b=bcalElem('div','bcal-pill'+(late?' late':''));
+  let nv='—',ns='po pierwszej kąpieli';
+  if(info.next){
+    if(late){const n=-info.daysToNext;nv='dziś';ns=`zaległa o ${n} ${n===1?'dzień':'dni'}`}
+    else{nv=bcalShort(info.next);ns=bcalIn(info.daysToNext)}
+  }
+  b.append(bcalElem('span','bcal-k',`NASTĘPNA · CO ${info.intervalDays} DNI`),bcalElem('span','bcal-v',nv),bcalElem('span','bcal-s',ns));
+  sum.append(a,b);
+
+  const nav=bcalElem('div','bcal-nav');
+  const prev=bcalElem('button','bcal-arrow','‹');prev.type='button';prev.setAttribute('aria-label','Poprzedni miesiąc');
+  const next=bcalElem('button','bcal-arrow','›');next.type='button';next.setAttribute('aria-label','Następny miesiąc');
+  const shift=n=>{let m=bcalState.m+n,y=bcalState.y;if(m<0){m=11;y--}else if(m>11){m=0;y++}bcalState.m=m;bcalState.y=y;drawBathCalendar(host)};
+  prev.addEventListener('click',()=>shift(-1));next.addEventListener('click',()=>shift(1));
+  nav.append(prev,bcalElem('div','bcal-title',`${BCAL_MONTHS[bcalState.m]} ${bcalState.y}`),next);
+
+  const grid=bcalElem('div','bcal-grid');
+  BCAL_DOW.forEach(n=>grid.append(bcalElem('div','bcal-h',n)));
+  const first=new Date(bcalState.y,bcalState.m,1);
+  const lead=(first.getDay()+6)%7; // poniedziałek = 0
+  const days=new Date(bcalState.y,bcalState.m+1,0).getDate();
+  for(let i=0;i<lead;i++)grid.append(bcalElem('div','bcal-d bcal-e'));
+  for(let d=1;d<=days;d++){
+    const iso=bcalIso(bcalState.y,bcalState.m,d);
+    let cls='bcal-d';
+    if(baths.has(iso))cls+=' bath';
+    else if(iso===due)cls+=' due'+(late?' late':'');
+    if(iso===info.today)cls+=' today';
+    const c=bcalElem('div',cls,String(d));
+    if(baths.has(iso))c.title='Kąpiel';else if(iso===due)c.title=late?'Kąpiel zaległa':'Planowana kąpiel';
+    grid.append(c);
+  }
+
+  const legend=bcalElem('div','bcal-legend');
+  const lg=(cls,t)=>{const s=bcalElem('span','');const i=bcalElem('i',cls);s.append(i,document.createTextNode(t));return s};
+  legend.append(lg('l-bath','kąpiel'),lg('l-due','planowana'),lg('l-today','dziś'));
+  root.append(sum,nav,grid,legend);
+  host.replaceChildren(root);
+}
+function bathCalendarCard(){
+  const wrap=document.createElement('section');wrap.className='card hist-chart';wrap.style.marginTop='16px';
+  wrap.append(bcalElem('div','eyebrow','Kąpiele'));
+  const host=bcalElem('div','');host.style.marginTop='12px';wrap.append(host);
+  renderBathCalendar(host);
+  return wrap;
 }
 /* ---------- Kąpiel (tylko data) ---------- */
 function openBath(){const inp=$('bathDate');const d=new Date();inp.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;const n=$('bathNotice');if(n){n.className='notice';n.textContent=''}show('bathModal')}

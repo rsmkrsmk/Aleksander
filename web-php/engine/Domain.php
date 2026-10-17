@@ -327,6 +327,38 @@ final class Domain
         }
         return $out;
     }
+    // Podsumowanie kapieli dla mini kalendarza: dni z kapiela (bez godzin), ostatnia
+    // kapiel i planowana nastepna (ostatnia + BATH_INTERVAL_DAYS). daysToNext < 0 =
+    // kapiel zalegla. Wpisy moga byc w dowolnej kolejnosci (sortujemy po dacie).
+    public static function bathSummary(array $entries, DateTimeImmutable $now): array
+    {
+        $set = [];
+        foreach ($entries as $e) {
+            if (($e['type'] ?? '') === 'KAPIEL' && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$e['date'])) {
+                $set[$e['date']] = true;
+            }
+        }
+        $dates = array_keys($set);
+        sort($dates);
+        $interval = Config::BATH_INTERVAL_DAYS;
+        $today = $now->format('Y-m-d');
+        $res = [
+            'intervalDays' => $interval, 'today' => $today, 'dates' => $dates,
+            'last' => null, 'next' => null, 'daysSinceLast' => null, 'daysToNext' => null,
+        ];
+        if ($dates) {
+            $last = end($dates);
+            $lastD = new DateTimeImmutable($last . ' 00:00:00');
+            $todayD = new DateTimeImmutable($today . ' 00:00:00');
+            $next = $lastD->modify('+' . $interval . ' days');
+            $res['last'] = $last;
+            $res['next'] = $next->format('Y-m-d');
+            $res['daysSinceLast'] = (int)$lastD->diff($todayD)->format('%r%a');
+            $res['daysToNext'] = (int)$todayD->diff($next)->format('%r%a');
+        }
+        return $res;
+    }
+
     public static function weightSeries(array $entries): array
     {
         $points = [];

@@ -902,6 +902,50 @@ void requestRgbResync() {
 #endif
 }
 
+// --- Ochrona obrazu na czas zapisu do flasha (LittleFS) ---------------------------
+// Dokumentacja Espressif (esp_lcd RGB + FAQ): w trybie bounce buffer panel NIE
+// dziala, gdy cache pamieci zewnetrznej jest wylaczony — a tak jest podczas zapisu
+// i kasowania sektorow flasha (PSRAM i flash dziela magistrale SPI). Bufory bounce
+// nie sa wtedy uzupelniane, DMA czyta zle dane i obraz przesuwa sie "jak na rolce"
+// (czesto na stale). Opcji CONFIG_LCD_RGB_ISR_IRAM_SAFE / SPIRAM_XIP_FROM_PSRAM nie da
+// sie wlaczyc w Arduino IDE, wiec stosujemy obejscie zalecane w FAQ Espressif:
+// na czas zapisu OBNIZAMY zegar pikseli (bufor bounce starcza wtedy na dluzej),
+// a po zapisie przywracamy go i zglaszamy restart DMA. Panel moze na ten czas
+// zmigotac — to krotkie (zapisy zdarzaja sie tylko po zmianie danych na WWW).
+// Funkcja deklarowana jako "weak": jesli rdzen Arduino jej nie ma, ochrona
+// po prostu sie wylacza (brak bledu linkowania).
+extern "C" esp_err_t esp_lcd_rgb_panel_set_pclk(esp_lcd_panel_handle_t panel,
+                                               uint32_t freq_hz) __attribute__((weak));
+constexpr uint32_t RGB_PCLK_NORMAL_HZ = 6000000;
+// Pelny bufor bounce (80 linii) starcza przy 1 MHz na ~44 ms (przy 6 MHz tylko ~7 ms),
+// czyli na czas typowego kasowania sektora flasha. Do dostrojenia na urzadzeniu.
+constexpr uint32_t RGB_PCLK_FLASH_SAFE_HZ = 1000000;
+static int flashGuardDepth = 0;
+
+// RAII: tworzymy na poczatku operacji zapisujacej do flasha; destruktor przywraca zegar.
+// Zagniezdzenia i wywolania z roznych rdzeni sa liczone atomowo.
+struct FlashWriteGuard {
+  bool active = false;
+  FlashWriteGuard() {
+    if (!rgbPanel || !esp_lcd_rgb_panel_set_pclk) return;
+    active = true;
+    if (__atomic_add_fetch(&flashGuardDepth, 1, __ATOMIC_SEQ_CST) == 1) {
+      esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_FLASH_SAFE_HZ);
+      // Nowy zegar zaczyna dzialac od najblizszego VSYNC (do ~1 klatki = 47 ms przy 6 MHz).
+      delay(70);
+    }
+  }
+  ~FlashWriteGuard() {
+    if (!active) return;
+    if (__atomic_sub_fetch(&flashGuardDepth, 1, __ATOMIC_SEQ_CST) == 0) {
+      esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_NORMAL_HZ);
+      requestRgbResync();
+    }
+  }
+  FlashWriteGuard(const FlashWriteGuard &) = delete;
+  FlashWriteGuard &operator=(const FlashWriteGuard &) = delete;
+};
+
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
   static int16_t lastX = 0;
   static int16_t lastY = 0;
@@ -1449,6 +1493,7 @@ bool deleteEntryByIndex(int entryIndex, String &removedDescription) {
   // Jeden przebieg zrodla -> zapis do pliku tymczasowego z pominieciem wybranego
   // wiersza. Dzieki temu operacja dziala niezaleznie od rozmiaru historii i nie
   // tworzy duzego, fragmentujacego bloku w RAM wewnetrznym (dawniej caly plik + substringi).
+  FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu (patrz definicja)
   File src = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!src) return false;
 
@@ -1519,6 +1564,7 @@ bool updateFeeding(int feedLineIndex, time_t when, int motherMl, int modifiedMl,
   if (!storageReady) { err = "Pamiec niedostepna."; return false; }
   if (feedLineIndex < 0) { err = "Nieprawidlowy indeks."; return false; }
 
+  FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu
   File src = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!src) { err = "Nie mozna otworzyc historii."; return false; }
   File dst = LittleFS.open("/karmienia.tmp", FILE_WRITE);
@@ -1650,6 +1696,7 @@ bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft, int 
   strftime(datePart, sizeof(datePart), "%Y-%m-%d", &entryTime);
   strftime(timePart, sizeof(timePart), "%H:%M", &entryTime);
 
+  FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu (patrz definicja)
   File file = LittleFS.open(DATA_FILE_PATH, FILE_APPEND);
   if (!file) return false;
 
@@ -3023,6 +3070,69 @@ void createDayDetailScreen(time_t day) {
   loadReusableScreen(dayDetailScreen);
 }
 
+// Kafelek informacyjny menu: plaski, tonalny, z kolorowym akcentem po lewej.
+// Zwraca kafelek; etykieta wartosci trafia do *valueOut (aktualizuje ja
+// updateHomeInformation()).
+lv_obj_t *createHomeInfoTile(int x, int y, int w, int h, const char *caption,
+                             lv_color_t accent, lv_obj_t **valueOut) {
+  lv_obj_t *tile = lv_obj_create(homeScreen);
+  lv_obj_remove_style_all(tile);
+  lv_obj_set_pos(tile, x, y);
+  lv_obj_set_size(tile, w, h);
+  lv_obj_set_style_bg_color(tile, lv_color_mix(accent, COLOR_CARD, 40), 0);
+  lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(tile, 26, 0);
+  lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *bar = lv_obj_create(tile);
+  lv_obj_remove_style_all(bar);
+  lv_obj_set_size(bar, 5, h - 34);
+  lv_obj_set_pos(bar, 14, 17);
+  lv_obj_set_style_radius(bar, 3, 0);
+  lv_obj_set_style_bg_color(bar, accent, 0);
+  lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+
+  lv_obj_t *cap = createLabel(tile, caption, COLOR_MUTED, LV_ALIGN_TOP_LEFT, 30, 12);
+  lv_obj_set_style_text_font(cap, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_LEFT, 0);
+
+  lv_obj_t *value = createLabel(tile, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 30, 34);
+  lv_obj_set_width(value, w - 42);
+  lv_obj_set_style_text_font(value, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_LEFT, 0);
+  lv_label_set_long_mode(value, LV_LABEL_LONG_CLIP);
+  if (valueOut) *valueOut = value;
+  return tile;
+}
+
+// Przycisk nawigacji menu: plaski "chip" w tonalnym kolorze z kropka akcentu.
+lv_obj_t *createHomeNavTile(const char *caption, int x, int y, int w, int h, lv_color_t color) {
+  lv_obj_t *button = lv_button_create(homeScreen);
+  lv_obj_set_pos(button, x, y);
+  lv_obj_set_size(button, w, h);
+  lv_obj_set_style_bg_color(button, lv_color_mix(color, COLOR_CARD, 40), 0);
+  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(button, lv_color_mix(color, COLOR_CARD, 90), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(button, 24, 0);
+  lv_obj_set_style_border_width(button, 0, 0);
+  lv_obj_set_style_shadow_width(button, 0, 0);
+
+  lv_obj_t *dot = lv_obj_create(button);
+  lv_obj_remove_style_all(dot);
+  lv_obj_set_size(dot, 10, 10);
+  lv_obj_align(dot, LV_ALIGN_LEFT_MID, 8, 0);
+  lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(dot, color, 0);
+  lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *label = lv_label_create(button);
+  lv_label_set_text(label, caption);
+  lv_obj_set_style_text_color(label, COLOR_TEXT, 0);
+  lv_obj_align(label, LV_ALIGN_LEFT_MID, 28, 0);
+  return button;
+}
+
 void createHomeScreen() {
   resetReusableScreen(homeScreen);
 
@@ -3072,39 +3182,45 @@ void createHomeScreen() {
   lv_obj_set_style_text_align(homeAgeLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(homeAgeLabel, LV_LABEL_LONG_WRAP);
 
-  // Dwa rowne panele: OSTATNIE KARMIENIE (lewy) i OSTATNIA BUTELKA (prawy).
-  feedingCard = createCard(homeScreen, 14, 190, 220, 70);
-  lv_obj_set_style_bg_color(feedingCard, lv_color_mix(COLOR_CARD, COLOR_ORANGE, 16), 0);
-  lv_obj_set_style_shadow_width(feedingCard, 4, 0);
-  createLabel(feedingCard, "OSTATNIE KARMIENIE", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
-  homeFeedingLabel = createLabel(feedingCard, "", COLOR_TEXT, LV_ALIGN_CENTER, 0, 10);
+  // ---- MENU (widok po dotknieciu wygaszacza) — nowoczesny, plaski uklad ----------
+  // Licznik: wiekszy promien, bez ramki i cienia (kolor/miganie nadal steruje
+  // updateCounterAlarmVisuals()).
+  lv_obj_set_style_radius(homeCounterBar, 28, 0);
+  lv_obj_set_style_border_width(homeCounterBar, 0, 0);
+  lv_obj_set_style_shadow_width(homeCounterBar, 0, 0);
 
-  milkCard = createCard(homeScreen, 246, 190, 220, 70);
-  lv_obj_set_style_bg_color(milkCard, lv_color_mix(COLOR_CARD, COLOR_BLUE, 16), 0);
-  lv_obj_set_style_shadow_width(milkCard, 4, 0);
-  createLabel(milkCard, "OSTATNIA BUTELKA", COLOR_TEXT, LV_ALIGN_TOP_MID, 0, 4);
-  homeMilkLabel = createLabel(milkCard, "", COLOR_TEXT, LV_ALIGN_CENTER, 0, 10);
+  // Dwa kafelki informacyjne: OSTATNIE KARMIENIE (lewy) i OSTATNIA BUTELKA (prawy).
+  feedingCard = createHomeInfoTile(14, 156, 220, 92, "OSTATNIE KARMIENIE", COLOR_ORANGE, &homeFeedingLabel);
+  milkCard = createHomeInfoTile(246, 156, 220, 92, "OSTATNIA BUTELKA", COLOR_BLUE, &homeMilkLabel);
 
-  feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 268, 452, 48, COLOR_ORANGE);
+  // Glowna akcja: duzy przycisk w ksztalcie pigulki z delikatnym gradientem.
+  feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 260, 452, 60, COLOR_ORANGE);
+  lv_obj_set_style_radius(feedFormButton, 30, 0);
+  lv_obj_set_style_bg_grad_color(feedFormButton, lv_color_mix(COLOR_ORANGE, lv_color_white(), 190), 0);
+  lv_obj_set_style_bg_grad_dir(feedFormButton, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_shadow_width(feedFormButton, 14, 0);
+  lv_obj_set_style_shadow_offset_y(feedFormButton, 4, 0);
+  lv_obj_set_style_shadow_opa(feedFormButton, LV_OPA_30, 0);
+  lv_obj_set_style_shadow_width(feedFormButton, 4, LV_STATE_PRESSED);
+  lv_obj_set_style_text_font(lv_obj_get_child(feedFormButton, 0), &lv_font_montserrat_16, 0);
   lv_obj_add_event_cb(feedFormButton, feedingButtonEvent, LV_EVENT_CLICKED, nullptr);
 
-  // Dolna nawigacja: 3 kolumny x 2 rzedy (6 slotow). Szerokosc kolumny 145 px,
-  // odstep 8: x = 14, 167, 320. SEN wyrozniony fioletem; gdy dziecko spi -> zolty.
+  // Dolna nawigacja: plaskie "chipy" z kolorowa kropka. Rzad 1: SEN, INNE, WAGA
+  // (3 kolumny po 145 px, odstep 8: x = 14, 167, 320); rzad 2: KALENDARZ, PODSUMOWANIE.
+  // SEN wyrozniony fioletem; gdy dziecko spi -> zolty.
   const int navW = 145;
   const int navX[3] = {14, 167, 320};
-  // Rzad 1 (y=324): SEN, INNE, WAGA
-  sleepHomeButton = createButton(homeScreen, sleepInProgress ? "SEN (spi)" : "SEN",
-                                 navX[0], 324, navW, 40,
-                                 sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
+  sleepHomeButton = createHomeNavTile(sleepInProgress ? "SEN (spi)" : "SEN",
+                                      navX[0], 334, navW, 56,
+                                      sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
   lv_obj_add_event_cb(sleepHomeButton, sleepOpenEvent, LV_EVENT_CLICKED, nullptr);
-  otherHomeButton = createButton(homeScreen, "INNE", navX[1], 324, navW, 40, COLOR_BLUE);
+  otherHomeButton = createHomeNavTile("INNE", navX[1], 334, navW, 56, COLOR_BLUE);
   lv_obj_add_event_cb(otherHomeButton, otherOpenEvent, LV_EVENT_CLICKED, nullptr);
-  weightHomeButton = createButton(homeScreen, "WAGA", navX[2], 324, navW, 40, COLOR_BLUE);
+  weightHomeButton = createHomeNavTile("WAGA", navX[2], 334, navW, 56, COLOR_BLUE);
   lv_obj_add_event_cb(weightHomeButton, weightOpenEvent, LV_EVENT_CLICKED, nullptr);
-  // Rzad 2 (y=372): KALENDARZ, PODSUMOWANIE (2 kolumny szersze dla czytelnosci etykiet)
-  calendarButton = createButton(homeScreen, "KALENDARZ", navX[0], 372, 220, 40, COLOR_BLUE);
+  calendarButton = createHomeNavTile("KALENDARZ", navX[0], 398, 220, 56, COLOR_BLUE);
   lv_obj_add_event_cb(calendarButton, calendarButtonEvent, LV_EVENT_CLICKED, nullptr);
-  chartButton = createButton(homeScreen, "PODSUMOWANIE", 246, 372, 220, 40, COLOR_GREEN);
+  chartButton = createHomeNavTile("PODSUMOWANIE", 246, 398, 220, 56, COLOR_GREEN);
   lv_obj_add_event_cb(chartButton, chartButtonEvent, LV_EVENT_CLICKED, nullptr);
 
   // ===================== WYGASZACZ =====================
@@ -4130,6 +4246,55 @@ bool csvFileLooksValid(const char *path) {
   return hs.startsWith("data,godzina,typ,");
 }
 
+// --- Bufor RAM (PSRAM) na pobierany CSV ---------------------------------------------
+// Pobranie z hostingu trwa kilka sekund (TLS). Dawniej plik byl zapisywany do flasha
+// DOPIERO-co-odebranymi kawalkami przez caly ten czas, a kazdy zapis/kasowanie sektora
+// wylacza cache pamieci zewnetrznej i rozsynchronizowuje panel RGB (przesuniecie obrazu).
+// Teraz CSV trafia najpierw do PSRAM, a flash jest zapisywany JEDNYM krotkim zrywem,
+// pod ochrona FlashWriteGuard, i tylko gdy tresc faktycznie sie zmienila.
+constexpr size_t HOST_CSV_RAM_MAX = 512 * 1024; // zapas wzgledem limitu 256 KB pliku
+
+static bool ramCsvAppend(uint8_t *&buf, size_t &len, size_t &cap, const uint8_t *src, size_t n) {
+  if (len + n > HOST_CSV_RAM_MAX) return false;
+  if (len + n > cap) {
+    size_t newCap = cap ? cap : 64 * 1024;
+    while (newCap < len + n) newCap *= 2;
+    if (newCap > HOST_CSV_RAM_MAX) newCap = HOST_CSV_RAM_MAX;
+    uint8_t *grown = static_cast<uint8_t *>(heap_caps_realloc(buf, newCap, MALLOC_CAP_SPIRAM));
+    if (!grown) return false;
+    buf = grown;
+    cap = newCap;
+  }
+  memcpy(buf + len, src, n);
+  len += n;
+  return true;
+}
+
+// To samo kryterium co csvFileLooksValid, ale na buforze w pamieci.
+static bool csvBufferLooksValid(const uint8_t *buf, size_t len) {
+  if (!buf || len < 30) return false;               // naglowek + co najmniej 1 wiersz
+  if (buf[len - 1] != '\n') return false;           // pelny ostatni wiersz
+  static const char HDR[] = "data,godzina,typ,";
+  return memcmp(buf, HDR, sizeof(HDR) - 1) == 0;
+}
+
+// Czy plik na LittleFS ma identyczna tresc jak bufor (odczyt nie zaklóca panelu).
+static bool fileEqualsBuffer(const char *path, const uint8_t *buf, size_t len) {
+  File f = LittleFS.open(path, FILE_READ);
+  if (!f) return false;
+  if (static_cast<size_t>(f.size()) != len) { f.close(); return false; }
+  uint8_t tmp[512];
+  size_t off = 0;
+  while (off < len) {
+    const size_t want = min(sizeof(tmp), len - off);
+    const size_t got = f.read(tmp, want);
+    if (got != want || memcmp(tmp, buf + off, want) != 0) { f.close(); return false; }
+    off += want;
+  }
+  f.close();
+  return true;
+}
+
 // Pobiera pelny CSV z hostingu i zapisuje atomowo jako lokalny mirror.
 // Po pobraniu odswieza dane i ekran. Zwraca true przy sukcesie.
 bool downloadCsvFromHost() {
@@ -4229,15 +4394,10 @@ bool downloadCsvFromHost() {
   }
   const bool isChunked = headers.indexOf("Transfer-Encoding: chunked") >= 0;
 
-  // Zapis do pliku tymczasowego, potem atomowy rename.
-  File tmp = LittleFS.open("/karmienia_sync.tmp", FILE_WRITE);
-  if (!tmp) {
-    while (client.available()) client.read();
-    client.stop();
-    ++hostDownloadFails;
-    hostLastError = 4;
-    return false;
-  }
+  // Odbior do bufora w PSRAM; do flasha zapisujemy dopiero po zamknieciu polaczenia.
+  uint8_t *csvBuf = nullptr;
+  size_t csvLen = 0, csvCap = 0;
+  bool csvBufOk = true;
   uint8_t chunk[512];
   bool wroteAny = false;
   int syncChunkNo = 0;
@@ -4289,7 +4449,7 @@ bool downloadCsvFromHost() {
           if (toRead > sizeof(chunk)) toRead = sizeof(chunk);
           const size_t n = client.read(chunk, toRead);
           if (n > 0) {
-            tmp.write(chunk, n);
+            if (!ramCsvAppend(csvBuf, csvLen, csvCap, chunk, n)) csvBufOk = false;
             received += static_cast<long>(n);
             left -= static_cast<long>(n);
             wroteAny = true;
@@ -4328,7 +4488,7 @@ bool downloadCsvFromHost() {
       if (client.available()) {
         const size_t n = client.read(chunk, sizeof(chunk));
         if (n > 0) {
-          tmp.write(chunk, n);
+          if (!ramCsvAppend(csvBuf, csvLen, csvCap, chunk, n)) csvBufOk = false;
           received += static_cast<long>(n);
           wroteAny = true;
           if ((++syncChunkNo & 7) == 0) {
@@ -4357,30 +4517,52 @@ bool downloadCsvFromHost() {
       }
     }
   }
-  tmp.close();
   while (client.available()) client.read();
   client.stop();
   feedWatchdog();
   requestRgbResync();
-  bool ok = wroteAny;
+  bool ok = wroteAny && csvBufOk;
   if (contentLength >= 0 && received < contentLength) ok = false; // niekompletny
-  if (ok) ok = csvFileLooksValid("/karmienia_sync.tmp");          // walidacja mirror
+  if (ok) ok = csvBufferLooksValid(csvBuf, csvLen);               // walidacja mirror
   if (!ok) {
-    LittleFS.remove("/karmienia_sync.tmp");
-    ++hostDownloadFails;
-    hostLastError = 4;
-    hostSyncProgressPct = -1;
-    Serial.printf("HostSync: CSV odrzucony (%ld/%ld B, walidacja=%d).\n",
-                  (long)received, (long)contentLength, (int)csvFileLooksValid("/karmienia_sync.tmp"));
-    return false;
-  }
-  if (!LittleFS.rename("/karmienia_sync.tmp", DATA_FILE_PATH)) {
-    LittleFS.remove("/karmienia_sync.tmp");
+    Serial.printf("HostSync: CSV odrzucony (%ld/%ld B, bufor=%d).\n",
+                  (long)received, (long)contentLength, (int)csvBufOk);
+    if (csvBuf) heap_caps_free(csvBuf);
     ++hostDownloadFails;
     hostLastError = 4;
     hostSyncProgressPct = -1;
     return false;
   }
+  // Zapis do flasha tylko gdy tresc sie zmienila (np. po wlasnym uploadzie lub gdy
+  // ktos tylko odswiezyl rewizje, plik jest identyczny — wtedy flash zostaje nietkniety).
+  const bool unchanged = fileEqualsBuffer(DATA_FILE_PATH, csvBuf, csvLen);
+  if (!unchanged) {
+    FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu (patrz definicja)
+    bool written = false;
+    File tmp = LittleFS.open("/karmienia_sync.tmp", FILE_WRITE);
+    if (tmp) {
+      size_t off = 0;
+      while (off < csvLen) {
+        const size_t n = min(static_cast<size_t>(1024), csvLen - off);
+        if (tmp.write(csvBuf + off, n) != n) break;
+        off += n;
+        if ((off & 0x1FFF) == 0) feedWatchdog();
+      }
+      tmp.close();
+      written = (off == csvLen);
+    }
+    if (!written || !csvFileLooksValid("/karmienia_sync.tmp") ||
+        !LittleFS.rename("/karmienia_sync.tmp", DATA_FILE_PATH)) {
+      LittleFS.remove("/karmienia_sync.tmp");
+      heap_caps_free(csvBuf);
+      ++hostDownloadFails;
+      hostLastError = 4;
+      hostSyncProgressPct = -1;
+      Serial.println("HostSync: zapis mirror nieudany.");
+      return false;
+    }
+  }
+  heap_caps_free(csvBuf);
   // Odswiez dane i ekran z nowego mirror.
   loadLatestEntries();
   invalidateDayStats();
@@ -4969,6 +5151,7 @@ bool saveWeatherCache() {
   // a plikowe I/O robimy bez trzymania mutexa.
   const WeatherState snap = snapshotWeather();
   if (!snap.valid) return false;
+  FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu
   File file = LittleFS.open(WEATHER_CACHE_FILE, FILE_WRITE);
   if (!file) return false;
   const uint32_t magic = 0x57454131UL; // "WEA1"
@@ -5001,6 +5184,7 @@ bool loadWeatherCache() {
 // Latwo rozszerzalny o kolejne ustawienia w przyszlosci.
 bool saveSettings() {
   if (!storageReady) return false;
+  FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu
   File file = LittleFS.open(SETTINGS_FILE, FILE_WRITE);
   if (!file) return false;
   file.printf("sleepTelegram=%d\n", sleepTelegramEnabled ? 1 : 0);

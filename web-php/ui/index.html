@@ -337,6 +337,28 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .hbar-v{font-size:.6rem;font-weight:800;color:var(--ink-2);white-space:nowrap;min-height:.8em}
 .hbar-track{width:100%;max-width:34px;height:96px;display:flex;align-items:flex-end;background:var(--card-2);border-radius:7px 7px 4px 4px;overflow:hidden}
 .hbar-fill{width:100%;border-radius:7px 7px 4px 4px;transition:height .6s cubic-bezier(.3,.9,.3,1);min-height:3px}
+/* mini kalendarz kąpieli */
+.bcal-sum{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.bcal-pill{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:16px;background:rgba(20,184,166,.12);border:1px solid rgba(20,184,166,.30)}
+.bcal-pill.late{background:rgba(224,72,60,.12);border-color:rgba(224,72,60,.38)}
+.bcal-k{font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--muted)}
+.bcal-v{font-size:1.05rem;font-weight:800;color:var(--ink)}
+.bcal-s{font-size:.72rem;color:var(--muted)}
+.bcal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.bcal-title{font-weight:800;text-transform:capitalize;color:var(--ink);font-size:.9rem}
+.bcal-arrow{width:34px;height:34px;min-height:0;min-width:34px;padding:0;flex:none;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--brd,var(--line,#ccc));background:transparent;color:var(--ink);font-size:1.15rem;line-height:1;cursor:pointer}
+.bcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+.bcal-h{font-size:.6rem;font-weight:700;color:var(--muted);padding:4px 0}
+.bcal-d{aspect-ratio:1/1;max-height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:.78rem;color:var(--ink);position:relative}
+.bcal-e{visibility:hidden}
+.bcal-d.bath{background:linear-gradient(135deg,#2dd4bf,#14B8A6);color:#fff;font-weight:800}
+.bcal-d.due{border:2px dashed #14B8A6;font-weight:800}
+.bcal-d.due.late{border-color:#e0483c}
+.bcal-d.today:not(.bath):not(.due){box-shadow:inset 0 0 0 1.5px var(--muted)}
+.bcal-d.today::after{content:"";position:absolute;bottom:3px;width:4px;height:4px;border-radius:50%;background:currentColor}
+.bcal-legend{display:flex;gap:14px;justify-content:center;font-size:.68rem;color:var(--muted);margin-top:10px}
+.bcal-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px;box-sizing:border-box}
+.bcal-legend .l-bath{background:#14B8A6}.bcal-legend .l-due{border:2px dashed #14B8A6}.bcal-legend .l-today{border:1.5px solid var(--muted)}
 .hbar-fill.feed{background:var(--g-feed)} .hbar-fill.milk{background:var(--g-milk)} .hbar-fill.diaper{background:var(--g-acc)} .hbar-fill.sleep{background:var(--g-sleep)} .hbar-fill.bath{background:linear-gradient(180deg,var(--bath-2),var(--bath))}
 .hbar-stack{width:100%;display:flex;flex-direction:column;border-radius:7px 7px 4px 4px;overflow:hidden;min-height:3px}
 .hbar-stack .hs.mother{background:var(--g-acc)} .hbar-stack .hs.mixed{background:linear-gradient(135deg,#12b877,#5f95ec)} .hbar-stack .hs.modified{background:var(--g-milk)}
@@ -830,6 +852,6 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
   });
 })();
 </script>
-<script src="app.js?v=20260922"></script>
+<script src="app.js?v=20261017"></script>
 </body>
 </html>

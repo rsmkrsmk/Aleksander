@@ -5,7 +5,7 @@
    Kontrakt endpointow 1:1 jak dotychczas. Zrodlo danych: Repository (CSV lub MySQL).
 
    Obslugiwane sciezki (dowolny prefiks jest obcinany do ostatniego segmentu):
-     GET  /api/status | /api/entries?date= | /api/weight-series | /export.csv
+     GET  /api/status | /api/entries?date= | /api/weight-series | /api/bath-calendar | /export.csv
      POST /api/entry | /api/delete-entry | /api/event | /api/send-backup
           /api/import | /api/upload-data | /api/update-feeding | /api/setting
    ============================================================================ */
@@ -179,6 +179,7 @@ function handle_api(string $route, string $method, Repository $repo): void
             'milkStepMl' => Config::MILK_ML_STEP, 'milkDefaultMl' => Config::MILK_ML_DEFAULT,
             'birthWeightG' => Config::BIRTH_WEIGHT_G, 'lastWeightG' => $latest['lastWeightG'],
             'lastBath' => $latest['lastBath'],
+            'bathIntervalDays' => Config::BATH_INTERVAL_DAYS,
             'calendar' => $calendar, 'night' => $nightActive,
             'mdns' => 'karmienie.local', 'undoWindowSec' => 60,
             'freeHeap' => 0, 'totalHeap' => 0, 'freePsram' => 0, 'totalPsram' => 0, 'maxAlloc' => 0,
@@ -200,6 +201,10 @@ function handle_api(string $route, string $method, Repository $repo): void
 
     if ($route === 'weight-series' && $method === 'GET') {
         sendJson(200, ['birthWeightG' => Config::BIRTH_WEIGHT_G, 'points' => Domain::weightSeries($repo->allEntries())]);
+    }
+
+    if ($route === 'bath-calendar' && $method === 'GET') {
+        sendJson(200, Domain::bathSummary($repo->allEntries(), $now));
     }
 
     if ($route === 'entry' && $method === 'POST') {
