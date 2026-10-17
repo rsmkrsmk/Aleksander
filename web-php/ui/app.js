@@ -1305,7 +1305,7 @@ function memPostcard(date,r){
    if((s.napCount||0)>=4)c.push('Drzemka za drzemką');
    if(!c.length)c.push('Kolejny dobry dzień');
    const hsh=String(date).split('').reduce((a,ch)=>(a*31+ch.charCodeAt(0))>>>0,7);hit=c[hsh%c.length]}
-  txt(txt(hit,W/2,cy+ch-70,'italic 700 38px '+SERIF,'#2f5a45');
+  txt(hit,W/2,cy+ch-70,'italic 700 38px '+SERIF,'#2f5a45');
   txt('Leśny Dziennik Aleksandra',W/2,H-42,'700 24px '+SANS,'rgba(255,248,230,.85)');
   return cv.toDataURL('image/png');
 }
