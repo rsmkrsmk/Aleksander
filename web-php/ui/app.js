@@ -1296,8 +1296,16 @@ function memPostcard(date,r){
   ['0','6','12','18','24'].forEach((h,i)=>txt(h,rx+i/4*rw,ry+34,'700 20px '+SANS,'#b3a48e'));
   // podpis
   let hit;
-  if((s.milkMl||0)>=250)hit='Rekordowo mlecznie!';else if(s.bathCount)hit='Dzień pełen bąbelków';else if(s.weightG)hit='Nowy pomiar wagi: '+s.weightG+' g';else if((s.feedingCount||0)>=6)hit='Dzielny, głodny maluch';else if(sleepMin>=360)hit='Spokojny, przyśnięty dzień';else hit='Kolejny dobry dzień';
-  txt(hit,W/2,cy+ch-70,'italic 700 38px '+SERIF,'#2f5a45');
+  {const c=[];const f=s.feedingCount||0,mk=s.milkMl||0;
+   if(s.bathCount)c.push('Dzień pełen bąbelków','Kąpiel i czysta główka');
+   if(s.weightG)c.push('Ważenie: '+s.weightG+' g','Dzień ważenia i mierzenia');
+   if(sleepMin>=840)c.push('Śpioch nad śpiochy','Dzień pełen snów');else if(sleepMin>=600)c.push('Dużo snu, dużo wzrostu');else if(sleepMin>0&&sleepMin<300)c.push('Dziś bardziej na czuwaniu');
+   if(f>=10)c.push('Mały głodomór, wielki apetyt');else if(f>=7)c.push('Dzielny, głodny maluch');else if(f>0&&f<=4)c.push('Spokojny, syty dzień');
+   if(mk>=300)c.push('Butelka na medal');else if(mk>=150)c.push('Porządna porcja mleka');
+   if((s.napCount||0)>=4)c.push('Drzemka za drzemką');
+   if(!c.length)c.push('Kolejny dobry dzień');
+   const hsh=String(date).split('').reduce((a,ch)=>(a*31+ch.charCodeAt(0))>>>0,7);hit=c[hsh%c.length]}
+  txt(txt(hit,W/2,cy+ch-70,'italic 700 38px '+SERIF,'#2f5a45');
   txt('Leśny Dziennik Aleksandra',W/2,H-42,'700 24px '+SANS,'rgba(255,248,230,.85)');
   return cv.toDataURL('image/png');
 }
