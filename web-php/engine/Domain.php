@@ -70,6 +70,13 @@ final class Domain
     {
         $days = self::calculateAgeDays($now);
         if ($days < 0) return 'Rozwoj: oczekiwanie na prawidlowy czas';
+        // Codzienny opis z pliku development_tips.php (dzien zycia 0..600).
+        static $tips = null;
+        if ($tips === null) {
+            $f = __DIR__ . '/development_tips.php';
+            $tips = is_file($f) ? (array)(require $f) : [];
+        }
+        if (isset($tips[$days]) && $tips[$days] !== '') return "Dzien {$days}: " . $tips[$days];
         return "Dzien {$days}: obserwuj rozwoj, zapewnij bliskosc, ruch i spokojny rytm dnia. Kazde dziecko rozwija sie we wlasnym tempie.";
     }
     public static function dayOfLifeForDate(string $isoDate): int

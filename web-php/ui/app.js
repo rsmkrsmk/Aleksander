@@ -153,14 +153,31 @@ function render(data){
   // oddychający pierścień gdy zbliża się / minął czas karmienia
   const rw=$('ringWrap');if(rw)rw.classList.toggle('breathe',ageMin>=180);
 
-  // pasek statusu dnia (dziś = calendar[0]) z count-up
+  // kafelki dnia (dziś = calendar[0]): liczba + krótka informacja pod spodem
   const t0=(data.calendar&&data.calendar[0])||{};
   countUp('dsFeeds',t0.feedingCount||0);
   countUp('dsMilk',t0.milkMl||0);
-  countUp('dsDiaper',(t0.diaperWet||0)+(t0.diaperDirty||0));
-  // "sen" na pasku: liczba drzemek dziś (z /api/status napCount)
   countUp('dsSleep',data.napCount||0);
-  countUp('dsBath',(t0.bathCount||0));
+  const clockOf=txt=>{const m=/(\d{1,2}:\d{2})/.exec(String(txt||'').split('\n')[0]);return m?m[1]:''};
+  const lf=clockOf(data.lastFeeding),lm=clockOf(data.lastMilk);
+  setText('dsFeedsSub',lf?`ostatnie o ${lf}`:'brak wpisów');
+  setText('dsMilkSub',lm?`butelka o ${lm}`:'brak butelek');
+  const sleepTotal=(data.sleepDayMin||0)+(data.sleepNightMin||0);
+  setText('dsSleepSub',data.sleepInProgress?'śpi teraz':(sleepTotal>0?`razem ${Math.floor(sleepTotal/60)}h${sleepTotal%60?` ${sleepTotal%60}min`:''}`:'brak snu dziś'));
+  // kąpiel: ostatnia + planowana następna (co bathIntervalDays dni)
+  {
+    const tile=$('dsBathTile');let big='brak',sub='zapisz pierwszą kąpiel',late=false;
+    if(data.lastBath){
+      const pb=data.lastBath.split('-');const then=new Date(+pb[0],+pb[1]-1,+pb[2]);
+      const nowN=new Date();const nowD=new Date(nowN.getFullYear(),nowN.getMonth(),nowN.getDate());
+      const days=Math.max(0,Math.round((nowD-then)/86400000));
+      const iv=data.bathIntervalDays||3;const dn=iv-days;
+      big=days===0?'dziś':days===1?'wczoraj':`${days} dni temu`;
+      late=dn<0;
+      sub=late?`zaległa o ${-dn} ${-dn===1?'dzień':'dni'}`:dn===0?'następna: dziś':dn===1?'następna: jutro':`następna za ${dn} dni`;
+    }
+    setText('dsBath',big);setText('dsBathSub',sub);if(tile)tile.classList.toggle('late',late);
+  }
 
   // połączona karta posiłku (czas + opis osobno)
   // W hero: karmienie = sama godzina (bo "X temu" jest w wielkim nagłówku), butelka = godz + ml/rodzaj
@@ -171,19 +188,6 @@ function render(data){
   if(!themeManual)applyTheme(data.night?'night':'day');
 
   setText('dockSleep',data.sleepInProgress?'Śpi':'Sen');
-
-  // ostatnia kąpiel (data z /api/status)
-  const bathEl=$('lastBathLine');
-  if(bathEl){
-    if(data.lastBath){
-      const pb=data.lastBath.split('-');const then=new Date(+pb[0],+pb[1]-1,+pb[2]);
-      const nowN=new Date();const nowD=new Date(nowN.getFullYear(),nowN.getMonth(),nowN.getDate());
-      const days=Math.max(0,Math.round((nowD-then)/86400000));
-      const iv=data.bathIntervalDays||3;const dn=iv-days; // dni do planowanej kąpieli
-      const nextTxt=dn<0?`zaległa o ${-dn} ${-dn===1?'dzień':'dni'}`:dn===0?'dziś':dn===1?'jutro':`za ${dn} dni`;
-      bathEl.textContent=(days===0?'Ostatnia kąpiel: dzisiaj':`Ostatnia kąpiel: ${days} dni temu`)+` · następna: ${nextTxt}`;
-    }else{bathEl.textContent='Ostatnia kąpiel: brak'}
-  }
 
   renderDayBand();
   renderDiag(data);
@@ -933,58 +937,81 @@ function gainBandPerDay(day){
   if(day<GAIN_P2_END)return{lo:15,hi:20};
   return{lo:10,hi:15};
 }
-/* Wykres słupkowy: rzeczywisty przyrost g/dzień (segmenty między pomiarami,
-   kotwica dzień 2 = 2850 g) na tle pasma referencyjnego. */
+/* Przyrost wagi: trend TYGODNIOWY (g/dzień) wyliczony regresją liniową z ważeń
+   z okna ±7 dni wokół każdego tygodnia życia. Pojedyncze ważenia mają błąd rzędu
+   ±100 g (pora dnia, ubranie, karmienie), więc różnica dwóch kolejnych pomiarów
+   daje "losowe piki" — trend z kilku pomiarów jest stabilny i czytelny. */
+function wgSlope(pts,from,to){
+  const w=pts.filter(p=>p.day>=from&&p.day<=to);
+  if(w.length<2)return null;
+  if(w[w.length-1].day-w[0].day<5)return null;
+  const mx=w.reduce((a,p)=>a+p.day,0)/w.length,my=w.reduce((a,p)=>a+p.g,0)/w.length;
+  let sxy=0,sxx=0;w.forEach(p=>{sxy+=(p.day-mx)*(p.g-my);sxx+=(p.day-mx)*(p.day-mx)});
+  return sxx>0?sxy/sxx:null;
+}
+function wgClass(val,band){
+  if(val<=0)return 'neg';
+  if(!band)return 'ok';
+  return val<band.lo?'low':(val>band.hi?'high':'ok');
+}
 async function renderGainChart(){
   const host=$('weightGainChart');if(!host)return;host.replaceChildren();
+  const note=$('weightGainNote');if(note)note.replaceChildren();
+  const birthG=(state.data&&state.data.birthWeightG)||3080;
   let ws=[];try{const d=await request('/api/weight-series');ws=(d.points||[]).filter(p=>p&&p.g>0).sort((a,b)=>a.day-b.day)}catch(e){}
-  const A_D=2,A_G=2850;let gains=[];
-  if(ws.length){
-    let seq=[{day:A_D,g:A_G,date:''}];ws.forEach(p=>seq.push({day:p.day,g:p.g,date:p.date}));
-    if(ws[0].day===A_D)seq[1]={day:ws[0].day,g:A_G,date:ws[0].date};
-    for(let i=1;i<seq.length;i++){const d1=seq[i-1].day,w1=seq[i-1].g,d2=seq[i].day,w2=seq[i].g;if(d2<=d1)continue;gains.push({from:d1,day:d2,date:seq[i].date,gain:Math.round((w2-w1)/(d2-d1))})}
+  if(ws.length<2){const p=bcalElem('p','empty','Dodaj co najmniej dwa pomiary wagi, aby zobaczyć trend przyrostu.');host.append(p);return}
+  const pts=ws.slice();if(pts[0].day>0)pts.unshift({day:0,g:birthG,date:''});
+  const lastDay=pts[pts.length-1].day;
+  // tygodnie życia 1..N (tydzień 0 pomijamy: adaptacja po porodzie, naturalny ubytek wagi)
+  let weeks=[];
+  for(let k=1;k*7<=lastDay;k++){
+    const c=k*7+3.5;const v=wgSlope(pts,c-7,c+7);
+    weeks.push({k,c,val:v==null?null:Math.round(v),band:gainBandPerDay(Math.round(c)),partial:(k*7+7>lastDay)});
   }
-  if(!gains.length){setText('weightGainNote','Dodaj co najmniej dwa pomiary wagi, aby zobaczyć przyrost dzienny.');return}
-  const lg=document.createElement('div');lg.style.cssText='display:flex;gap:10px;align-items:center;font-size:.68rem;color:var(--muted);margin-bottom:6px';
-  const it=(c,txt)=>{const s=document.createElement('span');s.style.cssText='display:inline-flex;align-items:center;gap:5px';const dd=document.createElement('span');dd.style.cssText='width:9px;height:9px;border-radius:50%;background:'+c;s.append(dd);const l=document.createElement('span');l.textContent=txt;s.append(l);return s};
-  lg.append(it('#0f8a5f','w normie'),it('#e0742e','poza normą'),it('#e0483c','spadek'));
-  host.append(lg);
-  const today=(state.data&&state.data.developmentDay!=null&&state.data.developmentDay>=0)?state.data.developmentDay:gains[gains.length-1].day;
-  const dataMax=gains[gains.length-1].day;
-  const maxDay=Math.max(today,dataMax,A_D+1);
-  const daily=[];const byDay={};
-  for(let i=0;i<gains.length;i++){const g=gains[i];const s=(i===0)?g.from:(g.from+1);for(let d=s;d<=g.day;d++)byDay[d]=g.gain}
-  byDay[A_D]=gains[0].gain;
-  for(let d=A_D;d<=dataMax;d++)daily.push({day:d,gain:byDay[d]||0});
-  const RAD=3;
-  const smooth=daily.map(p=>{const lo=Math.max(0,p.day-A_D-RAD),hi=Math.min(daily.length-1,p.day-A_D+RAD);let sum=0,cnt=0;for(let i=lo;i<=hi;i++){sum+=daily[i].gain;cnt++}return {day:p.day,gain:sum/cnt}});
-  let maxS=Math.max.apply(null,smooth.map(p=>p.gain));
-  let maxG=Math.max(40,Math.ceil((maxS+8)/10)*10);
-  const W=440,H=250,padL=42,padR=12,padT=16,padB=26,plotW=W-padL-padR,plotH=H-padT-padB;
-  const x=d=>padL+(maxDay<=A_D?0:(d-A_D)/(maxDay-A_D)*plotW);
-  const y=g=>padT+plotH-(g/maxG)*plotH;
-  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg'});
-  for(let gv=0;gv<=maxG;gv+=10){const yy=y(gv);svg.append(svgEl('line',{class:'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:6,y:yy+3});t.textContent=gv;svg.append(t)}
-  const bands=[[A_D,Math.min(91,maxDay),25,30],[Math.min(91,maxDay),Math.min(183,maxDay),15,20],[Math.min(183,maxDay),maxDay,10,15]];
-  bands.forEach(b=>{if(b[1]<=b[0])return;const bx1=x(b[0]),bx2=x(b[1]),yyHi=y(b[2]),yyLo=y(b[3]);svg.append(svgEl('rect',{x:bx1,y:yyLo,width:Math.max(1,bx2-bx1),height:Math.max(1,yyHi-yyLo),fill:'#12b877',opacity:'0.12',rx:2}));const med=(b[2]+b[3])/2;svg.append(svgEl('line',{x1:bx1,y1:y(med),x2:bx2,y2:y(med),stroke:'#0f8a5f','stroke-width':1.2,'stroke-dasharray':'5 4',opacity:.5}))});
-  if(smooth.length>1){
-    let area='M'+x(smooth[0].day).toFixed(1)+' '+y(0).toFixed(1);smooth.forEach(p=>{area+=' L'+x(p.day).toFixed(1)+' '+y(Math.max(0,p.gain)).toFixed(1)});area+=' L'+x(smooth[smooth.length-1].day).toFixed(1)+' '+y(0).toFixed(1)+' Z';
-    svg.append(svgEl('path',{d:area,fill:'#0f8a5f',opacity:.14,stroke:'none'}));
-    let line='';smooth.forEach((p,i)=>{line+=(i?'L':'M')+x(p.day).toFixed(1)+' '+y(p.gain).toFixed(1)+' '});
-    svg.append(svgEl('path',{d:line.trim(),fill:'none',stroke:'#0f8a5f','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));
-  }
-  gains.forEach(p=>{const b=gainBandPerDay(p.day);const col=p.gain<=0?'#e0483c':(b&&p.gain>=b.lo&&p.gain<=b.hi?'#0f8a5f':'#e0742e');const c=svgEl('circle',{cx:x(p.day),cy:y(Math.min(p.gain,maxG)),r:4.6,fill:col,stroke:'#fff','stroke-width':1.6});const ti=svgEl('title',{});ti.textContent='dzień '+p.day+': średnio '+p.gain+' g/dzień (od dnia '+p.from+')';c.append(ti);svg.append(c)});
-  const xt=[A_D].concat(gains.map(p=>p.day));const uniq=[...new Set(xt)];const lab=Math.min(uniq.length,5);const stepX=(maxDay-A_D)/Math.max(1,(lab-1));
-  for(let i=0;i<lab;i++){const d=Math.round(A_D+stepX*i);const t=svgEl('text',{class:'axis-txt',x:x(d)-9,y:H-7});t.textContent='d'+d;svg.append(t)}
+  weeks=weeks.slice(-14);
+  if(!weeks.some(w=>w.val!=null)){host.append(bcalElem('p','empty','Za mało pomiarów w odstępie kilku dni, aby policzyć trend. Zważ dziecko ponownie za kilka dni.'));return}
+  const vals=weeks.filter(w=>w.val!=null).map(w=>w.val);
+  const bandHi=Math.max(...weeks.map(w=>w.band?w.band.hi:0));
+  let yMax=Math.max(bandHi,...vals)+6;yMax=Math.ceil(yMax/10)*10;
+  let yMin=Math.min(0,...vals);yMin=yMin<0?Math.floor((yMin-4)/10)*10:0;
+  const W=440,H=262,padL=34,padR=10,padT=16,padB=34,plotW=W-padL-padR,plotH=H-padT-padB;
+  const n=weeks.length,slot=plotW/n,bw=Math.min(30,slot*.62);
+  const y=v=>padT+plotH-(v-yMin)/(yMax-yMin)*plotH;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg wg-svg',role:'img','aria-label':'Tygodniowy przyrost wagi w gramach na dzień'});
+  const stepG=(yMax-yMin)>60?20:10;
+  for(let g=yMin;g<=yMax;g+=stepG){const yy=y(g);svg.append(svgEl('line',{class:g===0?'wg-zero':'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:padL-6,y:yy+3,'text-anchor':'end'});t.textContent=g;svg.append(t)}
+  weeks.forEach((w,i)=>{
+    const cx=padL+slot*(i+0.5);
+    if(w.band){const r=svgEl('rect',{class:'wg-band',x:cx-slot/2+1,y:y(w.band.hi),width:slot-2,height:Math.max(2,y(w.band.lo)-y(w.band.hi)),rx:4});svg.append(r)}
+    if(w.val==null){const t=svgEl('text',{class:'wg-none',x:cx,y:y(0)-5,'text-anchor':'middle'});t.textContent='–';svg.append(t)}
+    else{
+      const cls=wgClass(w.val,w.band),top=Math.min(y(w.val),y(0)),h=Math.max(2,Math.abs(y(w.val)-y(0)));
+      const bar=svgEl('rect',{class:'wg-bar wg-'+cls+(w.partial?' wg-part':''),x:cx-bw/2,y:top,width:bw,height:h,rx:Math.min(7,bw/2.4)});
+      const ti=svgEl('title',{});ti.textContent=`tydzień ${w.k}: ${w.val} g/dzień`+(w.band?` (norma ${w.band.lo}–${w.band.hi})`:'')+(w.partial?' — tydzień w toku':'');bar.append(ti);svg.append(bar);
+      const lt=svgEl('text',{class:'wg-val',x:cx,y:w.val>=0?top-5:top+h+11,'text-anchor':'middle'});lt.textContent=w.val;svg.append(lt);
+    }
+    const xl=svgEl('text',{class:'axis-txt',x:cx,y:H-16,'text-anchor':'middle'});xl.textContent='t'+w.k;svg.append(xl);
+  });
+  const cap=svgEl('text',{class:'axis-txt',x:padL,y:H-3});cap.textContent='tydzień życia';svg.append(cap);
   host.append(svg);
-  const last=gains[gains.length-1];const b=gainBandPerDay(last.day);const avg=Math.round(smooth[smooth.length-1].gain);
-  const status=last.gain<=0?'<b style="color:#e0483c">spadek</b>':(last.gain>=b.lo&&last.gain<=b.hi?'<b style="color:#0f8a5f">w normie</b>':'<b style="color:#e0742e">poza normą</b>');
-  const gn=$('weightGainNote');if(gn)gn.innerHTML='Ostatni przyrost: <b>'+last.gain+' g/dzień</b> (norma '+b.lo+'–'+b.hi+') · średnio ostatnich dni: '+avg+' g/dzień · '+status+'<br><span style="opacity:.75">Krzywa = średnia ruchoma 7 dni (wygładzona); kropki = faktyczne pomiary.</span>';
+  const lg=bcalElem('div','wg-legend');
+  const it=(cls,t)=>{const s=bcalElem('span','');s.append(bcalElem('i',cls),document.createTextNode(t));return s};
+  lg.append(it('l-ok','w normie'),it('l-low','poniżej normy'),it('l-high','powyżej normy'),it('l-band','zakres normy'));
+  host.append(lg);
+
+  // kafelki podsumowania
+  const last=pts[pts.length-1],prev=pts.length>1?pts[pts.length-2]:null;
+  const sinceBirth=lastDay>0?Math.round((last.g-birthG)/lastDay):null;
+  const s14=wgSlope(pts,lastDay-14,lastDay);const r14=s14==null?null:Math.round(s14);
+  const bandNow=gainBandPerDay(lastDay);
+  const tile=(k,v,sub,cls)=>{const d=bcalElem('div','wg-stat'+(cls?' wg-'+cls:''));d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub));return d};
+  const grid=bcalElem('div','wg-stats');
+  grid.append(
+    tile('Od urodzenia',sinceBirth==null?'—':`${sinceBirth} g/dzień`,`+${last.g-birthG} g w ${lastDay} dni`,''),
+    tile('Ostatnie 2 tygodnie',r14==null?'—':`${r14} g/dzień`,bandNow?`norma ${bandNow.lo}–${bandNow.hi} g`:'trend z ważeń',r14==null?'':wgClass(r14,bandNow)),
+    tile('Ostatnie ważenie',`${last.g} g`,prev&&prev.day<last.day?`${last.g-prev.g>=0?'+':''}${last.g-prev.g} g po ${last.day-prev.day} ${last.day-prev.day===1?'dniu':'dniach'}`:'',''));
+  if(note){note.append(grid,bcalElem('p','chart-note wg-foot','Pojedyncze ważenia różnią się nawet o 100 g (pora dnia, ubranie), dlatego przyrost pokazujemy jako trend z kilku pomiarów, a nie różnicę dwóch kolejnych.'))}
 }
-
-
-
-
 
 /* ============================================================================
    Formularz karmienia / odciągania
@@ -1187,71 +1214,88 @@ async function renderMemoryReport(date){
 }
 
 
-function memRoundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.lineTo(x+w-r,y);g.arcTo(x+w-r,y+r,r,r,0,Math.PI/2);g.arcTo(x+w-r,y+h-r,r,r,Math.PI/2,Math.PI);g.arcTo(x+r,y+h-r,r,r,Math.PI,Math.PI*1.5);g.arcTo(x+r,y+r,r,r,Math.PI*1.5,Math.PI*2);g.closePath();g.fill()}
+function memRoundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.lineTo(x+w-r,y);g.arcTo(x+w,y,x+w,y+r,r);g.lineTo(x+w,y+h-r);g.arcTo(x+w,y+h,x+w-r,y+h,r);g.lineTo(x+r,y+h);g.arcTo(x,y+h,x,y+h-r,r);g.lineTo(x,y+r);g.arcTo(x,y,x+r,y,r);g.closePath();g.fill()}
+/* Pocztówka 1080×1350: bajkowy leśny wieczór — księżyc, gwiazdy, wzgórza i sosny,
+   papierowa karta z podsumowaniem dnia i znaczkiem pocztowym. */
 function memPostcard(date,r){
-  const W=1080,H=1080;
+  const W=1080,H=1400;
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;
   const g=cv.getContext('2d');
-  const gr=g.createLinearGradient(0,0,0,H);
-  gr.addColorStop(0,'#f8f4ec');gr.addColorStop(.45,'#f0f4e6');gr.addColorStop(1,'#d9e9d2');
-  g.fillStyle=gr;g.fillRect(0,0,W,H);
-  const blob=(cx,cy,rr,col)=>{g.fillStyle=col;g.beginPath();g.arc(cx,cy,rr,0,Math.PI*2);g.fill()};
-  blob(90,60,160,'rgba(47,86,56,.06)');blob(1020,70,110,'rgba(20,184,166,.05)');blob(60,1030,130,'rgba(20,184,166,.05)');blob(1010,1000,180,'rgba(47,86,56,.06)');
-  g.fillStyle='rgba(53,109,67,.85)';memRoundRect(g,60,44,W-120,10,5);
-  g.textAlign='center';g.textBaseline='middle';
-  g.fillStyle='#8a9780';g.font='700 32px sans-serif';g.fillText('W S P O M N I E N I E',W/2,96);
-  g.fillStyle='#a4b1a5';g.font='600 28px sans-serif';g.fillText('DZIEŃ ŻYCIA '+(r.dayOfLife!=null?r.dayOfLife:'-'),W/2,140);
-  g.fillStyle='#243528';g.font='900 96px sans-serif';g.fillText(dateLabel(date),W/2,234);
-  g.strokeStyle='rgba(53,109,67,.35)';g.lineWidth=3;g.beginPath();g.moveTo(W/2-160,266);g.lineTo(W/2+160,266);g.stroke();
-  g.fillStyle='#356D43';g.font='800 46px sans-serif';g.fillText('ALEKSANDER',W/2,310);
+  const SANS='"Nunito","Trebuchet MS","Segoe UI",Arial,sans-serif',SERIF='Georgia,"Times New Roman",serif';
   const s=r.summary||{};
+  const fmtMin=m=>{if(!m&&m!==0)return '–';const h=Math.floor(m/60),mm=m%60;return h?h+' h '+mm+' min':mm+' min'};
   const sleepMin=(s.sleepDayMin||0)+(s.sleepNightMin||0);
-  const fmtMin=m=>{if(!m&&m!==0)return '-';const h=Math.floor(m/60),mm=m%60;return h?h+'h '+mm+'min':mm+'min'};
-  const stats=[
-    {v:String(s.feedingCount||0),k:'KARMIENIA',c:'#e0742e'},
-    {v:(s.milkMl||0)+' ml',k:'MLEKO',c:'#3f77d6'},
-    {v:fmtMin(sleepMin),k:'SEN',c:'#7b58d4'},
-    {v:String(s.napCount||0),k:'DRZEMKI',c:'#9a7ce8'},
-    {v:s.bathCount?'TAK':'—',k:'KĄPIEL',c:'#14B8A6'},
-    {v:s.weightG?(s.weightG)+' g':'—',k:'WAGA',c:'#0f8a5f'},
-  ];
-  const cardW=280,cardH=150,gap=30,startX=(W-3*cardW-2*gap)/2;
-  const drawCard=(st,i,row)=>{
-    const x=startX+(i%3)*(cardW+gap), y=row?500:330;
-    g.fillStyle='rgba(255,255,255,.9)';memRoundRect(g,x,y,cardW,cardH,22);
-    g.fillStyle=st.c;g.font='900 58px sans-serif';g.textAlign='center';g.fillText(st.v,x+cardW/2,y+62);
-    g.fillStyle='#7a8d7f';g.font='700 24px sans-serif';g.fillText(st.k.toUpperCase(),x+cardW/2,y+118);
-  };
-  stats.forEach((st,i)=>drawCard(st,i,i<3?0:1));
-  g.fillStyle='#7a8d7f';g.font='700 26px sans-serif';g.textAlign='left';g.fillText('PRZEBIEG DNIA',84,690);
-  const rx=120,rw=W-240,ry=706,rh=10;
-  g.fillStyle='rgba(255,255,255,.78)';memRoundRect(g,rx,ry-6,rw,rh+12,9);
-  g.fillStyle='rgba(130,150,160,.4)';g.fillRect(rx,ry,rw,rh);
-  const toMin=t=>{const p=t.split(':');return(+p[0])*60+(+p[1])};
-  const dot=(min,rr,col)=>{const cx=rx+(min/1440)*rw;g.fillStyle=col;g.beginPath();g.arc(cx,ry+rh/2,rr,0,Math.PI*2);g.fill()};
-  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='SEN_START'||t==='SEN_STOP')return;const m=toMin(e.time);if(m==null)return;if(t==='KARMIENIE')dot(m,12,'#e0742e');else if(t.startsWith('MLEKO'))dot(m,8,'#3f77d6');else if(t==='KAPIEL')dot(m,9,'#14B8A6');else if(t==='WAGA')dot(m,9,'#0f8a5f')});
-  g.fillStyle='#a4b1a5';g.font='600 20px sans-serif';['0','6','12','18','24'].forEach((h,i)=>{g.textAlign='center';g.fillText(h,rx+(i/4)*rw,ry+rh+18)});
-  const feeds=(r.entries||[]).filter(e=>e.type==='KARMIENIE').map(e=>e.time);
-  g.fillStyle='#7a8d7f';g.font='700 26px sans-serif';g.textAlign='left';g.fillText('KARMIENIA',84,810);
-  let cy=810,cx2=84;
-  feeds.forEach(t=>{
-    const tw=Math.max(92,g.measureText(t)+30);
-    if(cx2+tw>W-60){cx2=84;cy+=56}
-    g.fillStyle='rgba(224,116,46,.16)';memRoundRect(g,cx2,cy-32,tw,42,21);
-    g.fillStyle='#c05a1c';g.font='800 30px sans-serif';g.textAlign='center';g.fillText(t,cx2+tw/2,cy-11);
-    cx2+=tw+12;
-  });
-  const milkTxt='MLEKO: '+(s.milkMl||0)+' ml'+(s.motherMilkMl?(' · matki '+(s.motherMilkMl||0)):'')+(s.modifiedMilkMl?(' · modyfikowane '+(s.modifiedMilkMl||0)):'');
-  g.fillStyle='#3f77d6';g.font='700 28px sans-serif';g.textAlign='left';g.fillText(milkTxt,84,cy+52);
-  let hit='';
-  if((s.milkMl||0)>=250)hit='Rekord mleka: '+(s.milkMl)+' ml!';
-  else if(s.bathCount)hit='Dzień kąpieli!';
-  else if(s.weightG)hit='Nowy pomiar wagi: '+(s.weightG)+' g';
-  else if((s.feedingCount||0)>=6)hit=(s.feedingCount)+' karmień — dzielny maluch!';
-  else if(sleepMin>=360)hit='Bardzo spokojny dzień: '+fmtMin(sleepMin)+' snu';
-  else hit='Piękny dzień pełen wrażeń';
-  g.fillStyle='#0f8a5f';g.font='800 40px sans-serif';g.textAlign='center';g.fillText('★  '+hit,W/2,990);
-  g.fillStyle='#a4b1a5';g.font='600 26px sans-serif';g.fillText('Leśny Dziennik Aleksandra · '+dateLabel(date),W/2,1040);
+  const toMin=t=>{const p=(t||'0:0').split(':');return(+p[0])*60+(+p[1])};
+  const txt=(t,x,y,font,col,al)=>{g.font=font;g.fillStyle=col;g.textAlign=al||'center';g.textBaseline='middle';g.fillText(t,x,y)};
+  // tło: niebo o zmierzchu
+  const sky=g.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#2d3f6b');sky.addColorStop(.38,'#6f7fb4');sky.addColorStop(.62,'#f3cfb8');sky.addColorStop(1,'#fbe9d0');
+  g.fillStyle=sky;g.fillRect(0,0,W,H);
+  // gwiazdy (deterministyczne)
+  let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647};
+  for(let i=0;i<46;i++){const x=rnd()*W,y=rnd()*430,rr=1.4+rnd()*3;g.fillStyle='rgba(255,247,220,'+(.35+rnd()*.5).toFixed(2)+')';g.beginPath();g.arc(x,y,rr,0,7);g.fill()}
+  const star=(cx,cy,R,col)=>{g.fillStyle=col;g.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2?R*.45:R;g.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr)}g.closePath();g.fill()};
+  star(170,150,26,'#ffe9a8');star(905,250,20,'#ffe9a8');star(330,60,14,'#fff3cf');star(760,90,16,'#fff3cf');
+  // księżyc z poświatą
+  const halo=g.createRadialGradient(850,150,20,850,150,200);halo.addColorStop(0,'rgba(255,240,200,.55)');halo.addColorStop(1,'rgba(255,240,200,0)');g.fillStyle=halo;g.fillRect(600,0,480,360);
+  g.save();g.beginPath();g.rect(700,0,300,300);g.arc(884,132,66,0,7);g.clip('evenodd');g.fillStyle='#fff1c9';g.beginPath();g.arc(850,150,74,0,7);g.fill();g.restore();
+  // chmurki
+  const cloud=(x,y,sc,a)=>{g.fillStyle='rgba(255,255,255,'+a+')';[[0,0,46],[52,-14,58],[112,0,44],[56,16,50]].forEach(c=>{g.beginPath();g.arc(x+c[0]*sc,y+c[1]*sc,c[2]*sc,0,7);g.fill()})};
+  cloud(120,330,.8,.35);cloud(640,400,.6,.3);
+  // wzgórza
+  const hill=(y,amp,col,ph)=>{g.fillStyle=col;g.beginPath();g.moveTo(0,H);for(let x=0;x<=W;x+=20)g.lineTo(x,y+Math.sin(x/W*Math.PI*2+ph)*amp);g.lineTo(W,H);g.closePath();g.fill()};
+  hill(560,26,'#8fa7a0',0);hill(600,30,'#6f9482',2);
+  const pine=(x,y,h,col)=>{g.fillStyle=col;for(let i=0;i<3;i++){const t=y-h+i*h*.28,w=h*(.22+i*.1);g.beginPath();g.moveTo(x,t);g.lineTo(x-w,t+h*.38);g.lineTo(x+w,t+h*.38);g.closePath();g.fill()}g.fillRect(x-h*.04,y-h*.1,h*.08,h*.12)};
+  [[70,640,150],[150,655,110],[950,640,160],[1020,660,115],[880,668,100]].forEach(p=>pine(p[0],p[1],p[2],'#2f5a45'));
+  hill(660,24,'#4d7a5f',4);
+  // papierowa karta
+  const cx=70,cy=520,cw=W-140,ch=800;
+  g.save();g.shadowColor='rgba(40,40,80,.28)';g.shadowBlur=40;g.shadowOffsetY=16;g.fillStyle='#fffaf0';memRoundRect(g,cx,cy,cw,ch,44);g.restore();
+  g.strokeStyle='#e8c9a0';g.lineWidth=3;g.setLineDash([3,12]);g.lineCap='round';g.beginPath();g.moveTo(cx+30,cy+30);g.lineTo(cx+cw-30,cy+30);g.lineTo(cx+cw-30,cy+ch-30);g.lineTo(cx+30,cy+ch-30);g.closePath();g.stroke();g.setLineDash([]);
+  // znaczek pocztowy
+  g.save();g.translate(cx+cw-140,cy-30);g.rotate(.07);g.fillStyle='#fffdf6';g.shadowColor='rgba(0,0,0,.2)';g.shadowBlur=14;g.shadowOffsetY=6;memRoundRect(g,0,0,150,176,10);g.restore();
+  g.save();g.translate(cx+cw-140,cy-30);g.rotate(.07);g.fillStyle='#bcd9c4';memRoundRect(g,14,14,122,148,6);g.fillStyle='#2f5a45';g.beginPath();g.moveTo(75,40);g.lineTo(38,110);g.lineTo(112,110);g.closePath();g.fill();g.fillStyle='#ffe9a8';g.beginPath();g.arc(105,50,14,0,7);g.fill();
+  g.font='800 20px '+SANS;g.fillStyle='#2f5a45';g.textAlign='center';g.fillText('Aleks',75,138);g.restore();
+  // stempel
+  g.save();g.translate(cx+cw-250,cy+60);g.rotate(-.2);g.strokeStyle='rgba(180,90,70,.55)';g.lineWidth=4;g.beginPath();g.arc(0,0,48,0,7);g.stroke();g.beginPath();g.arc(0,0,38,0,7);g.stroke();g.font='800 17px '+SANS;g.fillStyle='rgba(180,90,70,.7)';g.textAlign='center';g.fillText(dateLabel(date).slice(0,5),0,6);g.restore();
+  // nagłówek karty
+  txt('Wspomnienie z dnia',cx+70,cy+92,'italic 700 34px '+SERIF,'#9a7b5a','left');
+  txt(dateLabel(date),cx+70,cy+150,'900 76px '+SANS,'#2d3f6b','left');
+  txt('Aleksander · dzień życia '+(r.dayOfLife!=null?r.dayOfLife:'–'),cx+70,cy+208,'700 32px '+SANS,'#6f7fb4','left');
+  // kafelki z ikonami
+  const tiles=[
+    {k:'karmienia',v:String(s.feedingCount||0),c:'#e0742e',ic:'drop'},
+    {k:'mleko',v:(s.milkMl||0)+' ml',c:'#3f77d6',ic:'bottle'},
+    {k:'sen',v:fmtMin(sleepMin),c:'#7b58d4',ic:'moon'},
+    {k:'kąpiel',v:s.bathCount?'tak':'–',c:'#14a89a',ic:'bubble'},
+    {k:'waga',v:s.weightG?s.weightG+' g':'–',c:'#2f8a5f',ic:'heart'},
+    {k:'drzemki',v:String(s.napCount||0),c:'#9a7ce8',ic:'cloud'}];
+  const tw=(cw-140-2*22)/3,th=138,tx0=cx+70,ty0=cy+250;
+  const icon=(t,x,y,col)=>{g.fillStyle=col;g.strokeStyle=col;g.lineWidth=4;
+    if(t==='drop'){g.beginPath();g.moveTo(x,y-18);g.bezierCurveTo(x+22,y+4,x+18,y+20,x,y+20);g.bezierCurveTo(x-18,y+20,x-22,y+4,x,y-18);g.fill()}
+    else if(t==='bottle'){memRoundRect(g,x-11,y-8,22,30,7);memRoundRect(g,x-6,y-18,12,12,3)}
+    else if(t==='moon'){g.beginPath();g.arc(x,y,19,0,7);g.fill();g.fillStyle='#fffaf0';g.beginPath();g.arc(x+9,y-6,16,0,7);g.fill()}
+    else if(t==='bubble'){g.beginPath();g.arc(x-6,y+4,13,0,7);g.stroke();g.beginPath();g.arc(x+12,y-10,8,0,7);g.stroke()}
+    else if(t==='heart'){g.beginPath();g.moveTo(x,y+18);g.bezierCurveTo(x-30,y-2,x-14,y-24,x,y-8);g.bezierCurveTo(x+14,y-24,x+30,y-2,x,y+18);g.fill()}
+    else{g.beginPath();g.arc(x-9,y+4,11,0,7);g.arc(x+4,y-4,14,0,7);g.arc(x+17,y+6,10,0,7);g.fill()}};
+  tiles.forEach((t,i)=>{const x=tx0+(i%3)*(tw+22),y=ty0+Math.floor(i/3)*(th+20);
+    g.fillStyle=t.c+'22';memRoundRect(g,x,y,tw,th,28);
+    icon(t.ic,x+tw/2,y+36,t.c);
+    txt(t.v,x+tw/2,y+84,'900 '+(t.v.length>7?'34':'42')+'px '+SANS,t.c);
+    txt(t.k,x+tw/2,y+119,'700 24px '+SANS,'#8a7b68')});
+  // oś dnia
+  const ay=ty0+2*th+20+56;
+  txt('przebieg dnia',cx+70,ay,'italic 700 28px '+SERIF,'#9a7b5a','left');
+  const rx=cx+70,rw=cw-140,ry=ay+44;
+  g.fillStyle='#efe3cf';memRoundRect(g,rx,ry-9,rw,18,9);
+  (r.sleepSpans||[]).forEach(sp=>{const a=toMin(sp.from),b=toMin(sp.to);g.fillStyle='rgba(123,88,212,.45)';memRoundRect(g,rx+a/1440*rw,ry-9,Math.max(8,(b-a)/1440*rw),18,9)});
+  const dot=(m,rr,col)=>{g.fillStyle='#fffaf0';g.beginPath();g.arc(rx+m/1440*rw,ry,rr+3,0,7);g.fill();g.fillStyle=col;g.beginPath();g.arc(rx+m/1440*rw,ry,rr,0,7);g.fill()};
+  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='KARMIENIE')dot(toMin(e.time),11,'#e0742e');else if(t.startsWith('MLEKO'))dot(toMin(e.time),8,'#3f77d6');else if(t==='KAPIEL')dot(toMin(e.time),9,'#14a89a');else if(t==='WAGA')dot(toMin(e.time),9,'#2f8a5f')});
+  ['0','6','12','18','24'].forEach((h,i)=>txt(h,rx+i/4*rw,ry+34,'700 20px '+SANS,'#b3a48e'));
+  // podpis
+  let hit;
+  if((s.milkMl||0)>=250)hit='Rekordowo mlecznie!';else if(s.bathCount)hit='Dzień pełen bąbelków';else if(s.weightG)hit='Nowy pomiar wagi: '+s.weightG+' g';else if((s.feedingCount||0)>=6)hit='Dzielny, głodny maluch';else if(sleepMin>=360)hit='Spokojny, przyśnięty dzień';else hit='Kolejny dobry dzień';
+  txt(hit,W/2,cy+ch-70,'italic 700 38px '+SERIF,'#2f5a45');
+  txt('Leśny Dziennik Aleksandra',W/2,H-42,'700 24px '+SANS,'rgba(255,248,230,.85)');
   return cv.toDataURL('image/png');
 }
 

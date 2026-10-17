@@ -589,71 +589,88 @@ days.forEach((d,i)=>{
   });
   wrap.appendChild(tl);rhythmHost.appendChild(wrap)
 })}
-function memRoundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.lineTo(x+w-r,y);g.arcTo(x+w-r,y+r,r,r,0,Math.PI/2);g.arcTo(x+w-r,y+h-r,r,r,Math.PI/2,Math.PI);g.arcTo(x+r,y+h-r,r,r,Math.PI,Math.PI*1.5);g.arcTo(x+r,y+r,r,r,Math.PI*1.5,Math.PI*2);g.closePath();g.fill()}
+function memRoundRect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.lineTo(x+w-r,y);g.arcTo(x+w,y,x+w,y+r,r);g.lineTo(x+w,y+h-r);g.arcTo(x+w,y+h,x+w-r,y+h,r);g.lineTo(x+r,y+h);g.arcTo(x,y+h,x,y+h-r,r);g.lineTo(x,y+r);g.arcTo(x,y,x+r,y,r);g.closePath();g.fill()}
+/* Pocztówka 1080×1350: bajkowy leśny wieczór — księżyc, gwiazdy, wzgórza i sosny,
+   papierowa karta z podsumowaniem dnia i znaczkiem pocztowym. */
 function memPostcard(date,r){
-  const W=1080,H=1080;
+  const W=1080,H=1400;
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;
   const g=cv.getContext('2d');
-  const gr=g.createLinearGradient(0,0,0,H);
-  gr.addColorStop(0,'#f8f4ec');gr.addColorStop(.45,'#f0f4e6');gr.addColorStop(1,'#d9e9d2');
-  g.fillStyle=gr;g.fillRect(0,0,W,H);
-  const blob=(cx,cy,rr,col)=>{g.fillStyle=col;g.beginPath();g.arc(cx,cy,rr,0,Math.PI*2);g.fill()};
-  blob(90,60,160,'rgba(47,86,56,.06)');blob(1020,70,110,'rgba(20,184,166,.05)');blob(60,1030,130,'rgba(20,184,166,.05)');blob(1010,1000,180,'rgba(47,86,56,.06)');
-  g.fillStyle='rgba(53,109,67,.85)';memRoundRect(g,60,44,W-120,10,5);
-  g.textAlign='center';g.textBaseline='middle';
-  g.fillStyle='#8a9780';g.font='700 32px sans-serif';g.fillText('W S P O M N I E N I E',W/2,96);
-  g.fillStyle='#a4b1a5';g.font='600 28px sans-serif';g.fillText('DZIEŃ ŻYCIA '+(r.dayOfLife!=null?r.dayOfLife:'-'),W/2,140);
-  g.fillStyle='#243528';g.font='900 96px sans-serif';g.fillText(dateLabel(date),W/2,234);
-  g.strokeStyle='rgba(53,109,67,.35)';g.lineWidth=3;g.beginPath();g.moveTo(W/2-160,266);g.lineTo(W/2+160,266);g.stroke();
-  g.fillStyle='#356D43';g.font='800 46px sans-serif';g.fillText('ALEKSANDER',W/2,310);
+  const SANS='"Nunito","Trebuchet MS","Segoe UI",Arial,sans-serif',SERIF='Georgia,"Times New Roman",serif';
   const s=r.summary||{};
+  const fmtMin=m=>{if(!m&&m!==0)return '–';const h=Math.floor(m/60),mm=m%60;return h?h+' h '+mm+' min':mm+' min'};
   const sleepMin=(s.sleepDayMin||0)+(s.sleepNightMin||0);
-  const fmtMin=m=>{if(!m&&m!==0)return '-';const h=Math.floor(m/60),mm=m%60;return h?h+'h '+mm+'min':mm+'min'};
-  const stats=[
-    {v:String(s.feedingCount||0),k:'KARMIENIA',c:'#e0742e'},
-    {v:(s.milkMl||0)+' ml',k:'MLEKO',c:'#3f77d6'},
-    {v:fmtMin(sleepMin),k:'SEN',c:'#7b58d4'},
-    {v:String(s.napCount||0),k:'DRZEMKI',c:'#9a7ce8'},
-    {v:s.bathCount?'TAK':'—',k:'KĄPIEL',c:'#14B8A6'},
-    {v:s.weightG?(s.weightG)+' g':'—',k:'WAGA',c:'#0f8a5f'},
-  ];
-  const cardW=280,cardH=150,gap=30,startX=(W-3*cardW-2*gap)/2;
-  const drawCard=(st,i,row)=>{
-    const x=startX+(i%3)*(cardW+gap), y=row?500:330;
-    g.fillStyle='rgba(255,255,255,.9)';memRoundRect(g,x,y,cardW,cardH,22);
-    g.fillStyle=st.c;g.font='900 58px sans-serif';g.textAlign='center';g.fillText(st.v,x+cardW/2,y+62);
-    g.fillStyle='#7a8d7f';g.font='700 24px sans-serif';g.fillText(st.k.toUpperCase(),x+cardW/2,y+118);
-  };
-  stats.forEach((st,i)=>drawCard(st,i,i<3?0:1));
-  g.fillStyle='#7a8d7f';g.font='700 26px sans-serif';g.textAlign='left';g.fillText('PRZEBIEG DNIA',84,690);
-  const rx=120,rw=W-240,ry=706,rh=10;
-  g.fillStyle='rgba(255,255,255,.78)';memRoundRect(g,rx,ry-6,rw,rh+12,9);
-  g.fillStyle='rgba(130,150,160,.4)';g.fillRect(rx,ry,rw,rh);
-  const toMin=t=>{const p=t.split(':');return(+p[0])*60+(+p[1])};
-  const dot=(min,rr,col)=>{const cx=rx+(min/1440)*rw;g.fillStyle=col;g.beginPath();g.arc(cx,ry+rh/2,rr,0,Math.PI*2);g.fill()};
-  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='SEN_START'||t==='SEN_STOP')return;const m=toMin(e.time);if(m==null)return;if(t==='KARMIENIE')dot(m,12,'#e0742e');else if(t.startsWith('MLEKO'))dot(m,8,'#3f77d6');else if(t==='KAPIEL')dot(m,9,'#14B8A6');else if(t==='WAGA')dot(m,9,'#0f8a5f')});
-  g.fillStyle='#a4b1a5';g.font='600 20px sans-serif';['0','6','12','18','24'].forEach((h,i)=>{g.textAlign='center';g.fillText(h,rx+(i/4)*rw,ry+rh+18)});
-  const feeds=(r.entries||[]).filter(e=>e.type==='KARMIENIE').map(e=>e.time);
-  g.fillStyle='#7a8d7f';g.font='700 26px sans-serif';g.textAlign='left';g.fillText('KARMIENIA',84,810);
-  let cy=810,cx2=84;
-  feeds.forEach(t=>{
-    const tw=Math.max(92,g.measureText(t)+30);
-    if(cx2+tw>W-60){cx2=84;cy+=56}
-    g.fillStyle='rgba(224,116,46,.16)';memRoundRect(g,cx2,cy-32,tw,42,21);
-    g.fillStyle='#c05a1c';g.font='800 30px sans-serif';g.textAlign='center';g.fillText(t,cx2+tw/2,cy-11);
-    cx2+=tw+12;
-  });
-  const milkTxt='MLEKO: '+(s.milkMl||0)+' ml'+(s.motherMilkMl?(' · matki '+(s.motherMilkMl||0)):'')+(s.modifiedMilkMl?(' · modyfikowane '+(s.modifiedMilkMl||0)):'');
-  g.fillStyle='#3f77d6';g.font='700 28px sans-serif';g.textAlign='left';g.fillText(milkTxt,84,cy+52);
-  let hit='';
-  if((s.milkMl||0)>=250)hit='Rekord mleka: '+(s.milkMl)+' ml!';
-  else if(s.bathCount)hit='Dzień kąpieli!';
-  else if(s.weightG)hit='Nowy pomiar wagi: '+(s.weightG)+' g';
-  else if((s.feedingCount||0)>=6)hit=(s.feedingCount)+' karmień — dzielny maluch!';
-  else if(sleepMin>=360)hit='Bardzo spokojny dzień: '+fmtMin(sleepMin)+' snu';
-  else hit='Piękny dzień pełen wrażeń';
-  g.fillStyle='#0f8a5f';g.font='800 40px sans-serif';g.textAlign='center';g.fillText('★  '+hit,W/2,990);
-  g.fillStyle='#a4b1a5';g.font='600 26px sans-serif';g.fillText('Leśny Dziennik Aleksandra · '+dateLabel(date),W/2,1040);
+  const toMin=t=>{const p=(t||'0:0').split(':');return(+p[0])*60+(+p[1])};
+  const txt=(t,x,y,font,col,al)=>{g.font=font;g.fillStyle=col;g.textAlign=al||'center';g.textBaseline='middle';g.fillText(t,x,y)};
+  // tło: niebo o zmierzchu
+  const sky=g.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#2d3f6b');sky.addColorStop(.38,'#6f7fb4');sky.addColorStop(.62,'#f3cfb8');sky.addColorStop(1,'#fbe9d0');
+  g.fillStyle=sky;g.fillRect(0,0,W,H);
+  // gwiazdy (deterministyczne)
+  let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647};
+  for(let i=0;i<46;i++){const x=rnd()*W,y=rnd()*430,rr=1.4+rnd()*3;g.fillStyle='rgba(255,247,220,'+(.35+rnd()*.5).toFixed(2)+')';g.beginPath();g.arc(x,y,rr,0,7);g.fill()}
+  const star=(cx,cy,R,col)=>{g.fillStyle=col;g.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2?R*.45:R;g.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr)}g.closePath();g.fill()};
+  star(170,150,26,'#ffe9a8');star(905,250,20,'#ffe9a8');star(330,60,14,'#fff3cf');star(760,90,16,'#fff3cf');
+  // księżyc z poświatą
+  const halo=g.createRadialGradient(850,150,20,850,150,200);halo.addColorStop(0,'rgba(255,240,200,.55)');halo.addColorStop(1,'rgba(255,240,200,0)');g.fillStyle=halo;g.fillRect(600,0,480,360);
+  g.save();g.beginPath();g.rect(700,0,300,300);g.arc(884,132,66,0,7);g.clip('evenodd');g.fillStyle='#fff1c9';g.beginPath();g.arc(850,150,74,0,7);g.fill();g.restore();
+  // chmurki
+  const cloud=(x,y,sc,a)=>{g.fillStyle='rgba(255,255,255,'+a+')';[[0,0,46],[52,-14,58],[112,0,44],[56,16,50]].forEach(c=>{g.beginPath();g.arc(x+c[0]*sc,y+c[1]*sc,c[2]*sc,0,7);g.fill()})};
+  cloud(120,330,.8,.35);cloud(640,400,.6,.3);
+  // wzgórza
+  const hill=(y,amp,col,ph)=>{g.fillStyle=col;g.beginPath();g.moveTo(0,H);for(let x=0;x<=W;x+=20)g.lineTo(x,y+Math.sin(x/W*Math.PI*2+ph)*amp);g.lineTo(W,H);g.closePath();g.fill()};
+  hill(560,26,'#8fa7a0',0);hill(600,30,'#6f9482',2);
+  const pine=(x,y,h,col)=>{g.fillStyle=col;for(let i=0;i<3;i++){const t=y-h+i*h*.28,w=h*(.22+i*.1);g.beginPath();g.moveTo(x,t);g.lineTo(x-w,t+h*.38);g.lineTo(x+w,t+h*.38);g.closePath();g.fill()}g.fillRect(x-h*.04,y-h*.1,h*.08,h*.12)};
+  [[70,640,150],[150,655,110],[950,640,160],[1020,660,115],[880,668,100]].forEach(p=>pine(p[0],p[1],p[2],'#2f5a45'));
+  hill(660,24,'#4d7a5f',4);
+  // papierowa karta
+  const cx=70,cy=520,cw=W-140,ch=800;
+  g.save();g.shadowColor='rgba(40,40,80,.28)';g.shadowBlur=40;g.shadowOffsetY=16;g.fillStyle='#fffaf0';memRoundRect(g,cx,cy,cw,ch,44);g.restore();
+  g.strokeStyle='#e8c9a0';g.lineWidth=3;g.setLineDash([3,12]);g.lineCap='round';g.beginPath();g.moveTo(cx+30,cy+30);g.lineTo(cx+cw-30,cy+30);g.lineTo(cx+cw-30,cy+ch-30);g.lineTo(cx+30,cy+ch-30);g.closePath();g.stroke();g.setLineDash([]);
+  // znaczek pocztowy
+  g.save();g.translate(cx+cw-140,cy-30);g.rotate(.07);g.fillStyle='#fffdf6';g.shadowColor='rgba(0,0,0,.2)';g.shadowBlur=14;g.shadowOffsetY=6;memRoundRect(g,0,0,150,176,10);g.restore();
+  g.save();g.translate(cx+cw-140,cy-30);g.rotate(.07);g.fillStyle='#bcd9c4';memRoundRect(g,14,14,122,148,6);g.fillStyle='#2f5a45';g.beginPath();g.moveTo(75,40);g.lineTo(38,110);g.lineTo(112,110);g.closePath();g.fill();g.fillStyle='#ffe9a8';g.beginPath();g.arc(105,50,14,0,7);g.fill();
+  g.font='800 20px '+SANS;g.fillStyle='#2f5a45';g.textAlign='center';g.fillText('Aleks',75,138);g.restore();
+  // stempel
+  g.save();g.translate(cx+cw-250,cy+60);g.rotate(-.2);g.strokeStyle='rgba(180,90,70,.55)';g.lineWidth=4;g.beginPath();g.arc(0,0,48,0,7);g.stroke();g.beginPath();g.arc(0,0,38,0,7);g.stroke();g.font='800 17px '+SANS;g.fillStyle='rgba(180,90,70,.7)';g.textAlign='center';g.fillText(dateLabel(date).slice(0,5),0,6);g.restore();
+  // nagłówek karty
+  txt('Wspomnienie z dnia',cx+70,cy+92,'italic 700 34px '+SERIF,'#9a7b5a','left');
+  txt(dateLabel(date),cx+70,cy+150,'900 76px '+SANS,'#2d3f6b','left');
+  txt('Aleksander · dzień życia '+(r.dayOfLife!=null?r.dayOfLife:'–'),cx+70,cy+208,'700 32px '+SANS,'#6f7fb4','left');
+  // kafelki z ikonami
+  const tiles=[
+    {k:'karmienia',v:String(s.feedingCount||0),c:'#e0742e',ic:'drop'},
+    {k:'mleko',v:(s.milkMl||0)+' ml',c:'#3f77d6',ic:'bottle'},
+    {k:'sen',v:fmtMin(sleepMin),c:'#7b58d4',ic:'moon'},
+    {k:'kąpiel',v:s.bathCount?'tak':'–',c:'#14a89a',ic:'bubble'},
+    {k:'waga',v:s.weightG?s.weightG+' g':'–',c:'#2f8a5f',ic:'heart'},
+    {k:'drzemki',v:String(s.napCount||0),c:'#9a7ce8',ic:'cloud'}];
+  const tw=(cw-140-2*22)/3,th=138,tx0=cx+70,ty0=cy+250;
+  const icon=(t,x,y,col)=>{g.fillStyle=col;g.strokeStyle=col;g.lineWidth=4;
+    if(t==='drop'){g.beginPath();g.moveTo(x,y-18);g.bezierCurveTo(x+22,y+4,x+18,y+20,x,y+20);g.bezierCurveTo(x-18,y+20,x-22,y+4,x,y-18);g.fill()}
+    else if(t==='bottle'){memRoundRect(g,x-11,y-8,22,30,7);memRoundRect(g,x-6,y-18,12,12,3)}
+    else if(t==='moon'){g.beginPath();g.arc(x,y,19,0,7);g.fill();g.fillStyle='#fffaf0';g.beginPath();g.arc(x+9,y-6,16,0,7);g.fill()}
+    else if(t==='bubble'){g.beginPath();g.arc(x-6,y+4,13,0,7);g.stroke();g.beginPath();g.arc(x+12,y-10,8,0,7);g.stroke()}
+    else if(t==='heart'){g.beginPath();g.moveTo(x,y+18);g.bezierCurveTo(x-30,y-2,x-14,y-24,x,y-8);g.bezierCurveTo(x+14,y-24,x+30,y-2,x,y+18);g.fill()}
+    else{g.beginPath();g.arc(x-9,y+4,11,0,7);g.arc(x+4,y-4,14,0,7);g.arc(x+17,y+6,10,0,7);g.fill()}};
+  tiles.forEach((t,i)=>{const x=tx0+(i%3)*(tw+22),y=ty0+Math.floor(i/3)*(th+20);
+    g.fillStyle=t.c+'22';memRoundRect(g,x,y,tw,th,28);
+    icon(t.ic,x+tw/2,y+36,t.c);
+    txt(t.v,x+tw/2,y+84,'900 '+(t.v.length>7?'34':'42')+'px '+SANS,t.c);
+    txt(t.k,x+tw/2,y+119,'700 24px '+SANS,'#8a7b68')});
+  // oś dnia
+  const ay=ty0+2*th+20+56;
+  txt('przebieg dnia',cx+70,ay,'italic 700 28px '+SERIF,'#9a7b5a','left');
+  const rx=cx+70,rw=cw-140,ry=ay+44;
+  g.fillStyle='#efe3cf';memRoundRect(g,rx,ry-9,rw,18,9);
+  (r.sleepSpans||[]).forEach(sp=>{const a=toMin(sp.from),b=toMin(sp.to);g.fillStyle='rgba(123,88,212,.45)';memRoundRect(g,rx+a/1440*rw,ry-9,Math.max(8,(b-a)/1440*rw),18,9)});
+  const dot=(m,rr,col)=>{g.fillStyle='#fffaf0';g.beginPath();g.arc(rx+m/1440*rw,ry,rr+3,0,7);g.fill();g.fillStyle=col;g.beginPath();g.arc(rx+m/1440*rw,ry,rr,0,7);g.fill()};
+  (r.entries||[]).forEach(e=>{const t=e.type||'';if(t==='KARMIENIE')dot(toMin(e.time),11,'#e0742e');else if(t.startsWith('MLEKO'))dot(toMin(e.time),8,'#3f77d6');else if(t==='KAPIEL')dot(toMin(e.time),9,'#14a89a');else if(t==='WAGA')dot(toMin(e.time),9,'#2f8a5f')});
+  ['0','6','12','18','24'].forEach((h,i)=>txt(h,rx+i/4*rw,ry+34,'700 20px '+SANS,'#b3a48e'));
+  // podpis
+  let hit;
+  if((s.milkMl||0)>=250)hit='Rekordowo mlecznie!';else if(s.bathCount)hit='Dzień pełen bąbelków';else if(s.weightG)hit='Nowy pomiar wagi: '+s.weightG+' g';else if((s.feedingCount||0)>=6)hit='Dzielny, głodny maluch';else if(sleepMin>=360)hit='Spokojny, przyśnięty dzień';else hit='Kolejny dobry dzień';
+  txt(hit,W/2,cy+ch-70,'italic 700 38px '+SERIF,'#2f5a45');
+  txt('Leśny Dziennik Aleksandra',W/2,H-42,'700 24px '+SANS,'rgba(255,248,230,.85)');
   return cv.toDataURL('image/png');
 }
 
