@@ -728,7 +728,14 @@ bool rgbColorTransferDoneCallback(esp_lcd_panel_handle_t panel,
   return highPriorityTaskWoken == pdTRUE;
 }
 
-// Callback VSYNC: przy KAZDEJ klatce (~60x/s) zglaszamy restart DMA panelu. Jest to
+// Zegar pikseli panelu. Przy 6 MHz klatka trwala ~48 ms (REALNE ~21 FPS, nie 60) — to byl
+// sufit plynnosci animacji. 12 MHz daje ~42 FPS (klatka ~24 ms). Gdyby obraz zaczal
+// "plywac"/dryfowac, wroc do 6000000 (jedyna zmiana potrzebna w tym miejscu).
+// Ramka = (480+8+50+14) x (480+8+20+10) = 552 x 518 px.
+constexpr uint32_t RGB_PCLK_NORMAL_HZ = 12000000;
+volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje render LVGL z odswiezaniem panelu
+
+// Callback VSYNC: przy KAZDEJ klatce panelu zglaszamy restart DMA panelu. Jest to
 // programowy odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC=y (niedostepnego w Arduino IDE
 // bez menuconfig): kanal GDMA jest resetowany na kazdym VBlank, wiec ewentualny dryf
 // obrazu koryguje sie w ~16 ms zamiast czekac na cykliczny timer. Callback MUSI byc
@@ -741,6 +748,7 @@ bool rgbVsyncCallback(esp_lcd_panel_handle_t panel,
                                 void *userCtx) {
   (void)edata;
   (void)userCtx;
+  rgbVsyncCount = rgbVsyncCount + 1;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
   if (panel) esp_lcd_rgb_panel_restart(panel);
 #endif
@@ -761,7 +769,7 @@ bool initialiseNativeRgbPanel() {
 
   esp_lcd_rgb_panel_config_t config = {};
   config.clk_src = LCD_CLK_SRC_DEFAULT;
-  config.timings.pclk_hz = 6000000;
+  config.timings.pclk_hz = RGB_PCLK_NORMAL_HZ;
   config.timings.h_res = SCREEN_WIDTH;
   config.timings.v_res = SCREEN_HEIGHT;
   config.timings.hsync_pulse_width = 8;
@@ -919,7 +927,6 @@ void requestRgbResync() {
 // po prostu sie wylacza (brak bledu linkowania).
 extern "C" esp_err_t esp_lcd_rgb_panel_set_pclk(esp_lcd_panel_handle_t panel,
                                                uint32_t freq_hz) __attribute__((weak));
-constexpr uint32_t RGB_PCLK_NORMAL_HZ = 6000000;
 // Pelny bufor bounce (80 linii) starcza przy 1 MHz na ~44 ms (przy 6 MHz tylko ~7 ms),
 // czyli na czas typowego kasowania sektora flasha. Do dostrojenia na urzadzeniu.
 constexpr uint32_t RGB_PCLK_FLASH_SAFE_HZ = 1000000;
@@ -934,7 +941,7 @@ struct FlashWriteGuard {
     active = true;
     if (__atomic_add_fetch(&flashGuardDepth, 1, __ATOMIC_SEQ_CST) == 1) {
       esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_FLASH_SAFE_HZ);
-      // Nowy zegar zaczyna dzialac od najblizszego VSYNC (do ~1 klatki = 47 ms przy 6 MHz).
+      // Nowy zegar zaczyna dzialac od najblizszego VSYNC (do ~1 klatki panelu).
       delay(70);
     }
   }
@@ -5475,12 +5482,70 @@ void requestWeatherFetch() {
 // po uruchomieniu LVGL, aktualizowany przy kazdym etapie startu.
 constexpr uint8_t BOOT_STEP_COUNT = 5; // kroki: Wi-Fi, zegar, pamiec, pogoda, dane z WWW (ui_modern.h)
 
-// Wymusza jedno odswiezenie LVGL, aby zmiany byly widoczne mimo blokujacych krokow.
+// --- Pompa LVGL na czas startu ---------------------------------------------------
+// Kroki startu (Wi-Fi, NTP, pobieranie danych) BLOKUJA setup() nawet na kilkanascie
+// sekund — wczesniej animacje ekranu startowego zamarzaly i "przeskakiwaly" przy kazdym
+// takim kroku. Teraz osobne zadanie FreeRTOS (rdzen 0) renderuje LVGL z czestotliwoscia
+// odswiezania panelu, a kazde wywolanie LVGL z setup() jest chronione muteksem.
+static SemaphoreHandle_t bootLvMutex = nullptr;
+static TaskHandle_t bootPumpTask = nullptr;
+static volatile bool bootPumpRun = false;
+
+struct BootLvLock {
+  BootLvLock() { if (bootLvMutex) xSemaphoreTake(bootLvMutex, portMAX_DELAY); }
+  ~BootLvLock() { if (bootLvMutex) xSemaphoreGive(bootLvMutex); }
+};
+
+static void bootPumpTaskFn(void *) {
+  uint32_t lastMs = millis();
+  uint32_t lastVsync = rgbVsyncCount;
+  while (bootPumpRun) {
+    const uint32_t waitStart = millis();
+    while (rgbVsyncCount == lastVsync && millis() - waitStart < 30 && bootPumpRun) vTaskDelay(1);
+    lastVsync = rgbVsyncCount;
+    if (xSemaphoreTake(bootLvMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      const uint32_t nowMs = millis();
+      lv_tick_inc(nowMs - lastMs);
+      lastMs = nowMs;
+      lv_timer_handler();
+      xSemaphoreGive(bootLvMutex);
+    }
+    vTaskDelay(1);
+  }
+  bootPumpTask = nullptr;
+  vTaskDelete(nullptr);
+}
+
+static void bootPumpStart() {
+  if (bootPumpTask) return;
+  if (!bootLvMutex) bootLvMutex = xSemaphoreCreateMutex();
+  bootPumpRun = true;
+  if (xTaskCreatePinnedToCore(bootPumpTaskFn, "bootui", 6144, nullptr, 2, &bootPumpTask, 0) != pdPASS) {
+    bootPumpRun = false;
+    bootPumpTask = nullptr;  // brak zadania — fallback: bootPumpLvgl() z setup()
+  }
+}
+
+static void bootPumpStop() {
+  if (!bootPumpTask && !bootPumpRun) return;
+  bootPumpRun = false;
+  const uint32_t t0 = millis();
+  while (bootPumpTask && millis() - t0 < 500) delay(5);
+  lastLvglTickMs = millis();  // loop() przejmuje tick LVGL
+}
+
+// Wymusza jedno odswiezenie LVGL (fallback gdy zadanie pompy nie dziala).
 void bootPumpLvgl() {
+  if (bootPumpTask) return;  // zadanie samo odswieza ekran
   const uint32_t nowMs = millis();
   lv_tick_inc(nowMs - lastLvglTickMs);
   lastLvglTickMs = nowMs;
   lv_timer_handler();
+}
+
+static void bootStatus(const char *text) {
+  BootLvLock lock;
+  uiBootSetStatus(text);
 }
 
 // Aktualizuje pasek postepu synchronizacji z hostingiem na ekranie startowym.
@@ -5489,7 +5554,10 @@ void updateBootSyncUi() {
   int pct = hostSyncProgressPct;
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
-  uiBootProgress(pct);
+  {
+    BootLvLock lock;
+    uiBootProgress(pct);
+  }
   bootPumpLvgl();
 }
 
@@ -5506,7 +5574,7 @@ void syncOnBoot() {
   }
   bootStep(4, 0);
   hostSyncProgressPct = 0;
-  uiBootSetStatus("Odbieranie danych z WWW...");
+  bootStatus("Odbieranie danych z WWW...");
   const uint32_t startMs = millis();
   bool done = false;
   while (millis() - startMs < 25000) {
@@ -5530,11 +5598,11 @@ void syncOnBoot() {
   if (done) {
     hostSyncProgressPct = 100;
     bootStep(4, 1);
-    uiBootSetStatus("Dane WWW odebrane!");
+    bootStatus("Dane WWW odebrane!");
   } else {
     hostSyncProgressPct = -1;
     bootStep(4, 2);
-    uiBootSetStatus("Brak danych WWW – start mimo to");
+    bootStatus("Brak danych WWW – start mimo to");
   }
   updateBootSyncUi();
 #else
@@ -5550,13 +5618,17 @@ void showBootScreen() {
   uiBootCreate();
   bootSyncBar = lv_screen_active();
   bootPumpLvgl();
+  bootPumpStart();  // od teraz animacje startu ida plynnie takze podczas blokujacych krokow
 }
 
 // state: 0 = w toku, 1 = OK, 2 = pominiete/blad.
 void bootStep(uint8_t idx, uint8_t state) {
   if (idx >= BOOT_STEP_COUNT) return;
-  uiBootStep(idx, state);
-  if (state != 0 && idx == BOOT_STEP_COUNT - 1) uiBootSetStatus("Gotowe!");
+  {
+    BootLvLock lock;
+    uiBootStep(idx, state);
+    if (state != 0 && idx == BOOT_STEP_COUNT - 1) uiBootSetStatus("Gotowe!");
+  }
   bootPumpLvgl();
 }
 
@@ -5760,9 +5832,12 @@ void setup() {
     Serial.println("Telegram: nie mozna uruchomic zadania FreeRTOS — wysylka wylaczona.");
     telegramTaskHandle = nullptr;
   }
-  updateNightMode();
-  lv_timer_create(agingTickCb, 30000, nullptr);
-  counterAlarmTimer = lv_timer_create(counterAlarmTickCb, 500, nullptr);
+  {
+    BootLvLock lock;  // LVGL jest pompowane w osobnym zadaniu
+    updateNightMode();
+    lv_timer_create(agingTickCb, 30000, nullptr);
+    counterAlarmTimer = lv_timer_create(counterAlarmTickCb, 500, nullptr);
+  }
   lastUiWifiConnected = WiFi.status() == WL_CONNECTED;
 
   // --- Czekamy az wszystko bedzie gotowe zanim wejdziemy do aplikacji ---
@@ -5770,7 +5845,7 @@ void setup() {
   // (do BOOT_TIME_WAIT_MS). Bez Wi-Fi nie ma na co czekac. Watchdog nieaktywny —
   // ta petla jest bezpieczna, a bootPumpLvgl utrzymuje animacje/odswiezanie ekranu.
   if (WiFi.status() == WL_CONNECTED && !timeIsValid) {
-    uiBootSetStatus("Synchronizacja zegara...");
+    bootStatus("Synchronizacja zegara...");
     constexpr uint32_t BOOT_TIME_WAIT_MS = 12000;
     const uint32_t waitStart = millis();
     while (!timeIsValid && millis() - waitStart < BOOT_TIME_WAIT_MS) {
@@ -5796,13 +5871,16 @@ void setup() {
   appendBackupIfDue();
 
   // "Gotowe!" tylko gdy krytyczne elementy sa OK (pamiec + czas + dane WWW). Inaczej informacja.
-  if (storageReady && timeIsValid && hostRevisionLocal >= 0) uiBootSetStatus("Gotowe!");
-  else if (hostRevisionLocal < 0) uiBootSetStatus("Brak danych WWW – start mimo to");
-  else if (!timeIsValid) uiBootSetStatus("Brak czasu – start mimo to");
-  else uiBootSetStatus("Start...");
-  uiBootProgress(100);
-  // Chwila na pokazanie animacji "Gotowe!" (LVGL pompowany, aby animacje szly).
-  for (uint8_t i = 0; i < 24; ++i) { bootPumpLvgl(); delay(30); }
+  if (storageReady && timeIsValid && hostRevisionLocal >= 0) bootStatus("Gotowe!");
+  else if (hostRevisionLocal < 0) bootStatus("Brak danych WWW – start mimo to");
+  else if (!timeIsValid) bootStatus("Brak czasu – start mimo to");
+  else bootStatus("Start...");
+  {
+    BootLvLock lock;
+    uiBootProgress(100);
+  }
+  delay(900);  // chwila na pokazanie animacji "Gotowe!" (zadanie pompy renderuje ekran)
+  bootPumpStop();
 
   // Pusty ekran glowny z initScreens() nie jest juz potrzebny (panel budujemy dynamicznie).
   if (homeScreen) {
@@ -5944,7 +6022,14 @@ uint32_t lvglNowMs = millis();
   // wiec stac nas na gestszy odczyt GT911 niz wczesniejsze 4x2 ms.
   const uint32_t busyBeforeDelayUs = micros() - loopStart;
   uint32_t samplingWorkUs = 0;
-  for (uint8_t s = 0; s < 8; ++s) {
+  // Render LVGL synchronizujemy z VSYNC panelu: czekamy (probkujac dotyk co 1 ms) na
+  // kolejna klatke panelu i dopiero wtedy wykonujemy JEDEN krok animacji + render.
+  // Dzieki temu kazda wyswietlona klatka ma rowny odstep w czasie (bez "klatkowania"
+  // wynikajacego z rozjazdu 16 ms LVGL vs. okres klatki panelu). Limit 40 ms chroni
+  // przed brakiem VSYNC (wtedy dziala jak dawniej, ~25 FPS).
+  static uint32_t lastRenderedVsync = 0;
+  const uint32_t waitStartMs = millis();
+  do {
     delay(1);
     const uint32_t workStart = micros();
     lvglNowMs = millis();
@@ -5952,7 +6037,8 @@ uint32_t lvglNowMs = millis();
     lastLvglTickMs = lvglNowMs;
     if (touchDriver) lv_indev_read(touchDriver);
     samplingWorkUs += micros() - workStart;
-  }
+  } while (rgbVsyncCount == lastRenderedVsync && millis() - waitStartMs < 40);
+  lastRenderedVsync = rgbVsyncCount;
   const uint32_t afterDelayStartUs = micros();
 
   // Pelny render LVGL: timery + odrysowanie zmian wywolanych dotykiem.

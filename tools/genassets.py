@@ -53,6 +53,49 @@ def rays():
         out.append('<rect x="47" y="%d" width="6" height="%d" rx="3" fill="#F7B733" transform="rotate(%d 50 50)"/>' % (4 if i % 2 == 0 else 9, ln, a))
     return ''.join(out)
 
+
+import math
+def hedge_quills():
+    cx, cy, rx, ry, n = 66, 82, 63, 60, 27
+    pts = []
+    for k in range(n + 1):
+        th = math.pi * (0.88 + 1.24 * k / n)
+        for rr in ((1.0, 0.82) if k < n else (1.0,)):
+            ang = th if rr == 1.0 else th + math.pi * 1.24 / n / 2
+            pts.append((cx + rx * rr * math.cos(ang), cy + ry * rr * math.sin(ang) * (1 if math.sin(ang) < 0 else 0.62)))
+    for k in range(1, 12):  # dol (gladki luk)
+        th = math.pi * (0.12 - 0.24 * k / 12 + 0.0)
+        pts.append((cx + rx * 0.8 * math.cos(th), cy + ry * 0.8 * math.sin(math.pi * (0.12 + 0.76 * (1 - k / 12)))))
+    d = 'M' + 'L'.join('%.1f %.1f' % p for p in pts) + 'Z'
+    hl = ''.join('<path d="M%.1f %.1f L%.1f %.1f" stroke="#A67E58" stroke-width="2.2" stroke-linecap="round" opacity=".55"/>' % (
+        cx + rx * 0.62 * math.cos(a), cy + ry * 0.62 * math.sin(a), cx + rx * 0.78 * math.cos(a), cy + ry * 0.78 * math.sin(a))
+        for a in [math.pi * (1.08 + 0.84 * t / 10) for t in range(11)])
+    return '<defs>%s</defs><path d="%s" fill="url(#q)" stroke="#3A271C" stroke-width="1.4" stroke-linejoin="round"/>%s' % (G('q', '#8A6446', '#4B3225'), d, hl)
+
+def hedge_face():
+    fringe = []
+    cx, cy, rx, ry = 66, 92, 40, 35
+    for k in range(11):
+        a0 = math.pi * (1.12 + 0.76 * k / 11); a1 = math.pi * (1.12 + 0.76 * (k + 1) / 11); am = (a0 + a1) / 2
+        p0 = (cx + rx * math.cos(a0), cy + ry * math.sin(a0)); p1 = (cx + rx * math.cos(a1), cy + ry * math.sin(a1))
+        tip = (cx + (rx + 9) * math.cos(am), cy + (ry + 9) * math.sin(am))
+        fringe.append('M%.1f %.1f L%.1f %.1f L%.1f %.1fZ' % (p0[0], p0[1], tip[0], tip[1], p1[0], p1[1]))
+    return ('<defs>%s%s</defs>'
+            '<ellipse cx="46" cy="127" rx="13" ry="6" fill="#D6A074"/><ellipse cx="86" cy="127" rx="13" ry="6" fill="#D6A074"/>'
+            '<circle cx="31" cy="68" r="12" fill="#E3B089"/><circle cx="101" cy="68" r="12" fill="#E3B089"/>'
+            '<circle cx="31" cy="68" r="6.500" fill="#F3C8A8"/><circle cx="101" cy="68" r="6.500" fill="#F3C8A8"/>'
+            '<ellipse cx="66" cy="92" rx="40" ry="35" fill="url(#f)"/>'
+            '<path d="%s" fill="#5A3D2B"/>'
+            '<ellipse cx="66" cy="104" rx="23" ry="18" fill="#FBEAD6"/>'
+            '<ellipse cx="66" cy="97" rx="7.500" ry="5.500" fill="#33241C"/><ellipse cx="63.500" cy="95" rx="2.600" ry="1.600" fill="#fff" opacity=".65"/>'
+            '<path d="M66 102.500v6" stroke="#6B4A38" stroke-width="2" stroke-linecap="round"/>'
+            % (R('f', '#FBE6CC', '#E7B88C', .45, .35, .8), '', ''.join(fringe)))
+
+def glow_svg(n):
+    c = n / 2.0
+    return ('<defs><radialGradient id="g"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".35" stop-color="#fff" stop-opacity=".45"/>'
+            '<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><circle cx="%g" cy="%g" r="%g" fill="url(#g)"/>' % (c, c, c))
+
 SPRITES = {
  # name: (w, h, svg_inner(viewBox 0 0 w h))
  'sun_disk': (100, 100, '<defs>%s</defs><circle cx="50" cy="50" r="40" fill="#FFE9A8" opacity=".35"/><circle cx="50" cy="50" r="27" fill="url(#s)"/><ellipse cx="42" cy="40" rx="9" ry="6" fill="#fff" opacity=".45" transform="rotate(-30 42 40)"/>' % R('s', '#FFE27A', '#F5A623')),
@@ -66,12 +109,22 @@ SPRITES = {
  'star4':    (20, 20, '<path d="M10 0c.8 5.500 3.500 8.200 10 10-6.500 1.800-9.200 4.500-10 10-.8-5.500-3.500-8.200-10-10C6.500 8.200 9.200 5.500 10 0Z" fill="#FFF1C2"/>'),
  'glow':     (64, 64, '<defs><radialGradient id="g"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".35" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><circle cx="32" cy="32" r="32" fill="url(#g)"/>'),
  'leaf':     (40, 40, '<defs>%s</defs><path d="M6 34C6 17 16 7 35 5c0 19-9 29-25 29Z" fill="url(#l)"/><path d="M6 34C14 22 22 15 31 10" stroke="#2E6B45" stroke-width="2" fill="none" stroke-linecap="round" opacity=".7"/>' % G('l', '#7DC58F', '#3F8C5A')),
- 'bear':     (132, 132, '<defs>%s%s%s</defs><circle cx="30" cy="40" r="18" fill="url(#h)"/><circle cx="102" cy="40" r="18" fill="url(#h)"/><circle cx="30" cy="40" r="10" fill="#F5C7B0"/><circle cx="102" cy="40" r="10" fill="#F5C7B0"/><circle cx="66" cy="72" r="46" fill="url(#h)"/><ellipse cx="66" cy="88" rx="24" ry="19" fill="#F8DFC6"/><ellipse cx="66" cy="79" rx="8.500" ry="6" fill="#4A3328"/><ellipse cx="63.500" cy="77" rx="2.500" ry="1.500" fill="#fff" opacity=".6"/><path d="M58 94c3 4 13 4 16 0" stroke="#4A3328" stroke-width="2.800" fill="none" stroke-linecap="round" opacity="0"/><path d="M26 54C28 28 48 20 66 20s38 8 40 34C92 40 40 40 26 54Z" fill="url(#cap)"/><path d="M24 56c14-12 70-12 84 0" stroke="#2F6A45" stroke-width="9" fill="none" stroke-linecap="round"/><path d="M30 55c12-8 60-8 72 0" stroke="#4E9468" stroke-width="3" fill="none" stroke-linecap="round" opacity=".7"/><circle cx="66" cy="16" r="9" fill="#F4E2B8"/><circle cx="63" cy="13" r="3" fill="#fff" opacity=".6"/>' % (R('h', '#D49B6B', '#A8683F', .4, .3, .85), G('cap', '#5BA377', '#35794F'), '')),
+ # JEZ (ekran startowy): kolce + twarz jako dwa sprite'y; oczy/policzki/usmiech to zywe obiekty LVGL
+ 'hedge_q':  (132, 132, hedge_quills()),
+ 'hedge_f':  (132, 132, hedge_face()),
  'rattle':   (112, 52, '<g stroke-linecap="round" stroke-linejoin="round"><path d="M33 31 47 47" stroke="#E8B6A0" stroke-width="6" fill="none"/><circle cx="52" cy="47" r="6" fill="none" stroke="#F08AA0" stroke-width="3.2"/><circle cx="25" cy="22" r="17" fill="#FFD36B" stroke="#E5A52F" stroke-width="2.4"/><path d="M13 15c7 3 17 3 24-1M12 28c8 4 18 4 26-1" fill="none" stroke="#FFF6DC" stroke-width="3"/><circle cx="22" cy="17" r="2.200" fill="#F08AA0"/><circle cx="31" cy="26" r="2.200" fill="#7CC7B8"/><circle cx="25" cy="5.500" r="2.600" fill="#F08AA0"/><circle cx="92" cy="16" r="10" fill="none" stroke="#F08AA0" stroke-width="4"/><ellipse cx="92" cy="34" rx="19" ry="10" fill="#9FD8CF" stroke="#58A89A" stroke-width="2.400"/><ellipse cx="92" cy="34" rx="8" ry="4.500" fill="#E6F6F2" stroke="#58A89A" stroke-width="1.600"/><circle cx="92" cy="47" r="6" fill="#FFD9C9" stroke="#E29B82" stroke-width="2.200"/></g>'),
 }
 
 MASKS = {  # maski A8 (kolorowane w LVGL)
+ 'glow_xl': (224, 224, glow_svg(224)),
+ 'glow_m': (140, 140, glow_svg(140)),
+ 'glow_w': (116, 116, glow_svg(116)),
+ 'glow_f1': (26, 26, glow_svg(26)),
+ 'glow_f2': (32, 32, glow_svg(32)),
+ 'glow_f3': (40, 40, glow_svg(40)),
  'pine': (40, 64, '<path d="M20 2 7 24h8L4 42h10L2 58h14v4h8v-4h14L26 42h10L25 24h8Z" fill="#000"/>'),
+ 'hill_a': (480, 140, '<g transform="scale(2 2)"><path d="M0 70V34C40 10 90 2 140 14c40 10 70 26 100 4v52Z" fill="#000"/></g>'),
+ 'hill_b': (563, 164, '<g transform="scale(2.346 2.343)"><path d="M0 70V34C40 10 90 2 140 14c40 10 70 26 100 4v52Z" fill="#000"/></g>'),
  'hill': (240, 70, '<path d="M0 70V34C40 10 90 2 140 14c40 10 70 26 100 4v52Z" fill="#000"/>'),
 }
 

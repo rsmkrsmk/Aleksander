@@ -208,7 +208,7 @@ static lv_obj_t *uiBootScr = nullptr;
 static lv_obj_t *uiBootInd[UI_BOOT_STEPS];     // kontener wskaznika kroku
 static lv_obj_t *uiBootTxt[UI_BOOT_STEPS];
 static lv_obj_t *uiBootBarFill = nullptr, *uiBootPct = nullptr, *uiBootStatus = nullptr;
-static lv_obj_t *uiBootEyeL = nullptr, *uiBootEyeR = nullptr;
+static lv_obj_t *uiBootEyeL = nullptr, *uiBootEyeR = nullptr, *uiBootHedge = nullptr, *uiBootSmile = nullptr;
 static lv_timer_t *uiBootTimer = nullptr;
 static int uiBootBarTarget = 0;
 struct UiFly { lv_obj_t *img; float cx, cy, rx, ry, sp, ph; };
@@ -221,17 +221,24 @@ static void ui_boot_tick(lv_timer_t *t) {
   const float tm = lv_tick_get() * 0.001f;
   for (auto &f : uiFlies) {
     if (!f.img) continue;
-    lv_obj_set_pos(f.img, (int)(f.cx + f.rx * sinf(tm * f.sp + f.ph)) - 12, (int)(f.cy + f.ry * cosf(tm * f.sp * 0.7f + f.ph)) - 12);
+    const int half = lv_obj_get_width(f.img) / 2;
+    lv_obj_set_pos(f.img, (int)(f.cx + f.rx * sinf(tm * f.sp + f.ph)) - half, (int)(f.cy + f.ry * cosf(tm * f.sp * 0.7f + f.ph)) - half);
     const int o = 120 + (int)(110.f * (0.5f + 0.5f * sinf(tm * f.sp * 2.1f + f.ph * 2.f)));
     lv_obj_set_style_image_opa(f.img, (lv_opa_t)o, 0);
   }
 }
 static void ui_boot_blink_cb(lv_timer_t *t) {
+  static uint8_t n = 0;
   (void)t;
-  // mrugniecie: oczy spłaszczaja sie na ~140 ms
+  // mrugniecie: oczy splaszczaja sie (i obnizaja srodek) na ~140 ms
   for (lv_obj_t *e : {uiBootEyeL, uiBootEyeR}) {
     if (!e) continue;
     ui_anim_start(e, ui_cb_h, 15, 2, 70, 0, lv_anim_path_ease_in, 90);
+    ui_anim_start(e, ui_cb_y, 78, 84, 70, 0, lv_anim_path_ease_in, 90);
+  }
+  // co drugi raz jez podskakuje z radosci
+  if (uiBootHedge && (n++ & 1)) {
+    ui_anim_start(uiBootHedge, ui_cb_y, 44, 26, 190, 120, lv_anim_path_ease_out, 260);
   }
 }
 static lv_timer_t *uiBootBlinkTimer = nullptr;
@@ -261,16 +268,16 @@ static void uiBootCreate() {
   }
 
   // ksiezyc z poswiata, delikatnie unosi sie
-  lv_obj_t *glow = ui_img(s, &sp_glow, 410 - 32, 70 - 32);
-  lv_image_set_scale(glow, 560); ui_tint(glow, lv_color_hex(0xFFE9A8), 60);
+  lv_obj_t *glow = ui_img(s, &mk_glow_m, 410 - 70, 70 - 70);
+  ui_tint(glow, lv_color_hex(0xFFE9A8), 60);
   lv_obj_t *moon = ui_img(s, &sp_moon, 410 - 50, 70 - 50);
   lv_image_set_scale(moon, 190);
   ui_anim_start(moon, ui_cb_y, 20, 28, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
-  ui_anim_start(glow, ui_cb_y, 38, 46, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
+  ui_anim_start(glow, ui_cb_y, 0, 8, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
 
   // wzgorza i sosny (sylwety)
-  lv_obj_t *h1 = ui_img(s, &mk_hill, -40, 232); lv_image_set_scale(h1, 512); ui_tint(h1, lv_color_hex(0x1B4733));
-  lv_obj_t *h2 = ui_img(s, &mk_hill, 200, 262); lv_image_set_scale(h2, 600); ui_tint(h2, lv_color_hex(0x163B2B));
+  lv_obj_t *h1 = ui_img(s, &mk_hill_a, -160, 197); ui_tint(h1, lv_color_hex(0x1B4733));
+  lv_obj_t *h2 = ui_img(s, &mk_hill_b, 39, 215); ui_tint(h2, lv_color_hex(0x163B2B));
   static const int16_t px_[] = {12, 52, 396, 436, 360, 24};
   static const int16_t py_[] = {188, 214, 196, 176, 226, 238};
   static const int16_t ps_[] = {420, 330, 380, 470, 300, 250};
@@ -282,34 +289,38 @@ static void uiBootCreate() {
   }
   ui_box(s, 0, 296, 480, 184, 0, lv_color_hex(0x0F2A1F));
 
-  // misiek: wyskakuje z przeskokiem, potem oddycha
-  lv_obj_t *halo = ui_img(s, &sp_glow, 150, 26);
-  lv_image_set_scale(halo, 900); ui_tint(halo, lv_color_hex(0xBFE8C8), 60);
-  lv_obj_t *bearBox = ui_box(s, 174, 44, 132, 132, 0, lv_color_black(), LV_OPA_TRANSP);
-  lv_obj_t *bear = ui_img(bearBox, &sp_bear, 0, 0);
-  lv_image_set_pivot(bear, 66, 132);
-  ui_anim_start(bear, ui_cb_scale, 0, 256, 900, 150, lv_anim_path_overshoot);
-  ui_anim_start(bear, ui_cb_scale, 256, 262, 1800, 1200, lv_anim_path_ease_in_out, 1800, true);
-  // twarz: oczy, policzki, usmiech (animowane mruganie)
-  uiBootEyeL = ui_box(bearBox, 41, 56, 11, 15, 6, lv_color_hex(0x3B2A1E));
-  uiBootEyeR = ui_box(bearBox, 80, 56, 11, 15, 6, lv_color_hex(0x3B2A1E));
-  lv_obj_set_style_translate_y(uiBootEyeL, 0, 0);
-  ui_box(bearBox, 41 + 2, 58, 3, 4, 2, lv_color_white(), 200);
-  ui_box(bearBox, 80 + 2, 58, 3, 4, 2, lv_color_white(), 200);
-  ui_box(bearBox, 28, 78, 15, 10, 6, lv_color_hex(0xF28F8F), 140);
-  ui_box(bearBox, 89, 78, 15, 10, 6, lv_color_hex(0xF28F8F), 140);
-  lv_obj_t *smile = lv_arc_create(bearBox);
-  lv_obj_set_size(smile, 22, 22);
-  lv_obj_set_pos(smile, 55, 77);
-  lv_arc_set_bg_angles(smile, 30, 150);
-  lv_arc_set_range(smile, 0, 100); lv_arc_set_value(smile, 0);
-  lv_obj_remove_style(smile, NULL, LV_PART_KNOB);
-  lv_obj_remove_flag(smile, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_arc_width(smile, 3, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(smile, lv_color_hex(0x4A3328), LV_PART_MAIN);
-  lv_obj_set_style_arc_rounded(smile, true, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(smile, 0, LV_PART_INDICATOR);
-  if (!uiBootBlinkTimer) uiBootBlinkTimer = lv_timer_create(ui_boot_blink_cb, 3300, nullptr);
+  // JEZ: wyskakuje z dolu, kolce "oddychaja", mruga, usmiecha sie i co chwile podskakuje
+  lv_obj_t *halo = ui_img(s, &mk_glow_xl, 128, -2);
+  ui_tint(halo, lv_color_hex(0xBFE8C8), 60);
+  ui_anim_start(halo, ui_cb_iopa, 40, 80, 2200, 0, lv_anim_path_ease_in_out, 2200, true);
+  uiBootHedge = ui_box(s, 174, 44, 132, 132, 0, lv_color_black(), LV_OPA_TRANSP);
+  lv_obj_t *quills = ui_img(uiBootHedge, &sp_hedge_q, 0, 0);
+  lv_image_set_pivot(quills, 66, 100);
+  ui_img(uiBootHedge, &sp_hedge_f, 0, 0);
+  ui_anim_start(uiBootHedge, ui_cb_y, 120, 44, 750, 100, lv_anim_path_overshoot);
+  ui_anim_start(quills, ui_cb_scale, 256, 270, 1300, 900, lv_anim_path_ease_in_out, 1300, true);
+  // twarz: oczy (z odblaskiem), rumience, usmiech
+  uiBootEyeL = ui_box(uiBootHedge, 44, 78, 11, 15, 6, lv_color_hex(0x2B1E16));
+  uiBootEyeR = ui_box(uiBootHedge, 77, 78, 11, 15, 6, lv_color_hex(0x2B1E16));
+  ui_box(uiBootEyeL, 2, 2, 4, 5, 2, lv_color_white(), 220);
+  ui_box(uiBootEyeR, 2, 2, 4, 5, 2, lv_color_white(), 220);
+  lv_obj_t *chL = ui_box(uiBootHedge, 29, 93, 15, 10, 6, lv_color_hex(0xF08F8F), 150);
+  lv_obj_t *chR = ui_box(uiBootHedge, 88, 93, 15, 10, 6, lv_color_hex(0xF08F8F), 150);
+  ui_anim_start(chL, ui_cb_opa, 90, 190, 1100, 0, lv_anim_path_ease_in_out, 1100, true);
+  ui_anim_start(chR, ui_cb_opa, 90, 190, 1100, 0, lv_anim_path_ease_in_out, 1100, true);
+  uiBootSmile = lv_arc_create(uiBootHedge);
+  lv_obj_set_size(uiBootSmile, 28, 28);
+  lv_obj_set_pos(uiBootSmile, 52, 98);
+  lv_arc_set_bg_angles(uiBootSmile, 25, 155);
+  lv_arc_set_range(uiBootSmile, 0, 100); lv_arc_set_value(uiBootSmile, 0);
+  lv_obj_remove_style(uiBootSmile, NULL, LV_PART_KNOB);
+  lv_obj_remove_flag(uiBootSmile, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_arc_width(uiBootSmile, 3, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(uiBootSmile, lv_color_hex(0x5A3D2B), LV_PART_MAIN);
+  lv_obj_set_style_arc_rounded(uiBootSmile, true, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(uiBootSmile, 0, LV_PART_INDICATOR);
+  ui_anim_start(uiBootSmile, ui_cb_opa, 0, 255, 500, 800);
+  if (!uiBootBlinkTimer) uiBootBlinkTimer = lv_timer_create(ui_boot_blink_cb, 2600, nullptr);
 
   // tytul
   lv_obj_t *t1 = ui_label(s, "Leśny Dziennik", &ui_f24, lv_color_hex(0xBFE0C4), 0, 190, 480, LV_TEXT_ALIGN_CENTER);
@@ -338,13 +349,13 @@ static void uiBootCreate() {
   // swietliki (rojenie)
   for (int i = 0; i < 8; ++i) {
     UiFly &f = uiFlies[i];
-    f.img = ui_img(s, &sp_glow, 0, 0);
-    lv_image_set_scale(f.img, 100 + (i % 3) * 30);
+    static const lv_image_dsc_t *const fg[3] = {&mk_glow_f1, &mk_glow_f2, &mk_glow_f3};
+    f.img = ui_img(s, fg[i % 3], 0, 0);
     ui_tint(f.img, lv_color_hex(0xFFEFA0));
     f.cx = 40 + i * 55; f.cy = 250 + (i % 4) * 38; f.rx = 28 + (i % 3) * 12; f.ry = 16 + (i % 2) * 14;
     f.sp = 0.5f + 0.13f * i; f.ph = i * 1.7f;
   }
-  if (!uiBootTimer) uiBootTimer = lv_timer_create(ui_boot_tick, 50, nullptr);
+  if (!uiBootTimer) uiBootTimer = lv_timer_create(ui_boot_tick, 16, nullptr);
   lv_screen_load(s);
 }
 
@@ -400,7 +411,7 @@ static void uiBootDestroy() {
   if (uiBootTimer) { lv_timer_delete(uiBootTimer); uiBootTimer = nullptr; }
   if (uiBootBlinkTimer) { lv_timer_delete(uiBootBlinkTimer); uiBootBlinkTimer = nullptr; }
   for (auto &f : uiFlies) f.img = nullptr;
-  uiBootEyeL = uiBootEyeR = nullptr;
+  uiBootEyeL = uiBootEyeR = uiBootHedge = uiBootSmile = nullptr;
   if (uiBootScr) { lv_obj_delete(uiBootScr); uiBootScr = nullptr; }
   for (uint8_t i = 0; i < UI_BOOT_STEPS; ++i) { uiBootInd[i] = nullptr; uiBootTxt[i] = nullptr; }
   uiBootBarFill = uiBootPct = uiBootStatus = nullptr;
@@ -444,7 +455,7 @@ static void uiWeatherIcon(lv_obj_t *box, int wmo, bool night, bool valid) {
     ui_anim_start(disk, ui_cb_scale, sc, sc + 14, 2200, 0, lv_anim_path_ease_in_out, 2200, true);
   };
   auto moonAt = [&](int cx, int cy, int sc) {
-    lv_obj_t *g = ui_img_c(box, &sp_glow, cx, cy, sc * 2);
+    lv_obj_t *g = ui_img_c(box, &mk_glow_w, cx, cy);
     ui_tint(g, lv_color_hex(0xFFE9A8), 70);
     lv_obj_t *m = ui_img_c(box, &sp_moon, cx, cy, sc);
     ui_anim_start(m, ui_cb_y, lv_obj_get_y(m), lv_obj_get_y(m) + 4, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
