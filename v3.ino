@@ -3460,6 +3460,7 @@ static void uiFillCharts(UiModel &m) {
   for (int i = 0; i < UI_WEEKS; ++i) { m.weekHas[i] = false; m.weekPartial[i] = false; m.weekVal[i] = 0; m.weekNo[i] = 0; }
   for (int i = 0; i < UI_NIGHTS; ++i) { m.nightMin[i] = -1; m.nightFrom[i] = 0; m.nightTo[i] = 0; m.nightLabel[i][0] = 0; }
   m.lastWeightG = 0; m.lastWeightDate[0] = 0;
+  m.wpN = 0; m.wLastDay = 0; m.wTodayDay = 0; m.wHasSince = false; m.wHas14 = false; m.wSince = 0; m.wGainTotal = 0; m.w14 = 0; m.wBirthG = BIRTH_WEIGHT_G;
   m.bathMask = 0; m.bathSinceDays = -1; m.bathNextDay = 0; m.bathLastTxt[0] = 0; m.bathNextTxt[0] = 0;
 
   const time_t nowT = time(nullptr);
@@ -3600,6 +3601,25 @@ static void uiFillCharts(UiModel &m) {
       ++wN;
     }
     const int lastDay = uiWts[wN - 1].day;
+    // punkty wykresu wagi (ostatnie UI_WPTS) i statystyki przyrostu (jak kafelki na stronie WWW)
+    {
+      const int from = wN > UI_WPTS ? wN - UI_WPTS : 0;
+      m.wpN = wN - from;
+      for (int i = 0; i < m.wpN; ++i) { m.wpDay[i] = uiWts[from + i].day; m.wpG[i] = uiWts[from + i].g; }
+      m.wLastDay = lastDay;
+      m.wTodayDay = todayDfc - birthDfc;
+      m.wGainTotal = uiWts[wN - 1].g - BIRTH_WEIGHT_G;
+      if (lastDay > 0) { m.wHasSince = true; m.wSince = static_cast<int>(lroundf(static_cast<float>(m.wGainTotal) / lastDay)); }
+      float sx = 0, sy = 0; int cnt = 0, dmin = 100000, dmax = -100000;
+      for (int j = 0; j < wN; ++j) {
+        if (uiWts[j].day >= lastDay - 14) { sx += uiWts[j].day; sy += uiWts[j].g; ++cnt; if (uiWts[j].day < dmin) dmin = uiWts[j].day; if (uiWts[j].day > dmax) dmax = uiWts[j].day; }
+      }
+      if (cnt >= 2 && dmax - dmin >= 5) {
+        const float mx = sx / cnt, my = sy / cnt; float sxy = 0, sxx = 0;
+        for (int j = 0; j < wN; ++j) if (uiWts[j].day >= lastDay - 14) { sxy += (uiWts[j].day - mx) * (uiWts[j].g - my); sxx += (uiWts[j].day - mx) * (uiWts[j].day - mx); }
+        if (sxx > 0) { m.wHas14 = true; m.w14 = static_cast<int>(lroundf(sxy / sxx)); }
+      }
+    }
     const int kLast = lastDay / 7;
     int k0 = kLast - (UI_WEEKS - 1);
     if (k0 < 1) k0 = 1;

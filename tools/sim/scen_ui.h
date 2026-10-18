@@ -20,6 +20,8 @@ static void fillCharts(UiModel&m){
   m.gapN=6; int gs[6]={60,230,420,560,720,880}, gl[6]={170,190,140,160,150,200}; for(int i=0;i<6;i++){m.gapStart[i]=gs[i];m.gapLen[i]=gl[i];} m.gapOpen=true;
   const char*rl[3]={"dziś","17.10","16.10"}; for(int d=0;d<3;d++){strcpy(m.rhLabel[d],rl[d]);m.rhN[d]=7+d;for(int k=0;k<m.rhN[d];k++)m.rhT[d][k]=60+k*170+d*20;}
   for(int i=0;i<10;i++){m.weekHas[i]=i>0;m.weekVal[i]=20+((i*37)%40)-(i==5?50:0);m.weekNo[i]=i+1;m.weekPartial[i]=(i==9);} m.lastWeightG=5120; strcpy(m.lastWeightDate,"14.10.2026");
+  {int dd[]={0,2,9,16,24,31,45,57,70}, gg[]={3080,2850,3010,3290,3500,3800,4300,4750,5340}; m.wpN=9; for(int i=0;i<9;i++){m.wpDay[i]=dd[i];m.wpG[i]=gg[i];}
+   m.wBirthG=3080; m.wLastDay=70; m.wTodayDay=71; m.wGainTotal=2260; m.wHasSince=true; m.wSince=32; m.wHas14=true; m.w14=25;}
   for(int i=0;i<14;i++){m.nightMin[i]=(i%5==3)?-1:(300+((i*53)%200));m.nightFrom[i]=20*60+30;m.nightTo[i]=2*60+10;sprintf(m.nightLabel[i],"%d.10",4+i);}
   strcpy(m.bathMonth,"Październik 2026"); m.bathFirstDow=3; m.bathDays=31; m.bathToday=18; m.bathMask=(1u<<1)|(1u<<4)|(1u<<7)|(1u<<10)|(1u<<13)|(1u<<16); m.bathNextDay=18;
   strcpy(m.bathLastTxt,"17.10 · wczoraj"); strcpy(m.bathNextTxt,"18.10 · dziś");

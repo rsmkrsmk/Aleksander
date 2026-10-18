@@ -62,6 +62,7 @@ constexpr int UI_MAX_GAPS = 16;
 constexpr int UI_RHYTHM_DAYS = 3;
 constexpr int UI_RHYTHM_MAX = 16;
 constexpr int UI_WEEKS = 10;
+constexpr int UI_WPTS = 48;   // maks. punktow pomiarow wagi na wykresie
 constexpr int UI_NIGHTS = 14;
 struct UiModel {
   bool night = false;
@@ -95,6 +96,11 @@ struct UiModel {
   // waga
   int weightN = 0; int weekVal[UI_WEEKS] = {}; bool weekHas[UI_WEEKS] = {}; bool weekPartial[UI_WEEKS] = {};
   int weekNo[UI_WEEKS] = {}; int lastWeightG = 0; char lastWeightDate[12] = "";
+  // wykres wagi (dzien zycia + gramy) i statystyki przyrostu (kafelki na stronie "Waga")
+  int wpN = 0; int wpDay[UI_WPTS] = {}; int wpG[UI_WPTS] = {};
+  int wBirthG = 3080, wTodayDay = 0, wLastDay = 0;
+  bool wHasSince = false; int wSince = 0, wGainTotal = 0;
+  bool wHas14 = false; int w14 = 0;
   // sen nocny: minuty (-1 brak), poczatek i koniec (min od polnocy)
   int nightMin[UI_NIGHTS] = {}; int nightFrom[UI_NIGHTS] = {}; int nightTo[UI_NIGHTS] = {}; char nightLabel[UI_NIGHTS][8] = {};
   int sleepTodayDay = 0, sleepTodayNight = 0, sleepNeedDay = 0, sleepNeedNight = 0;
@@ -771,7 +777,13 @@ static void ui_bars_stop_all() {   // wywolac PRZED usunieciem ekranu: anim slup
     uiBarN[p] = 0;
   }
 }
+// Strona "Waga": dwa widoki (wykres wagi / wykres przyrostu) przelaczane same co ~3,5 s.
+static lv_obj_t *uiWtViewA = nullptr, *uiWtViewB = nullptr, *uiWtSub = nullptr, *uiWtDot[2] = {nullptr, nullptr};
+static int uiWtShown = 0, uiWtTicks = 0;
+static lv_point_precise_t uiWtMedPts[41];
+static lv_point_precise_t uiWtActPts[UI_WPTS];
 static void ui_page_reset(int page) {
+  if (page == 3) { uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr; uiWtShown = 0; uiWtTicks = 0; }
   for (int i = 0; i < uiBarN[page]; ++i) lv_anim_delete(&uiBars[page][i], ui_cb_bar);
   uiBarN[page] = 0;
   lv_obj_clean(uiDashPage[page]);
@@ -925,54 +937,185 @@ static void ui_build_gaps(const UiModel &m, bool anim) {
 }
 
 // ----------------------------- STRONA 3: WAGA ---------------------------------
-static void ui_build_weight(const UiModel &m, bool anim) {
-  const int pg = 3; ui_page_reset(pg);
-  lv_obj_t *p = uiDashPage[pg];
-  ui_card(p, 14, 2, 452, 340, 26);
-  ui_title(p, "Przyrost wagi", "średnio gramów na dobę, tydzień po tygodniu");
-  if (m.lastWeightG > 0) {
-    char b[24]; snprintf(b, sizeof b, "%d,%02d kg", m.lastWeightG / 1000, (m.lastWeightG % 1000) / 10);
-    ui_label(p, b, &ui_f32, P.acc, 250, 4, 204, LV_TEXT_ALIGN_RIGHT);
-    ui_label(p, m.lastWeightDate, &ui_f13, P.muted, 250, 46, 204, LV_TEXT_ALIGN_RIGHT);
+// Tablice WHO (chlopcy/dziewczeta usrednione jak na stronie WWW): percentyl 3, mediana, percentyl 97 [kg], co miesiac.
+static const float UI_WHO_P3[22]  = {2.5f,3.4f,4.4f,5.1f,5.6f,6.1f,6.4f,6.7f,6.9f,7.1f,7.4f,7.6f,7.7f,7.9f,8.1f,8.3f,8.4f,8.6f,8.8f,8.9f,9.1f,9.2f};
+static const float UI_WHO_MED[22] = {3.3f,4.5f,5.6f,6.4f,7.0f,7.5f,7.9f,8.3f,8.6f,8.9f,9.2f,9.4f,9.6f,9.9f,10.1f,10.3f,10.5f,10.7f,10.9f,11.1f,11.3f,11.5f};
+static const float UI_WHO_P97[22] = {4.3f,5.7f,7.0f,7.9f,8.6f,9.2f,9.7f,10.2f,10.5f,10.9f,11.2f,11.5f,11.8f,12.1f,12.4f,12.7f,12.9f,13.2f,13.5f,13.7f,14.0f,14.3f};
+static float ui_who_interp(const float *tab, int day) {
+  const float mo = day / 30.4375f;
+  if (mo <= 0) return tab[0];
+  if (mo >= 21) return tab[21];
+  const int i = (int)mo; const float f = mo - i;
+  return tab[i] + (tab[i + 1] - tab[i]) * f;
+}
+// Pasmo oczekiwanej wagi [g] skalowane do wagi urodzeniowej (jak expectedWeightBand na WWW).
+static void ui_who_band(int day, int birthG, int *mn, int *md, int *mx) {
+  const float sc = birthG / (UI_WHO_MED[0] * 1000.0f);
+  *mn = (int)lroundf(ui_who_interp(UI_WHO_P3, day) * 1000.0f * sc);
+  *md = (int)lroundf(ui_who_interp(UI_WHO_MED, day) * 1000.0f * sc);
+  *mx = (int)lroundf(ui_who_interp(UI_WHO_P97, day) * 1000.0f * sc);
+}
+// Pasmo przyrostu od wypisu (dzien 2, 2850 g): +25..30 g/dzien do 3 mies., potem 15..20 do 6 mies.
+static bool ui_gain_band(int day, int *lo, int *hi) {
+  if (day < 2) return false;
+  int l = 2850, h = 2850;
+  for (int d = 2; d < day; ++d) {
+    if (d < 91) { l += 25; h += 30; } else if (d < 183) { l += 15; h += 20; }
   }
-  int n = 0; for (int i = 0; i < UI_WEEKS; ++i) if (m.weekNo[i] >= 0 && (m.weekHas[i] || m.weekNo[i] > 0)) n = i + 1;
-  n = UI_WEEKS;
-  bool any = false; for (int i = 0; i < UI_WEEKS; ++i) any |= m.weekHas[i];
-  if (!any) { ui_label(p, "Za mało pomiarów w odstępie kilku dni,\naby policzyć trend. Zważ dziecko za kilka dni.", &ui_f15, P.muted, 30, 130, 400); return; }
+  *lo = l; *hi = h;
+  return true;
+}
+static void ui_gain_per_day(int day, int *lo, int *hi) {   // 0/0 gdy brak normy
+  *lo = *hi = 0;
+  if (day < 2) return;
+  if (day < 91) { *lo = 25; *hi = 30; } else if (day < 183) { *lo = 15; *hi = 20; } else { *lo = 10; *hi = 15; }
+}
+static void ui_weight_toggle() {
+  if (!uiWtViewA || !uiWtViewB) return;
+  uiWtShown ^= 1;
+  if (uiWtShown) { lv_obj_add_flag(uiWtViewA, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN); }
+  else { lv_obj_add_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiWtViewA, LV_OBJ_FLAG_HIDDEN); }
+  if (uiWtSub) lv_label_set_text(uiWtSub, uiWtShown ? "przyrost g/dzień co tydzień" : "waga na tle normy WHO");
+  for (int i = 0; i < 2; ++i) if (uiWtDot[i]) lv_obj_set_style_bg_color(uiWtDot[i], i == uiWtShown ? P.acc : P.brd, 0);
+}
+static void ui_wt_tile(lv_obj_t *p, int x, int y, int w, int h, const char *key, const char *val, const char *unit,
+                       const char *sub, lv_color_t c) {
+  ui_box(p, x, y + 4, w, h, 18, P.shade);
+  ui_box(p, x, y, w, h, 18, P.card);
+  lv_obj_t *t = ui_box(p, x, y, w, h, 18, c, 30);
+  lv_obj_set_style_border_width(t, 2, 0); lv_obj_set_style_border_color(t, c, 0); lv_obj_set_style_border_opa(t, 90, 0);
+  ui_label(p, key, &ui_f13, P.muted, x + 14, y + 6);
+  lv_obj_t *v = ui_label(p, val, &ui_f32, P.ink, x + 14, y + 22);
+  lv_obj_update_layout(v);
+  ui_label(p, unit, &ui_f15, P.ink2, x + 14 + lv_obj_get_width(v) + 5, y + 38);
+  ui_label(p, sub, &ui_f13, P.ink2, x + 14, y + h - 25, w - 20);
+}
+static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
+  const int px0 = 62, pw = 386, top = 80, base = 206, ph = base - top;
+  int maxDay = m.wTodayDay > m.wLastDay ? m.wTodayDay : m.wLastDay; if (maxDay < 30) maxDay = 30;
+  const int NC = 40;
+  int bmn[NC], bmx[NC], gl[NC], gh[NC]; bool gb[NC];
+  int minG = 1 << 30, maxG = 0;
+  for (int k = 0; k < NC; ++k) {
+    const int d = (int)((maxDay * (k + 0.5f)) / NC);
+    int md; ui_who_band(d, m.wBirthG, &bmn[k], &md, &bmx[k]);
+    gb[k] = d <= 183 && ui_gain_band(d, &gl[k], &gh[k]);
+    if (bmx[k] > maxG) maxG = bmx[k]; if (bmn[k] < minG) minG = bmn[k];
+    if (gb[k]) { if (gh[k] > maxG) maxG = gh[k]; if (gl[k] < minG) minG = gl[k]; }
+  }
+  for (int i = 0; i < m.wpN; ++i) { if (m.wpG[i] > maxG) maxG = m.wpG[i]; if (m.wpG[i] < minG) minG = m.wpG[i]; }
+  maxG = ((maxG + 300 + 499) / 500) * 500;
+  int mnG = ((minG - 300) / 500) * 500; if (mnG < 0) mnG = 0;
+  const int span = maxG - mnG;
+  auto yv = [&](int g) { return base - (g - mnG) * ph / span; };
+  auto xv = [&](int d) { return px0 + d * pw / maxDay; };
+  for (int i = 0; i <= 4; ++i) {
+    const int g = mnG + span * i / 4, y = yv(g);
+    ui_hline(v, px0, y, pw, P.brd, 110);
+    char t[10]; snprintf(t, sizeof t, "%d.%d", g / 1000, (g % 1000) / 100);
+    ui_label(v, t, &ui_f13, P.faint, 14, y - 9, 42, LV_TEXT_ALIGN_RIGHT);
+  }
+  for (int i = 0; i <= 4; ++i) {
+    char t[8]; snprintf(t, sizeof t, "d%d", maxDay * i / 4);
+    ui_label(v, t, &ui_f13, P.faint, px0 + pw * i / 4 - 20, base + 6, 40, LV_TEXT_ALIGN_CENTER);
+  }
+  // pasma: zielone = zakres WHO (3-97 pc), zolte = oczekiwany przyrost od wypisu
+  for (int k = 0; k < NC; ++k) {
+    const int x0 = px0 + k * pw / NC, x1 = px0 + (k + 1) * pw / NC;
+    int ya = yv(bmx[k]), yb = yv(bmn[k]);
+    ui_box(v, x0, ya, x1 - x0, yb - ya < 2 ? 2 : yb - ya, 0, P.good, 55);
+    if (gb[k]) { ya = yv(gh[k]); yb = yv(gl[k]); ui_box(v, x0, ya, x1 - x0, yb - ya < 2 ? 2 : yb - ya, 0, P.warn, 70); }
+  }
+  // mediana WHO
+  for (int k = 0; k <= 40; ++k) {
+    const int d = maxDay * k / 40; int a, md, b; ui_who_band(d, m.wBirthG, &a, &md, &b);
+    uiWtMedPts[k].x = xv(d); uiWtMedPts[k].y = yv(md);
+  }
+  lv_obj_t *ml = lv_line_create(v);
+  lv_line_set_points(ml, uiWtMedPts, 41);
+  lv_obj_set_style_line_width(ml, 2, 0); lv_obj_set_style_line_color(ml, P.good, 0); lv_obj_set_pos(ml, 0, 0);
+  // pomiary
+  const int n = m.wpN > UI_WPTS ? UI_WPTS : m.wpN;
+  for (int i = 0; i < n; ++i) { uiWtActPts[i].x = xv(m.wpDay[i]); uiWtActPts[i].y = yv(m.wpG[i]); }
+  lv_obj_t *al = lv_line_create(v);
+  lv_line_set_points(al, uiWtActPts, n);
+  lv_obj_set_style_line_width(al, 3, 0); lv_obj_set_style_line_color(al, P.acc, 0);
+  lv_obj_set_style_line_rounded(al, true, 0); lv_obj_set_pos(al, 0, 0);
+  for (int i = 0; i < n; ++i) if (n <= 24 || i == n - 1) ui_dot(v, uiWtActPts[i].x, uiWtActPts[i].y, i == n - 1 ? 5 : 3, P.acc);
+}
+static void ui_weight_view_gain(lv_obj_t *v, const UiModel &m, bool any) {
+  if (!any) { ui_label(v, "Za mało pomiarów w odstępie kilku dni,\naby policzyć trend. Zważ dziecko za kilka dni.", &ui_f15, P.muted, 30, 120, 400); return; }
+  const int pg = 3, n = UI_WEEKS;
   int mx = 40, mn = 0;
   for (int i = 0; i < n; ++i) if (m.weekHas[i]) { if (m.weekVal[i] > mx) mx = m.weekVal[i]; if (m.weekVal[i] < mn) mn = m.weekVal[i]; }
   mx = ((mx + 9) / 10) * 10; if (mn < 0) mn = ((mn - 9) / 10) * 10;
-  const int px0 = 56, pw = 392, top = 92, base = 296, ph = base - top;
+  const int px0 = 56, pw = 392, top = 80, base = 206, ph = base - top;
   const int span = mx - mn;
-  auto yv = [&](int v) { return base - (v - mn) * ph / span; };
+  auto yv = [&](int val) { return base - (val - mn) * ph / span; };
   const int stepG = span > 120 ? 40 : (span > 60 ? 20 : 10);
   for (int g = (mn / stepG) * stepG; g <= mx; g += stepG) {
     if (g < mn) continue;
     const int y = yv(g);
-    ui_hline(p, px0, y, pw, P.brd, g == 0 ? 220 : 110);
-    char t[8]; snprintf(t, sizeof t, "%d", g); ui_label(p, t, &ui_f13, P.faint, 14, y - 9, 38, LV_TEXT_ALIGN_RIGHT);
+    ui_hline(v, px0, y, pw, P.brd, g == 0 ? 220 : 110);
+    char t[8]; snprintf(t, sizeof t, "%d", g); ui_label(v, t, &ui_f13, P.faint, 14, y - 9, 38, LV_TEXT_ALIGN_RIGHT);
   }
   const int slot = pw / n, bw = slot - 10 > 30 ? 30 : slot - 10;
   const int zero = yv(0);
   for (int i = 0; i < n; ++i) {
     const int cx = px0 + slot * i + slot / 2;
     char t[8];
-    if (!m.weekHas[i]) { ui_label(p, "–", &ui_f15, P.faint, cx - 10, zero - 20, 20, LV_TEXT_ALIGN_CENTER); }
+    if (!m.weekHas[i]) { ui_label(v, "–", &ui_f15, P.faint, cx - 10, zero - 20, 20, LV_TEXT_ALIGN_CENTER); }
     else {
-      const int v = m.weekVal[i], yy = yv(v);
-      const int hh = v >= 0 ? zero - yy : yy - zero;
-      lv_color_t col = v < 0 ? P.danger : P.acc;
-      lv_obj_t *bar;
-      if (v >= 0) bar = ui_bar(pg, p, cx - bw / 2, zero, bw, hh < 3 ? 3 : hh, 8, col, anim, i);
-      else bar = ui_box(p, cx - bw / 2, zero, bw, hh < 3 ? 3 : hh, 8, col);
+      const int val = m.weekVal[i], yy = yv(val);
+      const int hh = val >= 0 ? zero - yy : yy - zero;
+      lv_color_t col = val < 0 ? P.danger : P.acc;
+      lv_obj_t *bar = ui_box(v, cx - bw / 2, val >= 0 ? zero - (hh < 3 ? 3 : hh) : zero, bw, hh < 3 ? 3 : hh, 8, col);
       if (m.weekPartial[i]) lv_obj_set_style_bg_opa(bar, 140, 0);
-      snprintf(t, sizeof t, "%d", v);
-      ui_label(p, t, &ui_f13, P.ink, cx - 20, v >= 0 ? yy - 19 : yy + 3, 40, LV_TEXT_ALIGN_CENTER);
+      snprintf(t, sizeof t, "%d", val);
+      ui_label(v, t, &ui_f13, P.ink, cx - 20, val >= 0 ? yy - 19 : yy + 3, 40, LV_TEXT_ALIGN_CENTER);
     }
     snprintf(t, sizeof t, "t%d", m.weekNo[i]);
-    ui_label(p, t, &ui_f13, P.muted, cx - 20, base + 8, 40, LV_TEXT_ALIGN_CENTER);
+    ui_label(v, t, &ui_f13, P.muted, cx - 20, base + 6, 40, LV_TEXT_ALIGN_CENTER);
   }
-  ui_label(p, "tydzień życia", &ui_f13, P.faint, 22, 318, 200);
+  (void)pg;
+}
+static void ui_build_weight(const UiModel &m, bool anim) {
+  (void)anim;
+  const int pg = 3; ui_page_reset(pg);
+  lv_obj_t *p = uiDashPage[pg];
+  ui_card(p, 14, 2, 452, 340, 26);
+  ui_label(p, "Waga dziecka", &ui_f18, P.ink, 22, 12);
+  if (m.lastWeightG > 0) {
+    char b[24]; snprintf(b, sizeof b, "%d,%02d kg", m.lastWeightG / 1000, (m.lastWeightG % 1000) / 10);
+    ui_label(p, b, &ui_f32, P.acc, 250, 4, 204, LV_TEXT_ALIGN_RIGHT);
+    ui_label(p, m.lastWeightDate, &ui_f13, P.muted, 250, 46, 204, LV_TEXT_ALIGN_RIGHT);
+  }
+  bool any = false; for (int i = 0; i < UI_WEEKS; ++i) any |= m.weekHas[i];
+  if (m.wpN < 2) { ui_label(p, "Dodaj co najmniej dwa pomiary wagi,\naby zobaczyć wykresy i trend przyrostu.", &ui_f15, P.muted, 30, 130, 400); return; }
+  uiWtSub = ui_label(p, "waga na tle normy WHO", &ui_f13, P.muted, 22, 36, 226);
+  // dwa widoki w tym samym miejscu; przelacza je ui_dash_tick (co ~3,5 s)
+  uiWtViewA = ui_box(p, 0, 0, 480, 240, 0, P.bg, LV_OPA_TRANSP);
+  uiWtViewB = ui_box(p, 0, 0, 480, 240, 0, P.bg, LV_OPA_TRANSP);
+  ui_weight_view_weight(uiWtViewA, m);
+  ui_weight_view_gain(uiWtViewB, m, any);
+  lv_obj_add_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN);
+  uiWtShown = 0; uiWtTicks = 0;
+  uiWtDot[0] = ui_box(p, 22, 62, 14, 5, 2, P.acc);
+  uiWtDot[1] = ui_box(p, 40, 62, 14, 5, 2, P.brd);
+
+  // stale kafelki: przyrost od urodzenia i z ostatnich 2 tygodni
+  char v1[12], s1[40], v2[12], s2[40];
+  if (m.wHasSince) snprintf(v1, sizeof v1, "%d", m.wSince); else snprintf(v1, sizeof v1, "—");
+  snprintf(s1, sizeof s1, "%s%d g w %d dni", m.wGainTotal >= 0 ? "+" : "", m.wGainTotal, m.wLastDay);
+  int lo, hi; ui_gain_per_day(m.wLastDay, &lo, &hi);
+  lv_color_t c2 = P.acc;
+  if (m.wHas14) {
+    snprintf(v2, sizeof v2, "%d", m.w14);
+    c2 = m.w14 <= 0 ? P.danger : (!hi ? P.good : (m.w14 < lo || m.w14 > hi ? P.warn : P.good));
+  } else snprintf(v2, sizeof v2, "—");
+  if (hi) snprintf(s2, sizeof s2, "norma %d–%d g", lo, hi); else snprintf(s2, sizeof s2, "trend z ważeń");
+  ui_wt_tile(p, 26, 246, 204, 90, "Od urodzenia", v1, m.wHasSince ? "g/dzień" : "", s1, P.acc);
+  ui_wt_tile(p, 250, 246, 204, 90, "Ostatnie 2 tygodnie", v2, m.wHas14 ? "g/dzień" : "", s2, c2);
 }
 
 // ----------------------------- STRONA 4: SEN ----------------------------------
@@ -1109,6 +1252,7 @@ static void ui_diag_cb(lv_event_t *) { if (uiOnDiagnostics) uiOnDiagnostics(); }
 
 static void ui_dash_tick(lv_timer_t *t) {   // 500 ms: sygnalizator "czas na karmienie" (biel/czerwien jak dawniej)
   (void)t;
+  if (uiDashScr && uiDashCur == 3 && uiWtViewA && uiWtViewB && ++uiWtTicks >= 7) { uiWtTicks = 0; ui_weight_toggle(); }
   if (!uiDashScr || uiDashCur != 0 || !uiDashCounterCard || !uiDashHasData) return;
   const bool alarm = uiDashM.hasLastFeed && uiDashM.sinceFeedMin >= uiDashM.alarmMin;
   if (!alarm) return;
@@ -1119,6 +1263,7 @@ static void ui_dash_tick(lv_timer_t *t) {   // 500 ms: sygnalizator "czas na kar
 }
 
 static void uiDashCreate(bool night) {
+  uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr;
   if (uiDashTimer) { lv_timer_delete(uiDashTimer); uiDashTimer = nullptr; }
   lv_obj_t *oldScr = uiDashScr; uiDashScr = nullptr;
   ui_bars_stop_all();
@@ -1186,6 +1331,7 @@ static void uiDashCreate(bool night) {
   ui_retire_screen(oldScr, uiDashScr);
 }
 static void uiDashDestroy() {
+  uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr;
   if (uiDashTimer) { lv_timer_delete(uiDashTimer); uiDashTimer = nullptr; }
   ui_bars_stop_all();
   if (uiDashScr) { lv_obj_t *o = uiDashScr; uiDashScr = nullptr; uiDashCounterCard = nullptr; uiDashHasData = false; if (lv_screen_active() != o) lv_obj_delete(o); }
