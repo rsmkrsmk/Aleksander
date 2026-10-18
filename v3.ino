@@ -4265,22 +4265,53 @@ bool sendBackupViaTelegram(const String &fileName) {
                 "User-Agent: ESP32\r\nContent-Type: multipart/form-data; boundary=%s\r\n"
                 "Content-Length: %u\r\nConnection: close\r\n\r\n",
                 TELEGRAM_BOT_TOKEN, boundary.c_str(), static_cast<unsigned>(bodyLen));
-  client.print(head);
+  // Zapis z kontrola: WiFiClientSecure::write() potrafi zapisac tylko CZESC danych (mało
+  // pamieci/bufor lwIP pelny) — wczesniej ignorowalismy wynik, naglowek Content-Length sie
+  // nie zgadzal i Telegram nie odpowiadal (kod 0), choc wiadomosc tekstowa przechodzila.
+  auto writeAll = [&](const uint8_t *data, size_t len) -> bool {
+    size_t off = 0;
+    uint32_t lastProgress = millis();
+    while (off < len) {
+      if (!client.connected()) return false;
+      const size_t w = client.write(data + off, len - off);
+      if (w == 0) {
+        if (millis() - lastProgress > 8000) return false;
+        delay(10);
+        continue;
+      }
+      off += w;
+      lastProgress = millis();
+    }
+    return true;
+  };
+  bool sendOk = writeAll(reinterpret_cast<const uint8_t *>(head.c_str()), head.length());
 
   uint8_t chunk[512];
   int chunkNo = 0;
-  while (file.available()) {
+  size_t sentFile = 0;
+  while (sendOk && sentFile < fileSize) {
     const size_t n = file.read(chunk, sizeof(chunk));
     if (n == 0) break;
-    client.write(chunk, n);
+    sendOk = writeAll(chunk, n);
+    sentFile += n;
     // Okresowy restart DMA panelu — profilaktyka dryfu obrazu podczas transmisji.
-    if ((++chunkNo & 0x07) == 0) requestRgbResync();
+    if ((++chunkNo & 0x07) == 0) { requestRgbResync(); feedWatchdog(); }
+    delay(1);  // oddaj CPU stosowi Wi-Fi/TLS
   }
-  client.print(tail);
+  if (sendOk && sentFile == fileSize) sendOk = writeAll(reinterpret_cast<const uint8_t *>(tail.c_str()), tail.length());
+  else sendOk = false;
+  if (!sendOk) {
+    Serial.printf("Telegram: backup — blad zapisu do gniazda (%u/%u B).\n",
+                  static_cast<unsigned>(sentFile), static_cast<unsigned>(fileSize));
+    client.stop();
+    file.close();
+    requestRgbResync();
+    return false;
+  }
   client.flush();
 
-  // Czytamy kod odpowiedzi HTTP.
-  unsigned long waitUntil = millis() + 6000;
+  // Czytamy kod odpowiedzi HTTP (Telegram potrafi odpowiadac kilka sekund po odebraniu pliku).
+  unsigned long waitUntil = millis() + 15000;
   String statusLine;
   while (!client.available() && millis() < waitUntil) delay(10);
   if (client.available()) statusLine = client.readStringUntil('\n');
