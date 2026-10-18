@@ -36,12 +36,14 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <vector>
+#include <algorithm>
 
 #include "config.h"
 #include "secrets.h"
 #include "development_tips.h"
 #include "dressing_guide.h"
 #include "web_panel.h"
+#include "ui_modern.h"   // nowy interfejs: ekran startowy, tablica, panel z wykresami
 
 // -------------------- Sprzęt Waveshare ESP32-S3-Touch-LCD-4B --------------------
 constexpr uint8_t I2C_SDA = 47;
@@ -129,6 +131,9 @@ SemaphoreHandle_t weatherMutex = nullptr;
 // WeatherKind), prototypy trafilyby nad te typy i kompilacja by sie wywalila.
 
 bool screensaverActive = false;
+volatile bool uiPendingEnterSaver = false; // zadania wykonywane w loop() (nie wewnatrz zdarzen LVGL)
+volatile bool uiPendingExitSaver = false;
+bool uiChartsDirty = true;                 // dane CSV zmienione — odswiez wykresy panelu
 lv_obj_t *ssClockLabel = nullptr;
 lv_obj_t *ssClockShadowLabel = nullptr;
 lv_obj_t *ssDateLabel = nullptr;
@@ -397,7 +402,6 @@ String nextFeedingClock();
 String formatGapShort(int minutes);
 void initWatchdog();
 void feedWatchdog();
-void drawBabyFace(lv_obj_t *box);
 void showBootScreen();
 void bootStep(uint8_t idx, uint8_t state);
 void bootPumpLvgl();
@@ -428,9 +432,9 @@ String formatEntryForUi(const String &csvLine);
 long calculateAgeDays();
 String calculateAgeText();
 String developmentTipForToday();
-void updateCounterAlarmVisuals();
 void counterAlarmTickCb(lv_timer_t *timer);
-void updateHomeInformation();
+void updateHomeInformation(bool forceCharts = false);
+static void uiShowSaver();
 void createHomeScreen();
 void createCalendarScreen();
 void createDayDetailScreen(time_t day);
@@ -507,7 +511,6 @@ void agingTickCb(lv_timer_t *timer);
 void enterScreensaver();
 void exitScreensaver();
 void updateScreensaverContent();
-void applyScreensaverVisibility();
 void fetchWeatherNow();
 void weatherTask(void *parameter);
 void requestWeatherFetch();
@@ -974,8 +977,8 @@ void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
     // Pierwszy dotyk przywraca jasność i równocześnie pozostaje normalnym kliknięciem LVGL.
     registerUserActivity();
     // Dotyk w trybie wygaszacza tylko przywraca standardowy widok (bez klikania pod spodem).
-    if (screensaverActive && homeScreen && lv_screen_active() == homeScreen) {
-      exitScreensaver();
+    if (screensaverActive && uiSaverScr && lv_screen_active() == uiSaverScr) {
+      uiPendingExitSaver = true; // panel budujemy w loop(), nie w callbacku odczytu dotyku
       suppressUntilRelease = true; // nie przetwarzaj tego dotkniecia jako kliku
       suppressStartMs = millis();
       data->state = LV_INDEV_STATE_RELEASED;
@@ -1860,7 +1863,7 @@ int statsIndexForDay(time_t day);
 // Zasila ekran główny (DZISIAJ), kalendarz, wykres oraz API WWW. Po zapisie wpisu
 // cache jest unieważniany i odbudowywany przy pierwszym dostępie. Tablice statystyk
 // oraz statsIndexForDay() są zadeklarowane wyżej, przed funkcjami dostępowymi.
-void invalidateDayStats() { statsValid = false; }
+void invalidateDayStats() { statsValid = false; uiChartsDirty = true; }
 
 // Dolicza liczbe drzemek: SEN_START rozpoczety w porze DZIENNEJ liczymy jako drzemke
 // tego dnia (sen nocny nie jest drzemka). Przypisanie do dnia wg daty startu.
@@ -2344,7 +2347,7 @@ void deleteToggleEvent(lv_event_t *event) {
       deletedEntryDescription = removed;
     }
     pendingDeleteIndex = -1;
-    updateHomeInformation();
+    updateHomeInformation(false);
     createFeedingChartScreen();
     return;
   }
@@ -2367,7 +2370,7 @@ void deleteEntryEvent(lv_event_t *event) {
     deletedEntryDescription = removed;
     pendingDeleteIndex = -1;
     deleteModeActive = false;
-    updateHomeInformation();
+    updateHomeInformation(false);
     createFeedingChartScreen();
     return;
   }
@@ -3133,341 +3136,568 @@ lv_obj_t *createHomeNavTile(const char *caption, int x, int y, int w, int h, lv_
   return button;
 }
 
-void createHomeScreen() {
-  resetReusableScreen(homeScreen);
+// =============================================================================
+//  NOWY INTERFEJS (ui_modern.h): budowanie modelu danych + ekran glowny
+//  Urzadzenie jest tablica informacyjna — dane wpisuje sie w panelu WWW.
+//  Model "na zywo" (zegar, licznik, pogoda) odswiezamy co sekunde, a ciezsze dane
+//  do wykresow (jeden przebieg pliku CSV) tylko po zmianie danych / co 2 minuty.
+// =============================================================================
+static UiModel uiModel;
+static uint32_t uiChartsStampMs = 0;
 
-  // Gorny pasek: tytul + skroty statusu z diodami (W/P/C) + zegar.
-  lv_obj_t *titleLabel = createLabel(homeScreen, "LESNY DZIENNIK ALEKSANDRA", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 14, 14);
-  lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_12, 0);
+static const char *const UI_PL_DAYS[7] = {"niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"};
+static const char *const UI_PL_MONTHS_GEN[12] = {"stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+                                                 "lipca", "sierpnia", "września", "października", "listopada", "grudnia"};
+static const char *const UI_PL_MONTHS_NOM[12] = {"Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
+                                                 "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"};
+static const char *const UI_WEATHER_PL[7] = {"Słonecznie", "Częściowe zachmurzenie", "Pochmurno", "Mgła", "Deszcz", "Śnieg", "Burza"};
+// Polskie odpowiedniki porad ubioru (ta sama kolejnosc co DRESSING_BANDS w dressing_guide.h).
+static const char *const UI_DRESS_PL[9] = {
+    "Upał: samo body z krótkim rękawem, nóżki gołe, cienka czapeczka, krem z filtrem",
+    "Gorąco: body z krótkim rękawem, lekkie spodenki, cienka czapeczka",
+    "Ciepło: body z długim rękawem, cienki pajacyk, bawełniana czapeczka",
+    "Lekko chłodno: body z długim rękawem, pajacyk, skarpetki, lekka czapka",
+    "Chłodno: body, pajacyk, sweterek, czapka, kocyk do wózka",
+    "Zimno: trzy warstwy, ciepłe skarpetki, kombinezon przejściowy, czapka",
+    "Mróz: body, polar, kombinezon zimowy, czapka na uszy, rożek lub śpiworek",
+    "Duży mróz: maksimum warstw, śpiworek zimowy, krótko na dworze",
+    "Poniżej -12°: odłóż spacer – wychłodzenie grozi szybciej niż korzyść ze spaceru"};
 
-  const char *ledLetters[3] = {"W", "P", "C"};
-  lv_obj_t **ledTargets[3] = {&homeLedWifi, &homeLedMemory, &homeLedTime};
-  for (uint8_t i = 0; i < 3; ++i) {
-    const int baseX = 266 + i * 28;
-    lv_obj_t *cap = createLabel(homeScreen, ledLetters[i], COLOR_MUTED, LV_ALIGN_TOP_LEFT, baseX, 15);
-    lv_obj_set_style_text_font(cap, &lv_font_montserrat_12, 0);
-    lv_obj_t *led = lv_obj_create(homeScreen);
-    lv_obj_remove_style_all(led);
-    lv_obj_set_size(led, 8, 8);
-    lv_obj_align(led, LV_ALIGN_TOP_LEFT, baseX + 11, 18);
-    lv_obj_set_style_radius(led, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(led, COLOR_RED, 0);
-    lv_obj_set_style_bg_opa(led, LV_OPA_COVER, 0);
-    *ledTargets[i] = led;
+static const char *uiDressPl(int tempC) {
+  if (DRESSING_BAND_COUNT == 9) {
+    for (size_t i = 0; i < DRESSING_BAND_COUNT; ++i) {
+      if (tempC >= DRESSING_BANDS[i].minTemp) return UI_DRESS_PL[i];
+    }
+    return UI_DRESS_PL[8];
   }
+  return dressingAdviceFor(tempC);
+}
 
-  homeClockLabel = createLabel(homeScreen, "", COLOR_MUTED, LV_ALIGN_TOP_RIGHT, -14, 14);
-  lv_obj_set_width(homeClockLabel, 122);
-  lv_obj_set_style_text_font(homeClockLabel, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_align(homeClockLabel, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_align(homeClockLabel, LV_ALIGN_TOP_RIGHT, -14, 14);
+static void uiFmtHm(char *dst, size_t n, int minutes) {
+  if (minutes <= 0) { snprintf(dst, n, "–"); return; }
+  if (minutes < 60) snprintf(dst, n, "%dm", minutes);
+  else snprintf(dst, n, "%dh %02dm", minutes / 60, minutes % 60);
+}
 
-  // Gora ekranu: po lewej LICZNIK od ostatniego karmienia (kolor/miganie wg czasu),
-  // po prawej wiek Aleksandra.
-  homeCounterBar = createCard(homeScreen, 14, 44, 268, 100);
-  lv_obj_set_style_bg_color(homeCounterBar, COLOR_TONAL_GREEN, 0);
-  lv_obj_set_style_shadow_width(homeCounterBar, 4, 0);
-  homeCounterLabel = createLabel(homeCounterBar, "", COLOR_MUTED, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_width(homeCounterLabel, 236);
-  lv_obj_set_style_text_align(homeCounterLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(homeCounterLabel, &lv_font_montserrat_16, 0);
-  lv_label_set_long_mode(homeCounterLabel, LV_LABEL_LONG_WRAP);
+static void uiFmtAgo(char *dst, size_t n, long minutes) {
+  if (minutes < 0) minutes = 0;
+  if (minutes < 60) snprintf(dst, n, "%ld min temu", minutes);
+  else snprintf(dst, n, "%ld h %ld min temu", minutes / 60, minutes % 60);
+}
 
-  lv_obj_t *ageCard = createCard(homeScreen, 290, 44, 176, 100);
-  lv_obj_set_style_bg_color(ageCard, COLOR_TONAL_GREEN, 0);
-  lv_obj_set_style_border_width(ageCard, 0, 0);
-  lv_obj_set_style_shadow_width(ageCard, 0, 0);
-  homeAgeLabel = createLabel(ageCard, "", COLOR_GREEN, LV_ALIGN_TOP_MID, 0, 8);
-  lv_obj_set_width(homeAgeLabel, 160);
-  lv_obj_set_style_text_align(homeAgeLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(homeAgeLabel, LV_LABEL_LONG_WRAP);
+// Dni od 1970-01-01 dla daty kalendarzowej (algorytm Howarda Hinnanta).
+static int uiDaysFromCivil(int y, int m, int d) {
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const int yoe = y - era * 400;
+  const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + doe - 719468;
+}
 
-  // ---- MENU (widok po dotknieciu wygaszacza) — nowoczesny, plaski uklad ----------
-  // Licznik: wiekszy promien, bez ramki i cienia (kolor/miganie nadal steruje
-  // updateCounterAlarmVisuals()).
-  lv_obj_set_style_radius(homeCounterBar, 28, 0);
-  lv_obj_set_style_border_width(homeCounterBar, 0, 0);
-  lv_obj_set_style_shadow_width(homeCounterBar, 0, 0);
+// "RRRR-MM-DD,GG:MM,TYP,ML,..." -> pola (bez alokacji; rowniez dla bardzo duzych plikow).
+static bool uiParseRow(const char *s, UiRow &r) {
+  if (strlen(s) < 18 || s[4] != '-' || s[7] != '-' || s[10] != ',' || s[13] != ':' || s[16] != ',') return false;
+  memcpy(r.date, s, 10);
+  r.date[10] = 0;
+  r.hh = (s[11] - '0') * 10 + (s[12] - '0');
+  r.mm = (s[14] - '0') * 10 + (s[15] - '0');
+  const char *t = s + 17;
+  const char *e = strchr(t, ',');
+  if (!e) return false;
+  size_t n = static_cast<size_t>(e - t);
+  if (n >= sizeof(r.type)) n = sizeof(r.type) - 1;
+  memcpy(r.type, t, n);
+  r.type[n] = 0;
+  r.ml = atoi(e + 1);
+  return true;
+}
 
-  // Dwa kafelki informacyjne: OSTATNIE KARMIENIE (lewy) i OSTATNIA BUTELKA (prawy).
-  feedingCard = createHomeInfoTile(14, 156, 220, 92, "OSTATNIE KARMIENIE", COLOR_ORANGE, &homeFeedingLabel);
-  milkCard = createHomeInfoTile(246, 156, 220, 92, "OSTATNIA BUTELKA", COLOR_BLUE, &homeMilkLabel);
+static time_t uiRowEpoch(const UiRow &r) {
+  struct tm t = {};
+  t.tm_year = atoi(r.date) - 1900;
+  t.tm_mon = atoi(r.date + 5) - 1;
+  t.tm_mday = atoi(r.date + 8);
+  t.tm_hour = r.hh;
+  t.tm_min = r.mm;
+  t.tm_isdst = -1;
+  return mktime(&t);
+}
 
-  // Glowna akcja: duzy przycisk w ksztalcie pigulki z delikatnym gradientem.
-  feedFormButton = createButton(homeScreen, "KARMIENIE", 14, 260, 452, 60, COLOR_ORANGE);
-  lv_obj_set_style_radius(feedFormButton, 30, 0);
-  lv_obj_set_style_bg_grad_color(feedFormButton, lv_color_mix(COLOR_ORANGE, lv_color_white(), 190), 0);
-  lv_obj_set_style_bg_grad_dir(feedFormButton, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_shadow_width(feedFormButton, 14, 0);
-  lv_obj_set_style_shadow_offset_y(feedFormButton, 4, 0);
-  lv_obj_set_style_shadow_opa(feedFormButton, LV_OPA_30, 0);
-  lv_obj_set_style_shadow_width(feedFormButton, 4, LV_STATE_PRESSED);
-  lv_obj_set_style_text_font(lv_obj_get_child(feedFormButton, 0), &lv_font_montserrat_16, 0);
-  lv_obj_add_event_cb(feedFormButton, feedingButtonEvent, LV_EVENT_CLICKED, nullptr);
+// Opis wpisu ("ostatnie karmienie"/"ostatnia butelka") w jednej linii: "15:20 · 120 ml".
+static void uiEntryLine(char *dst, size_t n, const String &entry, bool bottle) {
+  dst[0] = 0;
+  if (entry.startsWith("Brak")) return;
+  const int nl = entry.indexOf('\n');
+  const String first = nl >= 0 ? entry.substring(0, nl) : entry;
+  const String detail = nl >= 0 ? entry.substring(nl + 1) : String();
+  const int sep = first.lastIndexOf("  ");
+  const String timePart = sep >= 0 ? first.substring(sep + 2) : first;
+  const String datePart = (sep >= 5) ? first.substring(0, 5) : String();  // "dd.mm"
+  String out;
+  const String todayIso = dateIso(dayOffsetFromToday(0));
+  const String todayShort = todayIso.substring(8, 10) + "." + todayIso.substring(5, 7);
+  if (datePart.length() && datePart != todayShort) out = datePart + " " + timePart;
+  else out = timePart;
+  if (bottle) {
+    const int bar = detail.lastIndexOf('|');
+    String ml = bar >= 0 ? detail.substring(bar + 1) : detail;
+    ml.trim();
+    if (ml.length()) out += " · " + ml;
+  } else {
+    out += " · karmienie";
+  }
+  strlcpy(dst, out.c_str(), n);
+}
 
-  // Dolna nawigacja: plaskie "chipy" z kolorowa kropka. Rzad 1: SEN, INNE, WAGA
-  // (3 kolumny po 145 px, odstep 8: x = 14, 167, 320); rzad 2: KALENDARZ, PODSUMOWANIE.
-  // SEN wyrozniony fioletem; gdy dziecko spi -> zolty.
-  const int navW = 145;
-  const int navX[3] = {14, 167, 320};
-  sleepHomeButton = createHomeNavTile(sleepInProgress ? "SEN (spi)" : "SEN",
-                                      navX[0], 334, navW, 56,
-                                      sleepInProgress ? COLOR_YELLOW : lv_color_hex(0x6E5FA6));
-  lv_obj_add_event_cb(sleepHomeButton, sleepOpenEvent, LV_EVENT_CLICKED, nullptr);
-  otherHomeButton = createHomeNavTile("INNE", navX[1], 334, navW, 56, COLOR_BLUE);
-  lv_obj_add_event_cb(otherHomeButton, otherOpenEvent, LV_EVENT_CLICKED, nullptr);
-  weightHomeButton = createHomeNavTile("WAGA", navX[2], 334, navW, 56, COLOR_BLUE);
-  lv_obj_add_event_cb(weightHomeButton, weightOpenEvent, LV_EVENT_CLICKED, nullptr);
-  calendarButton = createHomeNavTile("KALENDARZ", navX[0], 398, 220, 56, COLOR_BLUE);
-  lv_obj_add_event_cb(calendarButton, calendarButtonEvent, LV_EVENT_CLICKED, nullptr);
-  chartButton = createHomeNavTile("PODSUMOWANIE", 246, 398, 220, 56, COLOR_GREEN);
-  lv_obj_add_event_cb(chartButton, chartButtonEvent, LV_EVENT_CLICKED, nullptr);
+// ---- Czesc "na zywo": zegar, licznik od karmienia, drzemka, pogoda, kafelki dnia ----
+static void uiFillLive(UiModel &m) {
+  m.night = nightModeActive;
+  m.wifiOk = WiFi.status() == WL_CONNECTED;
+  m.storageOk = storageReady;
+  struct tm nowInfo;
+  const bool haveTime = currentLocalTime(nowInfo);
+  timeIsValid = haveTime;
+  m.timeOk = haveTime;
+  if (haveTime) {
+    snprintf(m.clockHH, sizeof m.clockHH, "%02d", nowInfo.tm_hour);
+    snprintf(m.clockMM, sizeof m.clockMM, "%02d", nowInfo.tm_min);
+    snprintf(m.dateLine, sizeof m.dateLine, "%s, %d %s", UI_PL_DAYS[nowInfo.tm_wday], nowInfo.tm_mday,
+             UI_PL_MONTHS_GEN[nowInfo.tm_mon]);
+  } else {
+    strcpy(m.clockHH, "--");
+    strcpy(m.clockMM, "--");
+    m.dateLine[0] = 0;
+  }
+  String age = calculateAgeText();
+  const int nl = age.indexOf('\n');
+  if (nl >= 0) age = age.substring(nl + 1);
+  strlcpy(m.ageText, age.c_str(), sizeof m.ageText);
 
-  // ===================== WYGASZACZ =====================
-  // Uklad (gora ekranu tipCard/ageCard 44..144 pozostaja widoczne):
-  //   Karta zegara      150..250  (zegar + data + ostatnie/nastepne karmienie)
-  //   Pasmo doby        256..300  (karmienia/pieluchy na osi 0-24h)
-  //   Karta pogody      306..470  (ikona + temp + opis + min/max + 3h + ubior)
+  m.warnMin = COUNTER_WARN_MIN;
+  m.alarmMin = COUNTER_BLINK_MIN;
+  m.hasLastFeed = lastFeedingTime != 0;
+  if (m.hasLastFeed) {
+    long el = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
+    if (el < 0) el = 0;
+    m.sinceFeedMin = static_cast<int>(el);
+    uiFmtAgo(m.lastFeedTxt, sizeof m.lastFeedTxt, el);
+  } else {
+    m.sinceFeedMin = 0;
+    m.lastFeedTxt[0] = 0;
+  }
+  strlcpy(m.nextFeedClock, nextFeedingClock().c_str(), sizeof m.nextFeedClock);
+  uiEntryLine(m.lastFeedEntry, sizeof m.lastFeedEntry, lastFeeding, false);
+  uiEntryLine(m.lastBottleEntry, sizeof m.lastBottleEntry, lastMilk, true);
+  strlcpy(m.lastBottleTxt, m.lastBottleEntry, sizeof m.lastBottleTxt);
 
-  // ===================== WYGASZACZ (nowy uklad) =====================
-  //   Karta tipsow      44..144   (100; codzienna wskazowka — tylko na wygaszaczu)
-  //   Karta zegara      150..238  (88; zegar + data u gory, linia karmienia nizej)
-  //   Karta statystyk   244..292  (48; chudszy pasek 3 liczb)
-  //   Karta pogody      298..474  (176; ikona+temp+opis+minmax, godziny, ubior)
-
-  // --- Karta codziennej wskazowki (tipsy) — widoczna wylacznie na wygaszaczu ---
-  // Na ekranie glownym te miejsce zajmuje licznik/ wiek; tu wraca wskazowka dnia.
-  ssTipCard = createCard(homeScreen, 14, 44, 268, 100);
-  ssTipLabel = createLabel(ssTipCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 6, 6);
-  lv_obj_set_width(ssTipLabel, 244);
-  lv_obj_set_style_text_font(ssTipLabel, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_align(ssTipLabel, LV_TEXT_ALIGN_LEFT, 0); // akapit tipsow — do lewej
-  lv_label_set_long_mode(ssTipLabel, LV_LABEL_LONG_WRAP);
-
-  // --- Karta zegara ---
-  ssClockCard = createCard(homeScreen, 14, 150, 452, 88);
-  lv_obj_set_style_pad_all(ssClockCard, 10, 0);
-
-  // Lewa kolumna: zegar (font 36 — dostepny w lv_conf) + pod nim dzien tygodnia i data.
-  ssClockLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
-  lv_obj_set_style_text_font(ssClockLabel, &lv_font_montserrat_36, 0);
-  lv_obj_set_style_text_align(ssClockLabel, LV_TEXT_ALIGN_LEFT, 0);
-  // ssClockShadowLabel nieuzywany (plaski zegar) — zostaje ukryty.
-  ssClockShadowLabel = createLabel(ssClockCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 4, 0);
-  lv_obj_set_style_text_font(ssClockShadowLabel, &lv_font_montserrat_36, 0);
-  lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
-
-  ssDateLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 4, 46);
-  lv_obj_set_width(ssDateLabel, 130);
-  lv_obj_set_style_text_font(ssDateLabel, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_align(ssDateLabel, LV_TEXT_ALIGN_LEFT, 0);
-
-  // Prawa czesc (od x=146): linia 1 = ostatnie karmienie + (nast. ~HH:MM),
-  // linia 2 = informacja o drzemce. Osobne etykiety, bez zawijania na zegar.
-  // Font 12 (nie 14): dluzsza linia karmienia zawija sie max na 2 wiersze i miesci
-  // z zapasem nad wierszem drzemki (bez nachodzenia w pionie w karcie 68 px wnetrza).
-  ssLastFeedingLabel = createLabel(ssClockCard, "", COLOR_GREEN, LV_ALIGN_TOP_LEFT, 146, 4);
-  lv_obj_set_width(ssLastFeedingLabel, 286);
-  lv_obj_set_style_text_font(ssLastFeedingLabel, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_align(ssLastFeedingLabel, LV_TEXT_ALIGN_LEFT, 0);
-  lv_label_set_long_mode(ssLastFeedingLabel, LV_LABEL_LONG_WRAP);
-  ssSleepLabel = createLabel(ssClockCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 146, 46);
-  lv_obj_set_width(ssSleepLabel, 286);
-  lv_obj_set_style_text_font(ssSleepLabel, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_align(ssSleepLabel, LV_TEXT_ALIGN_LEFT, 0);
-  // ssNextFeedLabel nieuzywany osobno (scalony w linii karmienia) — ukryty.
-  ssNextFeedLabel = createLabel(ssClockCard, "", COLOR_BLUE, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
-  lv_obj_add_flag(ssNextFeedLabel, LV_OBJ_FLAG_HIDDEN);
-
-  // --- Karta statystyk dnia (chudsza): 3 kafelki liczbowe ---
-  ssDayBandCard = createCard(homeScreen, 14, 244, 452, 48);
-  lv_obj_set_style_pad_all(ssDayBandCard, 6, 0);
-  // ssDayBandTrack sluzy teraz jako niewidoczny kontener 3 kafelkow statystyk.
-  ssDayBandTrack = ssDayBandCard;
-  ssDayBandStamp = -1;
-  const char *statCaps[3] = {"KARMIENIA", "NAJDL. PRZERWA", "SR. PRZERWA"};
-  const int statX[3] = {6, 156, 306};
-  for (uint8_t i = 0; i < 3; ++i) {
-    ssStatValue[i] = createLabel(ssDayBandCard, "-", COLOR_GREEN, LV_ALIGN_TOP_LEFT, statX[i], 0);
-    lv_obj_set_width(ssStatValue[i], 134);
-    lv_obj_set_style_text_align(ssStatValue[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(ssStatValue[i], &lv_font_montserrat_16, 0);
-    lv_obj_t *cap = createLabel(ssDayBandCard, statCaps[i], COLOR_MUTED, LV_ALIGN_TOP_LEFT, statX[i], 22);
-    lv_obj_set_width(cap, 134);
-    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(cap, &lv_font_montserrat_10, 0);
-    if (i > 0) {
-      lv_obj_t *sep = lv_obj_create(ssDayBandCard);
-      lv_obj_remove_style_all(sep);
-      lv_obj_set_size(sep, 1, 32);
-      lv_obj_set_pos(sep, statX[i] - 8, 2);
-      lv_obj_set_style_bg_color(sep, COLOR_BORDER, 0);
-      lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
+  // Drzemka / okno czuwania (jak dawniej na wygaszaczu).
+  m.sleeping = false;
+  m.sleepingMin = 0;
+  m.napLine[0] = 0;
+  m.napState = 0;
+  if (sleepInProgress && sleepStartedTime) {
+    m.sleeping = true;
+    m.sleepingMin = static_cast<int>(difftime(time(nullptr), sleepStartedTime) / 60);
+    if (m.sleepingMin < 0) m.sleepingMin = 0;
+    char d[16];
+    uiFmtHm(d, sizeof d, m.sleepingMin);
+    snprintf(m.napLine, sizeof m.napLine, "Śpi od %s", d);
+    m.napState = 1;
+  } else if (lastWakeTime > 0) {
+    const WakeWindow ww = wakeWindowMinutes(calculateAgeDays());
+    const time_t napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
+    const time_t napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
+    const time_t nowS = time(nullptr);
+    if (nowS < napStart) {
+      struct tm ts;
+      localtime_r(&napStart, &ts);
+      snprintf(m.napLine, sizeof m.napLine, "Drzemka ok. %02d:%02d", ts.tm_hour, ts.tm_min);
+      m.napState = 1;
+    } else if (nowS <= napEnd) {
+      strcpy(m.napLine, "Czas na drzemkę");
+      m.napState = 2;
+    } else {
+      strcpy(m.napLine, "Przekroczone okno czuwania");
+      m.napState = 3;
     }
   }
 
-  // --- Karta pogody (wyzsza dzieki chudszej karcie statystyk) ---
-  ssWeatherCard = createCard(homeScreen, 14, 298, 452, 176);
-
-  ssIconBox = lv_obj_create(ssWeatherCard);
-  lv_obj_remove_style_all(ssIconBox);
-  lv_obj_set_size(ssIconBox, 92, 92);
-  lv_obj_set_pos(ssIconBox, 4, 6);
-  ssLastIconCode = -999;
-
-  // Gorna czesc: ikona (lewa) + temperatura/opis/minmax (prawa).
-  ssTempLabel = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_LEFT, 112, 2);
-  lv_obj_set_style_text_font(ssTempLabel, &lv_font_montserrat_36, 0);
-
-  ssDescLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 114, 44);
-  lv_obj_set_width(ssDescLabel, 320);
-  lv_obj_set_style_text_font(ssDescLabel, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(ssDescLabel, LV_LABEL_LONG_DOT);
-
-  ssMinMaxLabel = createLabel(ssWeatherCard, "", COLOR_MUTED, LV_ALIGN_TOP_LEFT, 114, 66);
-  lv_obj_set_style_text_font(ssMinMaxLabel, &lv_font_montserrat_14, 0);
-
-  // Srodek: 3 kolejne godziny (pod ikona/temp, w jednym rzedzie).
-  for (uint8_t i = 0; i < 3; ++i) {
-    ssHourLabels[i] = createLabel(ssWeatherCard, "", COLOR_TEXT, LV_ALIGN_TOP_MID,
-                                  static_cast<int>(-140 + i * 140), 96);
-    lv_obj_set_width(ssHourLabels[i], 128);
-    lv_obj_set_style_text_align(ssHourLabels[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(ssHourLabels[i], &lv_font_montserrat_12, 0);
+  // Statystyki dnia (rytm liczymy co ~3 min — bez skanowania pliku przy kazdym odswiezeniu).
+  static uint32_t rhythmStamp = 0;
+  if (rhythmStamp == 0 || millis() - rhythmStamp >= 180000) {
+    recomputeFeedingRhythm();
+    rhythmStamp = millis();
   }
-
-  // Dol: porada ubioru na tonalnym pasku (jedna linia z przycieciem — nie zaslania).
-  lv_obj_t *dressBar = lv_obj_create(ssWeatherCard);
-  lv_obj_remove_style_all(dressBar);
-  lv_obj_set_size(dressBar, 428, 26);
-  lv_obj_align(dressBar, LV_ALIGN_BOTTOM_MID, 0, 2);
-  lv_obj_set_style_radius(dressBar, 9, 0);
-  lv_obj_set_style_bg_color(dressBar, COLOR_TONAL_GREEN, 0);
-  lv_obj_set_style_bg_opa(dressBar, LV_OPA_COVER, 0);
-  lv_obj_clear_flag(dressBar, LV_OBJ_FLAG_SCROLLABLE);
-  ssDressLabel = createLabel(dressBar, "", COLOR_MUTED, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_width(ssDressLabel, 414);
-  lv_obj_set_style_text_align(ssDressLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(ssDressLabel, &lv_font_montserrat_10, 0);
-  lv_label_set_long_mode(ssDressLabel, LV_LABEL_LONG_DOT);
-
-  ssRenderedClock = "";
-  ssRenderedDate = "";
-  ssRenderedTemp = "";
-  ssRenderedDescription = "";
-  ssRenderedMinMax = "";
-  ssRenderedDress = "";
-  ssRenderedLastFeeding = "";
-  ssRenderedSleep = "";
-  ssRenderedTip = "";
-  ssRenderedNextFeed = "";
-  for (uint8_t i = 0; i < 3; ++i) ssRenderedHours[i] = "";
-  for (uint8_t i = 0; i < 3; ++i) ssRenderedStat[i] = "";
-
-  applyScreensaverVisibility();
-
-  renderedClock = "";
-  renderedAge = "";
-  renderedFeeding = "";
-  renderedMilk = "";
-  renderedCounter = "";
-  updateHomeInformation();
-  loadReusableScreen(homeScreen);
-}
-
-void updateHomeInformation() {
-  if (!homeClockLabel) return;
-
-  struct tm nowInfo;
-  String clockText;
-  if (currentLocalTime(nowInfo)) {
-    clockText = formatDateTime(time(nullptr));
-    timeIsValid = true;
-  } else {
-    clockText = "Brak potwierdzonego czasu";
-    timeIsValid = false;
-  }
-
-  const bool wifiOk = WiFi.status() == WL_CONNECTED;
-
-  const String ageText = calculateAgeText();
-
-  // Dioda przy kazdej sekcji statusu: zielona = OK, czerwona = blad.
-  if (homeLedWifi) lv_obj_set_style_bg_color(homeLedWifi, wifiOk ? COLOR_GREEN : COLOR_RED, 0);
-  if (homeLedMemory) lv_obj_set_style_bg_color(homeLedMemory, storageReady ? COLOR_GREEN : COLOR_RED, 0);
-  if (homeLedTime) lv_obj_set_style_bg_color(homeLedTime, timeIsValid ? COLOR_GREEN : COLOR_RED, 0);
-
-  // Widoczny pasek licznika czasu od ostatniego karmienia (nad kartami).
-  // Tekst ZAWSZE informuje, kiedy bylo ostatnie karmienie (np. "2h 30min temu");
-  // sygnalizacja "czasu na karmienie" pozostaje wylacznie przez kolor/miganie paska
-  // (patrz updateCounterAlarmVisuals). counterRemainMin nadal steruje wizualizacja.
-  String counterText;
+  DaySummary today;
+  dayStats(dayOffsetFromToday(0), today);
+  int longest = longestFeedingGapMin;
   if (lastFeedingTime) {
-    const long elapsedMin = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
-    counterText = "OSTATNIE KARMIENIE: " + formatAgoText(lastFeedingTime);
-    counterRemainMin = (elapsedMin >= 0)
-                           ? static_cast<int>(COUNTER_BLINK_MIN - elapsedMin)
-                           : -1;
+    const int openGap = static_cast<int>(difftime(time(nullptr), lastFeedingTime) / 60);
+    if (openGap > longest) longest = openGap;
+  }
+  m.feedCount = today.feedingCount;
+  m.longestGapMin = longest;
+  m.avgGapMin = avgFeedingGapMin;
+  snprintf(m.statVal[0], sizeof m.statVal[0], "%d", today.feedingCount);
+  uiFmtHm(m.statVal[1], sizeof m.statVal[1], longest);
+  uiFmtHm(m.statVal[2], sizeof m.statVal[2], avgFeedingGapMin);
+  m.todayFeed = today.feedingCount;
+  m.todayMl = today.milkMl;
+  m.todayDiapers = today.diaperWet + today.diaperDirty;
+  m.todayBath = today.bathCount > 0;
+  m.sleepTodayDay = today.sleepDayMin;
+  m.sleepTodayNight = today.sleepNightMin;
+  int needNight = 0, needDay = 0;
+  sleepNeedMinutes(calculateAgeDays(), needNight, needDay);
+  m.sleepNeedDay = needDay;
+  m.sleepNeedNight = needNight;
+
+  // Pogoda.
+  const WeatherState w = snapshotWeather();
+  m.weatherValid = w.valid;
+  if (w.valid) {
+    const WeatherKind kind = weatherKindOf(w.codeNow);
+    m.wmo = w.codeNow;
+    m.temp = w.tempNow;
+    m.feels = w.feelsLike;
+    m.tmin = w.tempMinDay;
+    m.tmax = w.tempMaxDay;
+    strlcpy(m.weatherDesc, UI_WEATHER_PL[static_cast<int>(kind)], sizeof m.weatherDesc);
+    strlcpy(m.dress, uiDressPl(w.tempNow), sizeof m.dress);
+    for (int i = 0; i < 3; ++i) {
+      m.hours[i].has = w.next[i].has;
+      m.hours[i].h = w.next[i].hour;
+      m.hours[i].m = w.next[i].minute;
+      m.hours[i].temp = w.next[i].temp;
+    }
   } else {
-    counterText = "OSTATNIE KARMIENIE: brak wpisu";
-    counterRemainMin = -1;
+    strlcpy(m.weatherDesc, m.wifiOk ? "Czekam na dane pogody…" : "Brak połączenia Wi-Fi", sizeof m.weatherDesc);
+    m.dress[0] = 0;
+    for (int i = 0; i < 3; ++i) m.hours[i].has = false;
   }
-  setLabelTextIfChanged(homeCounterLabel, renderedCounter, counterText);
-  updateCounterAlarmVisuals();
-
-  setLabelTextIfChanged(homeClockLabel, renderedClock, clockText);
-  setLabelTextIfChanged(homeAgeLabel, renderedAge, ageText);
-  setLabelTextIfChanged(homeFeedingLabel, renderedFeeding, compactHomeEntry(lastFeeding, false));
-  setLabelTextIfChanged(homeMilkLabel, renderedMilk, compactHomeEntry(lastMilk, true));
+  strlcpy(m.tip, developmentTipForToday().c_str(), sizeof m.tip);
 }
 
-// Belka licznika wg czasu od ostatniego karmienia:
-//   < 3 h        — zielona pastelowa
-//   3 h .. 4 h   — zolta (zbliza sie pora)
-//   >= 4 h       — miga biel/czerwień (sygnalizator: czas na karmienie)
-void updateCounterAlarmVisuals() {
-  if (!homeCounterBar || !homeCounterLabel) return;
+// ---- Czesc "wykresowa": jeden przebieg pliku CSV (rytm, przerwy, waga, sen nocny, kapiele) ----
+static time_t uiFeedTs[400];
+static time_t uiFeedFirst[400];
+static UiWeightPt uiWts[96];
 
-  if (!lastFeedingTime) {
-    lv_obj_set_style_bg_color(homeCounterBar, COLOR_TONAL_GREEN, 0);
-    lv_obj_set_style_text_color(homeCounterLabel, COLOR_MUTED, 0);
-    return;
+static void uiFillCharts(UiModel &m) {
+  // Reset sekcji wykresowych.
+  m.gapN = 0; m.gapOpen = false;
+  for (int d = 0; d < UI_RHYTHM_DAYS; ++d) { m.rhN[d] = 0; m.rhLabel[d][0] = 0; }
+  for (int i = 0; i < UI_WEEKS; ++i) { m.weekHas[i] = false; m.weekPartial[i] = false; m.weekVal[i] = 0; m.weekNo[i] = 0; }
+  for (int i = 0; i < UI_NIGHTS; ++i) { m.nightMin[i] = -1; m.nightFrom[i] = 0; m.nightTo[i] = 0; m.nightLabel[i][0] = 0; }
+  m.lastWeightG = 0; m.lastWeightDate[0] = 0;
+  m.bathMask = 0; m.bathSinceDays = -1; m.bathNextDay = 0; m.bathLastTxt[0] = 0; m.bathNextTxt[0] = 0;
+
+  const time_t nowT = time(nullptr);
+  struct tm tn;
+  localtime_r(&nowT, &tn);
+  const int todayDfc = uiDaysFromCivil(tn.tm_year + 1900, tn.tm_mon + 1, tn.tm_mday);
+  const int birthDfc = uiDaysFromCivil(BIRTH_YEAR, BIRTH_MONTH, BIRTH_DAY);
+
+  char iso[15][11];
+  for (int i = 0; i < 15; ++i) dateIso(dayOffsetFromToday(static_cast<uint8_t>(i))).toCharArray(iso[i], 11);
+  snprintf(m.rhLabel[0], sizeof m.rhLabel[0], "dziś");
+  for (int d = 1; d < UI_RHYTHM_DAYS; ++d) snprintf(m.rhLabel[d], sizeof m.rhLabel[d], "%.2s.%.2s", iso[d] + 8, iso[d] + 5);
+
+  int feedN = 0, wN = 0;
+  char lastBath[11] = "";
+  char lastWDate[11] = "";
+  int lastWG = 0;
+  char monthPrefix[8];
+  snprintf(monthPrefix, sizeof monthPrefix, "%04d-%02d", tn.tm_year + 1900, tn.tm_mon + 1);
+
+  if (storageReady) {
+    File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
+    if (file) {
+      char line[112];
+      bool header = true;
+      while (file.available()) {
+        const size_t n = file.readBytesUntil('\n', line, sizeof(line) - 1);
+        line[n] = 0;
+        if (header) { header = false; continue; }
+        size_t len = n;
+        while (len && (line[len - 1] == '\r' || line[len - 1] == ' ')) line[--len] = 0;
+        UiRow r;
+        if (!uiParseRow(line, r)) continue;
+        const bool isFeed = !strcmp(r.type, "KARMIENIE");
+        const bool isMilk = !strncmp(r.type, "MLEKO", 5);
+        if ((isFeed || isMilk) && strcmp(r.date, iso[14]) >= 0) {
+          if (feedN == 400) { memmove(uiFeedTs, uiFeedTs + 1, 399 * sizeof(time_t)); --feedN; }
+          uiFeedTs[feedN++] = uiRowEpoch(r);
+        }
+        if (isFeed) {
+          for (int d = 0; d < UI_RHYTHM_DAYS; ++d) {
+            if (!strcmp(r.date, iso[d]) && m.rhN[d] < UI_RHYTHM_MAX) m.rhT[d][m.rhN[d]++] = r.hh * 60 + r.mm;
+          }
+        } else if (!strcmp(r.type, "WAGA") && r.ml > 0) {
+          const int day = uiDaysFromCivil(atoi(r.date), atoi(r.date + 5), atoi(r.date + 8)) - birthDfc;
+          if (wN == 96) { memmove(uiWts, uiWts + 1, 95 * sizeof(UiWeightPt)); --wN; }
+          uiWts[wN].day = day;
+          uiWts[wN].g = r.ml;
+          ++wN;
+          if (strcmp(r.date, lastWDate) >= 0) { strcpy(lastWDate, r.date); lastWG = r.ml; }
+        } else if (!strcmp(r.type, "KAPIEL")) {
+          if (strcmp(r.date, lastBath) > 0) strcpy(lastBath, r.date);
+          if (!strncmp(r.date, monthPrefix, 7)) {
+            const int dd = atoi(r.date + 8);
+            if (dd >= 1 && dd <= 31) m.bathMask |= (1u << (dd - 1));
+          }
+        }
+      }
+      file.close();
+    }
   }
 
-  long elapsedMin = static_cast<long>(difftime(time(nullptr), lastFeedingTime) / 60);
-  if (elapsedMin < 0) elapsedMin = 0;
-
-  if (elapsedMin >= COUNTER_BLINK_MIN) {
-    // Przekroczenie 4 h: naprzemienne biale/czerwone tlo.
-    const bool redPhase = counterAlarmPhase;
-    lv_obj_set_style_bg_color(homeCounterBar, redPhase ? COLOR_RED : lv_color_white(), 0);
-    lv_obj_set_style_text_color(homeCounterLabel, redPhase ? lv_color_white() : COLOR_RED, 0);
-    return;
+  // --- Przerwy miedzy dzisiejszymi karmieniami (+ trwajaca) ---
+  {
+    int *t = m.rhT[0];
+    const int cnt = m.rhN[0];
+    for (int i = 1; i < cnt; ++i) {  // sortowanie wstawianie (edycja w miejscu potrafi zaburzyc kolejnosc)
+      const int v = t[i];
+      int j = i - 1;
+      while (j >= 0 && t[j] > v) { t[j + 1] = t[j]; --j; }
+      t[j + 1] = v;
+    }
+    for (int d = 1; d < UI_RHYTHM_DAYS; ++d) {
+      int *u = m.rhT[d];
+      for (int i = 1; i < m.rhN[d]; ++i) {
+        const int v = u[i];
+        int j = i - 1;
+        while (j >= 0 && u[j] > v) { u[j + 1] = u[j]; --j; }
+        u[j + 1] = v;
+      }
+    }
+    for (int i = 1; i < cnt && m.gapN < UI_MAX_GAPS; ++i) {
+      const int len = t[i] - t[i - 1];
+      if (len <= 0) continue;
+      m.gapStart[m.gapN] = t[i - 1];
+      m.gapLen[m.gapN] = len;
+      ++m.gapN;
+    }
+    if (cnt > 0 && tn.tm_year > 100) {
+      const int nowMin = tn.tm_hour * 60 + tn.tm_min;
+      const int len = nowMin - t[cnt - 1];
+      if (len > 0) {
+        if (m.gapN == UI_MAX_GAPS) {
+          memmove(m.gapStart, m.gapStart + 1, (UI_MAX_GAPS - 1) * sizeof(int));
+          memmove(m.gapLen, m.gapLen + 1, (UI_MAX_GAPS - 1) * sizeof(int));
+          --m.gapN;
+        }
+        m.gapStart[m.gapN] = t[cnt - 1];
+        m.gapLen[m.gapN] = len;
+        ++m.gapN;
+        m.gapOpen = true;
+      }
+    }
   }
 
-  counterAlarmPhase = false;
-  if (elapsedMin >= COUNTER_WARN_MIN) {
-    lv_obj_set_style_bg_color(homeCounterBar, COLOR_YELLOW, 0);
-    lv_obj_set_style_text_color(homeCounterLabel, COLOR_TEXT, 0);
-    return;
+  // --- Ostatnie 5 dob (wykres mleka) ---
+  for (int i = 0; i < 5; ++i) {
+    const int back = 4 - i;
+    DaySummary s;
+    dayStats(dayOffsetFromToday(static_cast<uint8_t>(back)), s);
+    UiDay &d = m.days[i];
+    if (back == 0) snprintf(d.label, sizeof d.label, "dziś");
+    else snprintf(d.label, sizeof d.label, "%.2s.%.2s", iso[back] + 8, iso[back] + 5);
+    d.feed = s.feedingCount;
+    d.milkMother = s.motherMilkMl;
+    d.milkModified = s.modifiedMilkMl;
+    d.milkMixed = s.mixedMilkMl;
+    d.sleepDayMin = s.sleepDayMin;
+    d.sleepNightMin = s.sleepNightMin;
+    d.wet = s.diaperWet;
+    d.dirty = s.diaperDirty;
+    d.bath = s.bathCount > 0;
   }
 
-  lv_obj_set_style_bg_color(homeCounterBar, COLOR_TONAL_GREEN, 0);
-  lv_obj_set_style_text_color(homeCounterLabel, COLOR_MUTED, 0);
+  // --- Przyrost wagi: trend tygodniowy (regresja liniowa z okna +-7 dni, g/dobe) ---
+  if (wN > 0) {
+    for (int i = 1; i < wN; ++i) {  // sortowanie po dniu
+      const UiWeightPt v = uiWts[i];
+      int j = i - 1;
+      while (j >= 0 && uiWts[j].day > v.day) { uiWts[j + 1] = uiWts[j]; --j; }
+      uiWts[j + 1] = v;
+    }
+    if (uiWts[0].day > 0) {  // punkt urodzeniowy
+      if (wN == 96) --wN;
+      memmove(uiWts + 1, uiWts, wN * sizeof(UiWeightPt));
+      uiWts[0].day = 0;
+      uiWts[0].g = BIRTH_WEIGHT_G;
+      ++wN;
+    }
+    const int lastDay = uiWts[wN - 1].day;
+    const int kLast = lastDay / 7;
+    int k0 = kLast - (UI_WEEKS - 1);
+    if (k0 < 1) k0 = 1;
+    for (int i = 0; i < UI_WEEKS; ++i) {
+      const int k = k0 + i;
+      m.weekNo[i] = k;
+      if (k > kLast) continue;
+      const float c = k * 7 + 3.5f;
+      float sx = 0, sy = 0;
+      int cnt = 0, dmin = 100000, dmax = -100000;
+      for (int j = 0; j < wN; ++j) {
+        if (uiWts[j].day >= c - 7 && uiWts[j].day <= c + 7) {
+          sx += uiWts[j].day; sy += uiWts[j].g; ++cnt;
+          if (uiWts[j].day < dmin) dmin = uiWts[j].day;
+          if (uiWts[j].day > dmax) dmax = uiWts[j].day;
+        }
+      }
+      if (cnt < 2 || dmax - dmin < 5) continue;
+      const float mx = sx / cnt, my = sy / cnt;
+      float sxy = 0, sxx = 0;
+      for (int j = 0; j < wN; ++j) {
+        if (uiWts[j].day >= c - 7 && uiWts[j].day <= c + 7) {
+          sxy += (uiWts[j].day - mx) * (uiWts[j].g - my);
+          sxx += (uiWts[j].day - mx) * (uiWts[j].day - mx);
+        }
+      }
+      if (sxx <= 0) continue;
+      m.weekHas[i] = true;
+      m.weekVal[i] = static_cast<int>(lroundf(sxy / sxx));
+      m.weekPartial[i] = (k * 7 + 7 > lastDay);
+    }
+    m.weightN = wN;
+  }
+  if (lastWG > 0) {
+    m.lastWeightG = lastWG;
+    snprintf(m.lastWeightDate, sizeof m.lastWeightDate, "%.2s.%.2s.%.4s", lastWDate + 8, lastWDate + 5, lastWDate);
+  }
+
+  // --- Sen nocny wg karmien: poczatek = poczatek karmienia wieczornego + 90 min,
+  //     koniec = 10 min przed poczatkiem pierwszego karmienia w nocy/nad ranem. ---
+  if (feedN > 1) {
+    std::sort(uiFeedTs, uiFeedTs + feedN);
+    int fN = 0;
+    time_t curLast = 0;
+    for (int i = 0; i < feedN; ++i) {
+      if (fN > 0 && uiFeedTs[i] - curLast <= 25 * 60) { curLast = uiFeedTs[i]; continue; }
+      uiFeedFirst[fN++] = uiFeedTs[i];
+      curLast = uiFeedTs[i];
+    }
+    int bestMin[15];
+    time_t bestFrom[15], bestTo[15];
+    for (int k = 0; k < 15; ++k) { bestMin[k] = 0; bestFrom[k] = 0; bestTo[k] = 0; }
+    for (int i = 0; i + 1 < fN; ++i) {
+      const time_t a = uiFeedFirst[i], b = uiFeedFirst[i + 1];
+      struct tm ta;
+      localtime_r(&a, &ta);
+      if (ta.tm_hour < 17 || ta.tm_hour >= 20) continue;
+      struct tm tm1 = ta;
+      tm1.tm_mday += 1; tm1.tm_hour = 0; tm1.tm_min = 0; tm1.tm_sec = 0; tm1.tm_isdst = -1;
+      const time_t mid = mktime(&tm1);
+      struct tm tm2 = ta;
+      tm2.tm_mday += 1; tm2.tm_hour = 9; tm2.tm_min = 0; tm2.tm_sec = 0; tm2.tm_isdst = -1;
+      const time_t lim = mktime(&tm2);
+      if (b < mid || b > lim) continue;
+      const time_t from = a + 90 * 60, to = b - 10 * 60;
+      const int mins = static_cast<int>((to - from) / 60);
+      if (mins <= 0) continue;
+      char key[11];
+      snprintf(key, sizeof key, "%04d-%02d-%02d", ta.tm_year + 1900, ta.tm_mon + 1, ta.tm_mday);
+      for (int k = 0; k < 15; ++k) {
+        if (!strcmp(key, iso[k])) {
+          if (mins > bestMin[k]) { bestMin[k] = mins; bestFrom[k] = from; bestTo[k] = to; }
+          break;
+        }
+      }
+    }
+    const int firstBack = bestMin[0] > 0 ? 13 : 14;  // noc zaczeta dzis — tylko gdy juz sie skonczyla
+    for (int i = 0; i < UI_NIGHTS; ++i) {
+      const int k = firstBack - i;
+      snprintf(m.nightLabel[i], sizeof m.nightLabel[i], "%.2s.%.2s", iso[k] + 8, iso[k] + 5);
+      if (bestMin[k] > 0) {
+        struct tm f, t;
+        localtime_r(&bestFrom[k], &f);
+        localtime_r(&bestTo[k], &t);
+        m.nightMin[i] = bestMin[k];
+        m.nightFrom[i] = f.tm_hour * 60 + f.tm_min;
+        m.nightTo[i] = t.tm_hour * 60 + t.tm_min;
+      }
+    }
+  } else {
+    for (int i = 0; i < UI_NIGHTS; ++i) {
+      const int k = 14 - i;
+      snprintf(m.nightLabel[i], sizeof m.nightLabel[i], "%.2s.%.2s", iso[k] + 8, iso[k] + 5);
+    }
+  }
+
+  // --- Kapiele: kalendarz biezacego miesiaca, ostatnia i nastepna (co 3 dni) ---
+  snprintf(m.bathMonth, sizeof m.bathMonth, "%s %d", UI_PL_MONTHS_NOM[tn.tm_mon], tn.tm_year + 1900);
+  const int firstDfc = uiDaysFromCivil(tn.tm_year + 1900, tn.tm_mon + 1, 1);
+  const int nextMonthDfc = tn.tm_mon == 11 ? uiDaysFromCivil(tn.tm_year + 1901, 1, 1)
+                                           : uiDaysFromCivil(tn.tm_year + 1900, tn.tm_mon + 2, 1);
+  m.bathFirstDow = (firstDfc + 3) % 7;  // 1970-01-01 = czwartek; poniedzialek = 0
+  m.bathDays = nextMonthDfc - firstDfc;
+  m.bathToday = tn.tm_mday;
+  m.bathInterval = 3;
+  if (lastBath[0]) {
+    const int lastDfc = uiDaysFromCivil(atoi(lastBath), atoi(lastBath + 5), atoi(lastBath + 8));
+    const int since = todayDfc - lastDfc;
+    m.bathSinceDays = since;
+    const char *when = since <= 0 ? "dziś" : (since == 1 ? "wczoraj" : "");
+    if (*when) snprintf(m.bathLastTxt, sizeof m.bathLastTxt, "%.2s.%.2s · %s", lastBath + 8, lastBath + 5, when);
+    else snprintf(m.bathLastTxt, sizeof m.bathLastTxt, "%.2s.%.2s · %d dni temu", lastBath + 8, lastBath + 5, since);
+    int nextDfc = lastDfc + m.bathInterval;
+    if (nextDfc < todayDfc) nextDfc = todayDfc;  // zalegla — proponujemy dzis
+    const int delta = nextDfc - todayDfc;
+    struct tm nt = tn;
+    nt.tm_mday += delta; nt.tm_hour = 12; nt.tm_min = 0; nt.tm_sec = 0; nt.tm_isdst = -1;
+    mktime(&nt);
+    if (nextDfc >= firstDfc && nextDfc < nextMonthDfc) m.bathNextDay = nextDfc - firstDfc + 1;
+    if (delta == 0) snprintf(m.bathNextTxt, sizeof m.bathNextTxt, "%02d.%02d · dziś", nt.tm_mday, nt.tm_mon + 1);
+    else if (delta == 1) snprintf(m.bathNextTxt, sizeof m.bathNextTxt, "%02d.%02d · jutro", nt.tm_mday, nt.tm_mon + 1);
+    else snprintf(m.bathNextTxt, sizeof m.bathNextTxt, "%02d.%02d · za %d dni", nt.tm_mday, nt.tm_mon + 1, delta);
+  }
 }
 
-// Timer 500 ms: steruje mignieciem belki i odswieza teksty tylko na home.
+// ----------------------------- Ekran glowny (panel) ------------------------------
+void updateHomeInformation(bool forceCharts) {
+  if (!uiDashScr) return;
+  uiFillLive(uiModel);
+  const bool charts = forceCharts || uiChartsDirty || millis() - uiChartsStampMs > 120000;
+  if (charts) {
+    uiFillCharts(uiModel);
+    uiChartsDirty = false;
+    uiChartsStampMs = millis();
+  }
+  uiDashUpdate(uiModel, charts);
+}
+
+void createHomeScreen() {
+  // Panel zastepuje tablice (wygaszacz) — zawsze konczymy tryb wygaszacza.
+  if (screensaverActive) {
+    screensaverActive = false;
+    if (ssClockTimer) { lv_timer_del(ssClockTimer); ssClockTimer = nullptr; }
+  }
+  lv_obj_t *legacyHome = uiDashScr ? nullptr : homeScreen;  // pusty ekran z initScreens() — do usuniecia raz
+  uiDashCreate(nightModeActive);
+  homeScreen = uiDashScr;
+  uiFillLive(uiModel);
+  uiFillCharts(uiModel);
+  uiChartsDirty = false;
+  uiChartsStampMs = millis();
+  uiDashUpdate(uiModel, false);
+  uiDashShow(0);
+  uiDashUpdate(uiModel, false);
+  uiSaverDestroy();
+  if (legacyHome && legacyHome != homeScreen && legacyHome != lv_screen_active()) lv_obj_delete(legacyHome);
+}
+
+// Timer 500 ms: panel odswiezamy co ~1 s, tylko gdy jest na ekranie.
 void counterAlarmTickCb(lv_timer_t *timer) {
   (void)timer;
   if (otaInProgress || !homeScreen || lv_screen_active() != homeScreen) return;
-
   static uint8_t divider = 0;
-  ++divider;
-  if (divider >= 2) { // co ~1 s odswiez teksty licznika
+  if (++divider >= 2) {
     divider = 0;
-    updateHomeInformation();
+    updateHomeInformation(false);
   }
-  updateCounterAlarmVisuals();
 }
 
 // ---------------------------------- Formularz -----------------------------------
@@ -3842,7 +4072,8 @@ void updateNightMode() {
   Serial.printf("Motyw: %s\n", night ? "nocny" : "dzienny");
 
   lv_obj_t *active = lv_screen_active();
-  if (active == homeScreen) createHomeScreen();
+  if (homeScreen && active == homeScreen) createHomeScreen();
+  else if (screensaverActive && uiSaverScr && active == uiSaverScr) uiShowSaver();
   else if (active == formScreen) createFormScreen();
   else if (active == calendarScreen) createCalendarScreen();
   else if (active == dayDetailScreen) createDayDetailScreen(selectedCalendarDay);
@@ -4566,7 +4797,7 @@ bool downloadCsvFromHost() {
   // Odswiez dane i ekran z nowego mirror.
   loadLatestEntries();
   invalidateDayStats();
-  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation();
+  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation(false);
   hostLastDownloadMs = millis();
   hostDownloadFails = 0;
   hostLastError = 0;
@@ -4769,7 +5000,7 @@ void initOptionalServices() {
 void agingTickCb(lv_timer_t *timer) {
   (void)timer;
   if (otaInProgress) return;
-  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation();
+  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation(false);
 }
 
 // --------------------------- Wygaszacz ekranu i pogoda --------------------------
@@ -4943,157 +5174,33 @@ void drawWeatherIcon(lv_obj_t *box, int wmoCode) {
   }
 }
 
+// ------------------------------ Wygaszacz = tablica ------------------------------
 void updateScreensaverContent() {
-  if (!screensaverActive || !ssClockLabel) return;
-
-  // Codzienna wskazowka rozwojowa (tylko na wygaszaczu).
-  setLabelTextIfChanged(ssTipLabel, ssRenderedTip, developmentTipForToday());
-
-  const WeatherState currentWeather = snapshotWeather();
-
-  struct tm nowInfo;
-  if (currentLocalTime(nowInfo)) {
-    char buf[8];
-    strftime(buf, sizeof(buf), "%H:%M", &nowInfo);
-    setLabelTextIfChanged(ssClockLabel, ssRenderedClock, String(buf));
-    // Krotki dzien tygodnia + data w JEDNEJ linii (pod zegarem), np. "PON 05.09".
-    static const char *DAYS_SHORT[] = {"NIEDZ", "PON", "WT", "SR", "CZW", "PT", "SOB"};
-    char dbuf[8];
-    strftime(dbuf, sizeof(dbuf), "%d.%m", &nowInfo);
-    setLabelTextIfChanged(ssDateLabel, ssRenderedDate,
-                          String(DAYS_SHORT[nowInfo.tm_wday]) + " " + dbuf);
-    // Jedna linia karmienia: stan + godzina nastepnego (ostatnie + 4h) w nawiasie.
-    String feedingText;
-    lv_color_t feedingColor = COLOR_MUTED;
-    if (lastFeedingTime) {
-      // ZAWSZE pokazujemy, ile czasu temu bylo ostatnie karmienie (+ ~godzina nastepnego).
-      // Zblizajaca sie/miniona pora sygnalizowana jest kolorem tekstu (feedingAgeColor).
-      const String nextClk = nextFeedingClock();
-      const String suffix = nextClk.length() ? (" (nast. ~" + nextClk + ")") : String();
-      feedingText = "Ostatnie: " + formatAgoText(lastFeedingTime) + suffix;
-      feedingColor = feedingAgeColor(lastFeedingTime);
-    } else {
-      feedingText = "Brak wpisu karmienia";
-    }
-    setLabelTextIfChanged(ssLastFeedingLabel, ssRenderedLastFeeding, feedingText);
-    if (ssLastFeedingLabel) lv_obj_set_style_text_color(ssLastFeedingLabel, feedingColor, 0);
-    // Drugi wiersz: informacja o drzemce (osobna etykieta pod linia karmienia).
-    String sleepLine;
-    lv_color_t sleepColor = COLOR_MUTED;
-    if (sleepInProgress && sleepStartedTime) {
-      const long minS = static_cast<long>(difftime(time(nullptr), sleepStartedTime) / 60);
-      sleepLine = "Spi: " + formatDurationShort(minS);
-    } else if (lastWakeTime > 0) {
-      const WakeWindow ww = wakeWindowMinutes(calculateAgeDays());
-      const time_t napStart = lastWakeTime + static_cast<time_t>(ww.minMin) * 60;
-      const time_t napEnd = lastWakeTime + static_cast<time_t>(ww.maxMin) * 60;
-      const time_t nowS = time(nullptr);
-      if (nowS < napStart) sleepLine = "Drzemka ~" + formatDateTime(napStart).substring(12, 17);
-      else if (nowS <= napEnd) { sleepLine = "Czas na drzemke"; sleepColor = COLOR_YELLOW; }
-      else { sleepLine = "Przekroczone okno czuwania"; sleepColor = COLOR_RED; }
-    }
-    setLabelTextIfChanged(ssSleepLabel, ssRenderedSleep, sleepLine);
-    if (ssSleepLabel) lv_obj_set_style_text_color(ssSleepLabel, sleepColor, 0);
-    // Statystyki dnia: liczba karmien, najdluzsza i srednia przerwa.
-    // Odswiezamy je NA BIEZACO — przeliczamy rytm co ~3 min (nie co 30 s), aby nie
-    // skanowac pliku CSV i nie fragmntowac heapa przy kazdym odswiezeniu wygaszacza
-    // (P4: wieksza czestotliwosc dodawala ~300 alokacji/min w tle). "Otwarta" przerwa
-    // od ostatniego karmienia i tak rosnie wizualnie na biezaco (openGap nizej).
-    static uint32_t ssStatsLastRecalc = 0;
-    if (ssStatsLastRecalc == 0 || millis() - ssStatsLastRecalc >= 180000) {
-      recomputeFeedingRhythm();
-      ssStatsLastRecalc = millis();
-    }
-    DaySummary ssToday;
-    dayStats(dayOffsetFromToday(0), ssToday);
-    // Biezaca (otwarta) przerwa od ostatniego karmienia — pokazujemy najwieksza
-    // z dotychczasowych i tej trwajacej, aby wartosc rosla w czasie na oczach.
-    int shownLongest = longestFeedingGapMin;
-    int shownAvg = avgFeedingGapMin;
-    if (lastFeedingTime) {
-      const int openGap = static_cast<int>(difftime(time(nullptr), lastFeedingTime) / 60);
-      if (openGap > shownLongest) shownLongest = openGap;
-    }
-    setLabelTextIfChanged(ssStatValue[0], ssRenderedStat[0], String(ssToday.feedingCount));
-    setLabelTextIfChanged(ssStatValue[1], ssRenderedStat[1], formatGapShort(shownLongest));
-    setLabelTextIfChanged(ssStatValue[2], ssRenderedStat[2], formatGapShort(shownAvg));
-  } else {
-    setLabelTextIfChanged(ssClockLabel, ssRenderedClock, "--:--");
-    setLabelTextIfChanged(ssDateLabel, ssRenderedDate, "");
-  }
-
-  if (!currentWeather.valid) {
-    setLabelTextIfChanged(ssTempLabel, ssRenderedTemp, "--°");
-    setLabelTextIfChanged(ssDescLabel, ssRenderedDescription,
-                          WiFi.status() == WL_CONNECTED ? "Czekam na dane pogody..." : "Brak polaczenia Wi-Fi");
-    setLabelTextIfChanged(ssMinMaxLabel, ssRenderedMinMax, "");
-    setLabelTextIfChanged(ssDressLabel, ssRenderedDress, "");
-    for (uint8_t i = 0; i < 3; ++i) setLabelTextIfChanged(ssHourLabels[i], ssRenderedHours[i], "--h\n--°");
-    if (ssLastIconCode != -999) {
-      lv_obj_clean(ssIconBox);
-      ssLastIconCode = -999;
-    }
-    return;
-  }
-
-  const WeatherKind kind = weatherKindOf(currentWeather.codeNow);
-  setLabelTextIfChanged(ssTempLabel, ssRenderedTemp,
-    String(currentWeather.tempNow >= 0 ? "+" : "") + currentWeather.tempNow +
-    "° (odcz. " + (currentWeather.feelsLike >= 0 ? "+" : "") + currentWeather.feelsLike + "°)");
-  setLabelTextIfChanged(ssDescLabel, ssRenderedDescription, weatherDescPL(kind));
-  setLabelTextIfChanged(ssMinMaxLabel, ssRenderedMinMax,
-                        String("MIN ") + currentWeather.tempMinDay + "°   MAX " + currentWeather.tempMaxDay + "°");
-  setLabelTextIfChanged(ssDressLabel, ssRenderedDress, dressingAdviceFor(currentWeather.tempNow));
-  for (uint8_t i = 0; i < 3; ++i) {
-    const auto &h = currentWeather.next[i];
-    String hourText = "--:--\n--°";
-    if (h.has) {
-      char hhmm[7];
-      snprintf(hhmm, sizeof(hhmm), "%02u:%02u", h.hour, h.minute);
-      hourText = String(hhmm) + "\n" + (h.temp >= 0 ? "+" : "") + h.temp + "°";
-    }
-    setLabelTextIfChanged(ssHourLabels[i], ssRenderedHours[i], hourText);
-  }
-  if (ssLastIconCode != currentWeather.codeNow) {
-    ssLastIconCode = currentWeather.codeNow;
-    drawWeatherIcon(ssIconBox, currentWeather.codeNow);
-  }
+  if (!screensaverActive || !uiSaverScr) return;
+  uiFillLive(uiModel);
+  uiSaverUpdate(uiModel);
 }
 
-void applyScreensaverVisibility() {
-  lv_obj_t *controls[] = {feedingCard, milkCard, feedFormButton,
-                          sleepHomeButton, otherHomeButton, weightHomeButton, calendarButton, chartButton,
-                          homeCounterBar};
-  for (lv_obj_t *o : controls) {
-    if (!o) continue;
-    if (screensaverActive) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
-  }
-  lv_obj_t *widgets[] = {ssTipCard, ssTipLabel, ssClockCard, ssWeatherCard, ssDayBandCard,
-                         ssClockLabel, ssDateLabel, ssIconBox,
-                         ssTempLabel, ssDescLabel, ssMinMaxLabel, ssDressLabel,
-                         ssLastFeedingLabel, ssSleepLabel,
-                         ssStatValue[0], ssStatValue[1], ssStatValue[2],
-                         ssHourLabels[0], ssHourLabels[1], ssHourLabels[2]};
-  for (lv_obj_t *o : widgets) {
-    if (!o) continue;
-    if (screensaverActive) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
-  }
-  // ssClockShadowLabel pozostaje ukryty w obu trybach (plaski zegar w nowym ukladzie).
-  if (ssClockShadowLabel) lv_obj_add_flag(ssClockShadowLabel, LV_OBJ_FLAG_HIDDEN);
+// Buduje tablice od nowa (start, zmiana motywu dzien/noc) i pokazuje ja.
+static void uiShowSaver() {
+  uiSaverCreate(nightModeActive);
+  uiFillLive(uiModel);
+  uiSaverUpdate(uiModel);
+  lv_screen_load(uiSaverScr);
 }
 
 void enterScreensaver() {
   // Idempotentne: wywolanie przy starcie (przed dotknieciem) rowniez tworzy timer.
   screensaverActive = true;
-  applyScreensaverVisibility();
-  updateScreensaverContent();
+  uiShowSaver();
+  // Panel nie jest potrzebny na tablicy — zwalniamy pamiec LVGL (zbudujemy go przy dotknieciu).
+  uiDashDestroy();
+  homeScreen = nullptr;
   if (!weatherValidNow() || millis() - weatherLastTryMs > WEATHER_STALE_MS) {
     weatherFetchPending = true;
   }
   if (!ssClockTimer) {
-    // 5 s: zegar, licznik "temu" i statystyki odswiezaja sie plynnie na wygaszaczu.
+    // 5 s: zegar, licznik "temu" i statystyki odswiezaja sie plynnie na tablicy.
     ssClockTimer = lv_timer_create([](lv_timer_t *) { updateScreensaverContent(); }, 5000, nullptr);
   }
 }
@@ -5105,7 +5212,7 @@ void exitScreensaver() {
     lv_timer_del(ssClockTimer);
     ssClockTimer = nullptr;
   }
-  applyScreensaverVisibility();
+  createHomeScreen();  // zbuduje panel, zaladuje go i usunie tablice
 }
 
 // Minimalny parser JSON bez bibliotek: liczba po kluczu oraz n-ty element
@@ -5366,12 +5473,7 @@ void requestWeatherFetch() {
 // ------------------------------- Ekran startowy (boot) --------------------------
 // Prosty, ladny ekran powitalny z lista krokow inicjalizacji. Pokazywany od razu
 // po uruchomieniu LVGL, aktualizowany przy kazdym etapie startu.
-constexpr uint8_t BOOT_STEP_COUNT = 5;
-lv_obj_t *bootScreen = nullptr;
-lv_obj_t *bootStepLabel[BOOT_STEP_COUNT] = {nullptr};
-lv_obj_t *bootStatusLabel = nullptr;
-const char *BOOT_STEP_NAMES[BOOT_STEP_COUNT] = {
-    "Wi-Fi", "Zegar (NTP)", "Pamiec danych", "Pogoda", "Sync z hostingiem (WWW)"};
+constexpr uint8_t BOOT_STEP_COUNT = 5; // kroki: Wi-Fi, zegar, pamiec, pogoda, dane z WWW (ui_modern.h)
 
 // Wymusza jedno odswiezenie LVGL, aby zmiany byly widoczne mimo blokujacych krokow.
 void bootPumpLvgl() {
@@ -5387,11 +5489,7 @@ void updateBootSyncUi() {
   int pct = hostSyncProgressPct;
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
-  lv_obj_set_width(bootSyncBar, (pct * 320) / 100);
-  if (bootSyncPctLabel) {
-    if (hostSyncProgressPct < 0) lv_label_set_text(bootSyncPctLabel, "WWW: --");
-    else lv_label_set_text_fmt(bootSyncPctLabel, "WWW: %d%%", pct);
-  }
+  uiBootProgress(pct);
   bootPumpLvgl();
 }
 
@@ -5408,7 +5506,7 @@ void syncOnBoot() {
   }
   bootStep(4, 0);
   hostSyncProgressPct = 0;
-  if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Odbieranie danych z WWW...");
+  uiBootSetStatus("Odbieranie danych z WWW...");
   const uint32_t startMs = millis();
   bool done = false;
   while (millis() - startMs < 25000) {
@@ -5432,11 +5530,11 @@ void syncOnBoot() {
   if (done) {
     hostSyncProgressPct = 100;
     bootStep(4, 1);
-    if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Dane WWW odebrane!");
+    uiBootSetStatus("Dane WWW odebrane!");
   } else {
     hostSyncProgressPct = -1;
     bootStep(4, 2);
-    if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Brak danych WWW — start mimo to");
+    uiBootSetStatus("Brak danych WWW – start mimo to");
   }
   updateBootSyncUi();
 #else
@@ -5446,146 +5544,19 @@ void syncOnBoot() {
 
 // Rysuje uroczą buzię niemowlaka z prymitywow LVGL wewnatrz podanego kontenera
 // (~104x104). Glowka, kosmyk wlosow, oczy, rumiane policzki, usmiech.
-void drawBabyFace(lv_obj_t *box) {
-  if (!box) return;
-  auto circle = [&](int cx, int cy, int r, lv_color_t c) {
-    lv_obj_t *o = lv_obj_create(box);
-    lv_obj_remove_style_all(o);
-    lv_obj_set_size(o, r * 2, r * 2);
-    lv_obj_set_pos(o, cx - r, cy - r);
-    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(o, c, 0);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-    return o;
-  };
-  const lv_color_t skin   = lv_color_hex(0xF6C9A8);
-  const lv_color_t skinSh = lv_color_hex(0xE8B291);
-  const lv_color_t cheek  = lv_color_hex(0xF3A9A0);
-  const lv_color_t hair   = lv_color_hex(0x6B4A2B);
-  const lv_color_t eye    = lv_color_hex(0x3B2A1E);
-  const lv_color_t white  = lv_color_white();
-
-  // Twarz (delikatny cien u dolu + wlasciwa buzia).
-  circle(52, 56, 34, skinSh);
-  circle(52, 53, 33, skin);
-  // Uszy.
-  circle(20, 55, 7, skin);
-  circle(84, 55, 7, skin);
-  // Kosmyk wlosow (mała czuprynka u gory).
-  circle(52, 24, 11, hair);
-  circle(44, 27, 7, hair);
-  circle(60, 27, 7, hair);
-  lv_obj_t *curl = circle(52, 20, 4, hair); (void)curl;
-  // Oczy (bialko + zrenica) + brwi jako male kreski (kropki).
-  circle(40, 50, 6, white);  circle(40, 51, 3, eye);
-  circle(64, 50, 6, white);  circle(64, 51, 3, eye);
-  // Rumiane policzki.
-  circle(33, 63, 5, cheek);
-  circle(71, 63, 5, cheek);
-  // Nosek.
-  circle(52, 60, 3, skinSh);
-  // Usmiech: luk z trzech kropek.
-  circle(45, 70, 2, eye);
-  circle(52, 73, 2, eye);
-  circle(59, 70, 2, eye);
-}
-
+// Ekran startowy (animowany) jest zbudowany w ui_modern.h. bootSyncBar sluzy tu tylko
+// jako znacznik "ekran startowy zyje" (uzywany przez pobieranie danych z hostingu).
 void showBootScreen() {
-  bootScreen = lv_obj_create(nullptr);
-  lv_obj_set_style_bg_color(bootScreen, lv_color_hex(0x27492E), 0); // ciepla zielen lesna
-  lv_obj_set_style_bg_opa(bootScreen, LV_OPA_COVER, 0);
-  lv_obj_clear_flag(bootScreen, LV_OBJ_FLAG_SCROLLABLE);
-
-  // Logo: okragla "odznaka" z rysowanym bobasem (prymitywy LVGL, wzgledem boxa).
-  lv_obj_t *badge = lv_obj_create(bootScreen);
-  lv_obj_remove_style_all(badge);
-  lv_obj_set_size(badge, 104, 104);
-  lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, 50);
-  lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(badge, lv_color_hex(0xEAF4E4), 0);
-  lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_color(badge, lv_color_hex(0x7FB88A), 0);
-  lv_obj_set_style_border_width(badge, 3, 0);
-  lv_obj_set_style_pad_all(badge, 0, 0);
-  lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-  drawBabyFace(badge);
-
-  lv_obj_t *title = lv_label_create(bootScreen);
-  lv_label_set_text(title, "LESNY DZIENNIK");
-  lv_obj_set_style_text_color(title, lv_color_white(), 0);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 162);
-
-  lv_obj_t *name = lv_label_create(bootScreen);
-  lv_label_set_text(name, "ALEKSANDER");
-  lv_obj_set_style_text_color(name, lv_color_hex(0xBFE0C4), 0);
-  lv_obj_set_style_text_font(name, &lv_font_montserrat_36, 0);
-  lv_obj_align(name, LV_ALIGN_TOP_MID, 0, 182);
-
-  // Karta z lista krokow.
-  lv_obj_t *card = lv_obj_create(bootScreen);
-  lv_obj_remove_style_all(card);
-  lv_obj_set_size(card, 360, 190);
-  lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 250);
-  lv_obj_set_style_radius(card, 18, 0);
-  lv_obj_set_style_bg_color(card, lv_color_hex(0x2F5638), 0);
-  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-  lv_obj_set_style_pad_all(card, 14, 0);
-  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-  for (uint8_t i = 0; i < BOOT_STEP_COUNT; ++i) {
-    bootStepLabel[i] = lv_label_create(card);
-    lv_label_set_text_fmt(bootStepLabel[i], "%s  %s", ".", BOOT_STEP_NAMES[i]);
-    lv_obj_set_style_text_color(bootStepLabel[i], lv_color_hex(0x9DB3A0), 0);
-    lv_obj_set_style_text_font(bootStepLabel[i], &lv_font_montserrat_16, 0);
-    lv_obj_align(bootStepLabel[i], LV_ALIGN_TOP_LEFT, 4, 4 + i * 32);
-  }
-
-  // Pasek postepu synchronizacji z hostingiem (v4) — czy klient WWW odebral dane.
-  lv_obj_t *syncBg = lv_obj_create(bootScreen);
-  lv_obj_remove_style_all(syncBg);
-  lv_obj_set_size(syncBg, 320, 14);
-  lv_obj_set_pos(syncBg, 80, 440);
-  lv_obj_set_style_radius(syncBg, 7, 0);
-  lv_obj_set_style_bg_color(syncBg, lv_color_hex(0x1F3A28), 0);
-  lv_obj_set_style_bg_opa(syncBg, LV_OPA_COVER, 0);
-  lv_obj_clear_flag(syncBg, LV_OBJ_FLAG_SCROLLABLE);
-  bootSyncBar = lv_obj_create(bootScreen);
-  lv_obj_remove_style_all(bootSyncBar);
-  lv_obj_set_size(bootSyncBar, 0, 10);
-  lv_obj_set_pos(bootSyncBar, 80, 442);
-  lv_obj_set_style_radius(bootSyncBar, 5, 0);
-  lv_obj_set_style_bg_color(bootSyncBar, lv_color_hex(0x7FDF8A), 0);
-  lv_obj_set_style_bg_opa(bootSyncBar, LV_OPA_COVER, 0);
-  lv_obj_clear_flag(bootSyncBar, LV_OBJ_FLAG_SCROLLABLE);
-  bootSyncPctLabel = lv_label_create(bootScreen);
-  lv_label_set_text(bootSyncPctLabel, "WWW: --");
-  lv_obj_set_style_text_color(bootSyncPctLabel, lv_color_hex(0xBFE0C4), 0);
-  lv_obj_set_style_text_font(bootSyncPctLabel, &lv_font_montserrat_14, 0);
-  lv_obj_set_pos(bootSyncPctLabel, 408, 438);
-  updateBootSyncUi();
-
-  bootStatusLabel = lv_label_create(bootScreen);
-  lv_label_set_text(bootStatusLabel, "Uruchamianie...");
-  lv_obj_set_style_text_color(bootStatusLabel, lv_color_hex(0xBFE0C4), 0);
-  lv_obj_set_style_text_font(bootStatusLabel, &lv_font_montserrat_14, 0);
-  lv_obj_align(bootStatusLabel, LV_ALIGN_BOTTOM_MID, 0, -14);
-
-  lv_screen_load(bootScreen);
+  uiBootCreate();
+  bootSyncBar = lv_screen_active();
   bootPumpLvgl();
 }
 
-// state: 0 = w toku (żółty ">"), 1 = OK (zielony "OK"), 2 = pominiete/blad (szary "-").
+// state: 0 = w toku, 1 = OK, 2 = pominiete/blad.
 void bootStep(uint8_t idx, uint8_t state) {
-  if (idx >= BOOT_STEP_COUNT || !bootStepLabel[idx]) return;
-  const char *mark = state == 1 ? "OK" : (state == 2 ? "--" : ">>");
-  lv_color_t col = state == 1 ? lv_color_hex(0x9FE6AC)
-                              : (state == 2 ? lv_color_hex(0x7C8C80) : lv_color_hex(0xE8D468));
-  lv_label_set_text_fmt(bootStepLabel[idx], "%s  %s", mark, BOOT_STEP_NAMES[idx]);
-  lv_obj_set_style_text_color(bootStepLabel[idx], col, 0);
-  if (bootStatusLabel && state != 0) {
-    // Po ostatnim kroku pokaz "Gotowe".
-    if (idx == BOOT_STEP_COUNT - 1) lv_label_set_text(bootStatusLabel, "Gotowe!");
-  }
+  if (idx >= BOOT_STEP_COUNT) return;
+  uiBootStep(idx, state);
+  if (state != 0 && idx == BOOT_STEP_COUNT - 1) uiBootSetStatus("Gotowe!");
   bootPumpLvgl();
 }
 
@@ -5799,7 +5770,7 @@ void setup() {
   // (do BOOT_TIME_WAIT_MS). Bez Wi-Fi nie ma na co czekac. Watchdog nieaktywny —
   // ta petla jest bezpieczna, a bootPumpLvgl utrzymuje animacje/odswiezanie ekranu.
   if (WiFi.status() == WL_CONNECTED && !timeIsValid) {
-    if (bootStatusLabel) lv_label_set_text(bootStatusLabel, "Synchronizacja zegara...");
+    uiBootSetStatus("Synchronizacja zegara...");
     constexpr uint32_t BOOT_TIME_WAIT_MS = 12000;
     const uint32_t waitStart = millis();
     while (!timeIsValid && millis() - waitStart < BOOT_TIME_WAIT_MS) {
@@ -5825,29 +5796,27 @@ void setup() {
   appendBackupIfDue();
 
   // "Gotowe!" tylko gdy krytyczne elementy sa OK (pamiec + czas + dane WWW). Inaczej informacja.
-  if (bootStatusLabel) {
-    if (storageReady && timeIsValid && hostRevisionLocal >= 0)
-      lv_label_set_text(bootStatusLabel, "Gotowe!");
-    else if (hostRevisionLocal < 0)
-      lv_label_set_text(bootStatusLabel, "Brak danych WWW — start mimo to");
-    else if (!timeIsValid) lv_label_set_text(bootStatusLabel, "Brak czasu — start mimo to");
-    else lv_label_set_text(bootStatusLabel, "Start...");
-  }
-  bootPumpLvgl();
-  delay(700);
+  if (storageReady && timeIsValid && hostRevisionLocal >= 0) uiBootSetStatus("Gotowe!");
+  else if (hostRevisionLocal < 0) uiBootSetStatus("Brak danych WWW – start mimo to");
+  else if (!timeIsValid) uiBootSetStatus("Brak czasu – start mimo to");
+  else uiBootSetStatus("Start...");
+  uiBootProgress(100);
+  // Chwila na pokazanie animacji "Gotowe!" (LVGL pompowany, aby animacje szly).
+  for (uint8_t i = 0; i < 24; ++i) { bootPumpLvgl(); delay(30); }
 
-  createHomeScreen();
-  // Zwolnij ekran startowy (nie jest juz potrzebny) — home jest juz zaladowany.
-  if (bootScreen) {
-    lv_obj_del(bootScreen);
-    bootScreen = nullptr;
-    for (uint8_t i = 0; i < BOOT_STEP_COUNT; ++i) bootStepLabel[i] = nullptr;
-    bootStatusLabel = nullptr;
-    bootSyncBar = nullptr;
-    bootSyncPctLabel = nullptr;
+  // Pusty ekran glowny z initScreens() nie jest juz potrzebny (panel budujemy dynamicznie).
+  if (homeScreen) {
+    lv_obj_delete(homeScreen);
+    homeScreen = nullptr;
   }
-  // Start w trybie zegara: czekamy na pierwsze dotkniecie ekranu.
+  // Start w trybie tablicy (zegar + pogoda): panel z wykresami pojawia sie po dotknieciu.
+  uiOnBackToSaver = []() { uiPendingEnterSaver = true; };
+  uiOnDiagnostics = []() { createDiagnosticsScreen(); };
   enterScreensaver();
+  // Zwolnij ekran startowy (tablica jest juz zaladowana).
+  uiBootDestroy();
+  bootSyncBar = nullptr;
+  bootSyncPctLabel = nullptr;
 
   // --- Watchdog zadaniowy: pilnuje petli loop() (restart przy zawieszeniu) ---
   // Uruchamiany na koncu setup(), gdy blokujace kroki startowe (WiFi/NTP) sa juz za nami.
@@ -5903,6 +5872,16 @@ void loop() {
   // Wysylka Telegrama biegnie w telegramTask (rdzen 0) — nie blokuje juz tej petli.
   resyncNtpIfDue();
   checkSleepNotifications(); // powiadomienia o oknie snu (jesli wlaczone)
+
+  // Zadania zlecone ze zdarzen LVGL / odczytu dotyku wykonujemy tu, poza callbackami.
+  if (uiPendingExitSaver) {
+    uiPendingExitSaver = false;
+    exitScreensaver();
+  }
+  if (uiPendingEnterSaver) {
+    uiPendingEnterSaver = false;
+    if (!screensaverActive && !otaInProgress) enterScreensaver();
+  }
 
   // Powrot na ekran glowny po 30 s bezczynnosci na dowolnym ekranie.
   if (!screensaverActive && !otaInProgress && homeScreen &&
@@ -5985,7 +5964,7 @@ uint32_t lvglNowMs = millis();
   if (wifiConnectedNow != lastUiWifiConnected) {
     lastUiWifiConnected = wifiConnectedNow;
     if (wifiConnectedNow && !timeIsValid) timeIsValid = syncTimeFromNTP();
-    if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation();
+    if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation(false);
   }
 
   // Co 30 s restartujemy próbę przez reconnect(), bez ponownego przekazywania konfiguracji SSID.
