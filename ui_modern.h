@@ -616,15 +616,15 @@ static void uiSaverCreate(bool night) {
   uiSvFeedNext = ui_label(s, "", &ui_f13, P.muted, 108, 254, 350);
 
   // ---------------- STATYSTYKI DNIA (3 kafelki) ----------------
-  static const char *caps[3] = {"karmień dziś", "najdłuższa przerwa", "średnia przerwa"};
+  static const char *caps[3] = {"karmień dziś", "mleka dziś", "średnia przerwa"};
   for (int i = 0; i < 3; ++i) {
     const int x = 14 + i * 153;
     ui_box(s, x, 290, 146, 50, 18, P.card2);
-    lv_obj_t *ib = ui_box(s, x + 8, 297, 22, 22, 11, i == 0 ? P.feed : (i == 1 ? P.sleep : P.milk), 70);
+    lv_obj_t *ib = ui_box(s, x + 8, 297, 22, 22, 11, i == 0 ? P.feed : (i == 1 ? P.milk : P.sleep), 70);
     (void)ib;
     if (i == 0) UI_ICON(s, feed, s, x + 7, 296, P.feed);
-    else if (i == 1) UI_ICON(s, moon, s, x + 7, 296, P.sleep);
-    else UI_ICON(s, clock, s, x + 7, 296, P.milk);
+    else if (i == 1) UI_ICON(s, bottle, s, x + 7, 296, P.milk);
+    else UI_ICON(s, clock, s, x + 7, 296, P.sleep);
     uiSvStatVal[i] = ui_label(s, "-", &ui_f24, P.ink, x + 36, 289, 106);
     ui_label(s, caps[i], &ui_f13, P.muted, x + 10, 321, 134);
   }

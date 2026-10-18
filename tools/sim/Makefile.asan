@@ -1,0 +1,9 @@
+LV=../lvgl
+CFLAGS=-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DLV_CONF_INCLUDE_SIMPLE -I../inc -I$(LV) -I$(LV)/src -w
+SRCS=$(shell find $(LV)/src -name '*.c')
+OBJS=$(patsubst $(LV)/%.c,build/%.o,$(SRCS))
+build/%.o: $(LV)/%.c
+	@mkdir -p $(dir $@)
+	@gcc $(CFLAGS) -c $< -o $@
+liblv.a: $(OBJS)
+	@ar rcs $@ $(OBJS)

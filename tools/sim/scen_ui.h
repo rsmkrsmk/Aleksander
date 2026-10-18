@@ -6,7 +6,7 @@ static void fillDemo(UiModel&m,bool night){
   strcpy(m.dateLine,"niedziela, 18 października"); strcpy(m.ageText,"10 tyg. i 1 dni | 2 mies.");
   m.hasLastFeed=true; m.sinceFeedMin=135; strcpy(m.nextFeedClock,"18:30"); strcpy(m.lastFeedTxt,"2 h 15 min temu");
   strcpy(m.napLine,"Czas na drzemkę"); m.napState=2;
-  strcpy(m.statVal[0],"5"); strcpy(m.statVal[1],"3h 20m"); strcpy(m.statVal[2],"2h 45m");
+  strcpy(m.statVal[0],"5"); strcpy(m.statVal[1],"300 ml"); strcpy(m.statVal[2],"2h 45m");
   m.weatherValid=true; m.wmo=2; m.temp=14; m.feels=12; m.tmin=8; m.tmax=16; strcpy(m.weatherDesc,"Częściowe zachmurzenie");
   strcpy(m.dress,"Chłodno: body, pajacyk, sweterek, czapka, kocyk do wózka");
   m.hours[0]={true,16,0,14}; m.hours[1]={true,17,0,13}; m.hours[2]={true,18,0,11};

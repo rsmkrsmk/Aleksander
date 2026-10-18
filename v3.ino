@@ -234,6 +234,7 @@ SemaphoreHandle_t telegramMutex = nullptr;
 // Synchronizacja CSV z panelem WWW (auto-wysylka po zmianie danych). Flaga ustawiana
 // z rdzenia serwera WWW / loop(); obsluga w telegramTask (rdzen 0, obok Telegrama).
 volatile bool hostSyncPending = false;
+volatile bool hostMirrorChanged = false;  // ustawiane w telegramTask po pobraniu CSV; obsluga w loop()
 unsigned long hostSyncNextMs = 0;   // najwczesniejszy czas kolejnej wysylki (debounce/retry)
 // Polling danych z hostingu (v4): co HOST_POLL_MS sprawdzamy rewizje, gdy sie
 // zmienila — pobieramy pelny CSV jako mirror. Zmienne czytane/uzupelniane w telegramTask.
@@ -408,6 +409,7 @@ void bootPumpLvgl();
 void bootPumpFor(uint32_t ms);
 void updateBootSyncUi();
 void syncOnBoot();
+void applyHostMirrorUpdate();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
 bool copyLittleFsFile(const char *srcPath, const char *dstPath);
 void archiveDataFileIfHuge();
@@ -3402,7 +3404,7 @@ static void uiFillLive(UiModel &m) {
   m.longestGapMin = longest;
   m.avgGapMin = avgFeedingGapMin;
   snprintf(m.statVal[0], sizeof m.statVal[0], "%d", today.feedingCount);
-  uiFmtHm(m.statVal[1], sizeof m.statVal[1], longest);
+  snprintf(m.statVal[1], sizeof m.statVal[1], "%d ml", today.milkMl);  // tablica: mleko wypite dzis
   uiFmtHm(m.statVal[2], sizeof m.statVal[2], avgFeedingGapMin);
   m.todayFeed = today.feedingCount;
   m.todayMl = today.milkMl;
@@ -4861,10 +4863,12 @@ bool downloadCsvFromHost() {
     }
   }
   heap_caps_free(csvBuf);
-  // Odswiez dane i ekran z nowego mirror.
-  loadLatestEntries();
-  invalidateDayStats();
-  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation(false);
+  // UWAGA: ta funkcja dziala w telegramTask (RDZEN 0). Nie wolno tu dotykac LVGL ani
+  // globalnych Stringow czytanych przez loop() (lastFeeding itp.) — rownolegly dostep
+  // z dwoch rdzeni psul sterte i powodowal restarty (LoadProhibited) np. po dotknieciu
+  // ekranu w trakcie synchronizacji. Odswiezenie danych i ekranu robi loop()
+  // (applyHostMirrorUpdate) po zauwazeniu flagi.
+  hostMirrorChanged = true;
   hostLastDownloadMs = millis();
   hostDownloadFails = 0;
   hostLastError = 0;
@@ -5603,6 +5607,16 @@ void updateBootSyncUi() {
   bootPumpLvgl();
 }
 
+// Wczytuje dane z nowego mirror CSV i odswieza ekran. TYLKO z watku loop()/setup().
+void applyHostMirrorUpdate() {
+  if (!hostMirrorChanged) return;
+  hostMirrorChanged = false;
+  loadLatestEntries();
+  invalidateDayStats();
+  if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation(false);
+  else if (screensaverActive) updateScreensaverContent();
+}
+
 // Pierwsza synchronizacja z hostingiem wykonana blokujaco podczas startu (v4).
 // Hosting jest zrodlem prawdy — zanim wejdziemy do aplikacji MUSIMY odebrac dane
 // (mirror), inaczej ekran pokazalby stary/uciety lokalny plik (np. "ostatnie
@@ -5637,6 +5651,7 @@ void syncOnBoot() {
     delay(1000);
     feedWatchdog();
   }
+  applyHostMirrorUpdate();  // setup() = ten sam watek co loop(): wczytaj dane od razu
   if (done) {
     hostSyncProgressPct = 100;
     bootStep(4, 1);
@@ -6007,6 +6022,7 @@ void loop() {
     uiPendingEnterSaver = false;
     if (!screensaverActive && !otaInProgress) enterScreensaver();
   }
+  applyHostMirrorUpdate();  // nowe dane z hostingu (pobrane w telegramTask) — LVGL tylko tutaj
 
   // Powrot na ekran glowny po 30 s bezczynnosci na dowolnym ekranie.
   if (!screensaverActive && !otaInProgress && homeScreen &&

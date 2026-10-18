@@ -34,6 +34,8 @@ static WeatherState snapshotWeather(){WeatherState w={};w.valid=true;w.tempNow=1
 static WeatherKind weatherKindOf(int c){return c==0?W_SUN:c<3?W_PARTLY:W_CLOUD;}
 static String developmentTipForToday(){return String("Dzień 71: tip testowy.");}
 static const char* formatEntryStub(){return "";}
+struct LineReader{File&f;explicit LineReader(File&x):f(x){} bool more(){return f.available();}
+ size_t nextBuf(char*d,size_t cap){size_t n=0;int c;while((c=fgetc(f.f))!=EOF&&c!='\n'){if(n+1<cap)d[n++]=c;}d[n]=0;return n;}};
 #include "glue_extract.h"
 static UiModel M;
 static void uiShowSaver(){uiSaverCreate(false);uiSaverUpdate(M);lv_screen_load(uiSaverScr);}
