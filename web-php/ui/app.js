@@ -668,19 +668,22 @@ function sleepSpansForDate(sessions,date){
    ostatnim karmieniem wieczornym (17:00–19:59) i kończy pierwszym karmieniem w nocy/nad ranem
    (po północy, do 09:00). Piersi + butelka w odstępie ≤ 25 min liczymy jako jedno karmienie. */
 const NIGHT_FEED_START_H=[17,20],NIGHT_FEED_END_MAX_H=9,NIGHT_MERGE_MIN=25;
+/* Dziecko po początku karmienia jeszcze je, więc sen liczymy od początku karmienia + 90 min, a kończymy 10 min przed początkiem następnego karmienia. */
+const NIGHT_SLEEP_LAG_MIN=90,NIGHT_WAKE_LEAD_MIN=10;
 function nightSleepSeries(rows,lastNights){
   const ts=(rows||[]).filter(r=>r.type==='KARMIENIE'||(r.type||'').startsWith('MLEKO')).map(r=>csvTs(r.date,r.time)).filter(t=>t!=null).sort((a,b)=>a-b);
   const feeds=[];
   ts.forEach(t=>{const L=feeds[feeds.length-1];if(L&&t-L.last<=NIGHT_MERGE_MIN*60000)L.last=t;else feeds.push({first:t,last:t})});
   const byNight={};
   for(let i=0;i<feeds.length-1;i++){
-    const a=feeds[i],b=feeds[i+1],da=new Date(a.last),h=da.getHours();
+    const a=feeds[i],b=feeds[i+1],da=new Date(a.first),h=da.getHours();
     if(h<NIGHT_FEED_START_H[0]||h>=NIGHT_FEED_START_H[1])continue;
     const mid=new Date(da.getFullYear(),da.getMonth(),da.getDate()+1,0,0,0).getTime();
     const lim=new Date(da.getFullYear(),da.getMonth(),da.getDate()+1,NIGHT_FEED_END_MAX_H,0,0).getTime();
     if(b.first<mid||b.first>lim)continue;
-    const min=Math.round((b.first-a.last)/60000),k=isoLocal(da);
-    if(!byNight[k]||min>byNight[k].min)byNight[k]={date:k,min,from:new Date(a.last),to:new Date(b.first)};
+    const from=a.first+NIGHT_SLEEP_LAG_MIN*60000,to=b.first-NIGHT_WAKE_LEAD_MIN*60000,min=Math.round((to-from)/60000),k=isoLocal(da);
+    if(min<=0)continue;
+    if(!byNight[k]||min>byNight[k].min)byNight[k]={date:k,min,from:new Date(from),to:new Date(to)};
   }
   const res=[];const now=new Date();
   for(let n=lastNights;n>=1;n--){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-n);const k=isoLocal(d);res.push(byNight[k]||{date:k,min:null})}
@@ -719,7 +722,7 @@ async function renderNightSleep(){
   const tile=(k,v,sub)=>{const d=bcalElem('div','wg-stat');d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub));return d};
   const grid=bcalElem('div','wg-stats');
   grid.append(tile('Średnia noc',fmtHM(Math.round(avg)),`z ${vals.length} nocy`),tile('Najdłuższa',fmtHM(best.min),`${hm(best.from)} → ${hm(best.to)}`),tile('Ostatnia',fmtHM(last.min),`${hm(last.from)} → ${hm(last.to)}`));
-  if(note)note.append(grid,bcalElem('p','chart-note wg-foot','Sen nocny liczony jako najdłuższy odstęp między ostatnim karmieniem wieczornym (17:00–19:59) a pierwszym karmieniem w nocy lub nad ranem. Pierś i butelka w odstępie do 25 min to jedno karmienie.'));
+  if(note)note.append(grid,bcalElem('p','chart-note wg-foot','Sen nocny liczony jako najdłuższy odstęp między karmieniem wieczornym (początek 17:00–19:59) a pierwszym karmieniem w nocy lub nad ranem. Początek snu to 90 min po rozpoczęciu karmienia, koniec to 10 min przed następnym karmieniem. Pierś i butelka w odstępie do 25 min to jedno karmienie.'));
 }
 
 /* ============================================================================
