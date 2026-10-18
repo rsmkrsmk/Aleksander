@@ -34,7 +34,6 @@ regresja z okna ±7 dni) · sen nocny wg karmień (początek karmienia wieczorne
 · kalendarz kąpieli (co 3 dni).
 
 ## Strona „Waga” (v4.1)
-Dwa wykresy w jednym miejscu, przełączane same co ~3,5 s (wskaźnik dwóch kresek pod tytułem): waga na tle normy WHO
-(pasmo P3–P97, mediana, pasmo przyrostu od wypisu) oraz przyrost tygodniowy (g/dzień). Pod nimi stałe kafelki
-„Od urodzenia” i „Ostatnie 2 tygodnie” (g/dzień + norma). Szczegóły i uwagi o stabilności obrazu, PSRAM i wątkach:
-sekcja „v4.1” w `README.md`.
+Dwa wykresy w jednym miejscu, **przełączane dotknięciem wykresu** (wskaźnik dwóch kresek pod tytułem): prosty wykres wagi
+z medianą WHO jako odniesieniem oraz przyrost tygodniowy (g/dzień). Pod nimi stałe kafelki „Od urodzenia” i
+„Ostatnie 2 tygodnie” (g/dzień + norma). Szczegóły i uwagi o stabilności obrazu, PSRAM i wątkach: sekcja „v4.1” w `README.md`.

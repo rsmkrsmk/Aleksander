@@ -955,16 +955,6 @@ static void ui_who_band(int day, int birthG, int *mn, int *md, int *mx) {
   *md = (int)lroundf(ui_who_interp(UI_WHO_MED, day) * 1000.0f * sc);
   *mx = (int)lroundf(ui_who_interp(UI_WHO_P97, day) * 1000.0f * sc);
 }
-// Pasmo przyrostu od wypisu (dzien 2, 2850 g): +25..30 g/dzien do 3 mies., potem 15..20 do 6 mies.
-static bool ui_gain_band(int day, int *lo, int *hi) {
-  if (day < 2) return false;
-  int l = 2850, h = 2850;
-  for (int d = 2; d < day; ++d) {
-    if (d < 91) { l += 25; h += 30; } else if (d < 183) { l += 15; h += 20; }
-  }
-  *lo = l; *hi = h;
-  return true;
-}
 static void ui_gain_per_day(int day, int *lo, int *hi) {   // 0/0 gdy brak normy
   *lo = *hi = 0;
   if (day < 2) return;
@@ -975,8 +965,14 @@ static void ui_weight_toggle() {
   uiWtShown ^= 1;
   if (uiWtShown) { lv_obj_add_flag(uiWtViewA, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN); }
   else { lv_obj_add_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiWtViewA, LV_OBJ_FLAG_HIDDEN); }
-  if (uiWtSub) lv_label_set_text(uiWtSub, uiWtShown ? "przyrost g/dzień co tydzień" : "waga na tle normy WHO");
+  if (uiWtSub) lv_label_set_text(uiWtSub, uiWtShown ? "przyrost g/dzień co tydzień" : "waga dziecka na tle mediany WHO");
   for (int i = 0; i < 2; ++i) if (uiWtDot[i]) lv_obj_set_style_bg_color(uiWtDot[i], i == uiWtShown ? P.acc : P.brd, 0);
+}
+static void ui_weight_click_cb(lv_event_t *e) {
+  (void)e;
+  lv_indev_t *in = lv_indev_active();
+  if (in && lv_indev_get_gesture_dir(in) != LV_DIR_NONE) return;   // przeciagniecie = zmiana strony, nie wykresu
+  ui_weight_toggle();
 }
 static void ui_wt_tile(lv_obj_t *p, int x, int y, int w, int h, const char *key, const char *val, const char *unit,
                        const char *sub, lv_color_t c) {
@@ -991,57 +987,62 @@ static void ui_wt_tile(lv_obj_t *p, int x, int y, int w, int h, const char *key,
   ui_label(p, sub, &ui_f13, P.ink2, x + 14, y + h - 25, w - 20);
 }
 static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
-  const int px0 = 62, pw = 386, top = 80, base = 206, ph = base - top;
-  int maxDay = m.wTodayDay > m.wLastDay ? m.wTodayDay : m.wLastDay; if (maxDay < 30) maxDay = 30;
-  const int NC = 40;
-  int bmn[NC], bmx[NC], gl[NC], gh[NC]; bool gb[NC];
+  // Prosty wykres: waga dziecka (gruba linia + punkty) i cienka przerywana mediana WHO jako odniesienie.
+  const int px0 = 62, pw = 384, top = 82, base = 204, ph = base - top;
+  int maxDay = m.wTodayDay > m.wLastDay ? m.wTodayDay : m.wLastDay; if (maxDay < 28) maxDay = 28;
   int minG = 1 << 30, maxG = 0;
-  for (int k = 0; k < NC; ++k) {
-    const int d = (int)((maxDay * (k + 0.5f)) / NC);
-    int md; ui_who_band(d, m.wBirthG, &bmn[k], &md, &bmx[k]);
-    gb[k] = d <= 183 && ui_gain_band(d, &gl[k], &gh[k]);
-    if (bmx[k] > maxG) maxG = bmx[k]; if (bmn[k] < minG) minG = bmn[k];
-    if (gb[k]) { if (gh[k] > maxG) maxG = gh[k]; if (gl[k] < minG) minG = gl[k]; }
+  for (int i = 0; i <= 8; ++i) {
+    int a, md, b; ui_who_band(maxDay * i / 8, m.wBirthG, &a, &md, &b);
+    if (md > maxG) maxG = md; if (md < minG) minG = md;
   }
   for (int i = 0; i < m.wpN; ++i) { if (m.wpG[i] > maxG) maxG = m.wpG[i]; if (m.wpG[i] < minG) minG = m.wpG[i]; }
-  maxG = ((maxG + 300 + 499) / 500) * 500;
-  int mnG = ((minG - 300) / 500) * 500; if (mnG < 0) mnG = 0;
-  const int span = maxG - mnG;
+  int mxG = ((maxG + 200 + 499) / 500) * 500;
+  int mnG = ((minG - 200) / 500) * 500; if (mnG < 0) mnG = 0;
+  if (mxG - mnG < 1500) mxG = mnG + 1500;
+  const int span = mxG - mnG;
   auto yv = [&](int g) { return base - (g - mnG) * ph / span; };
   auto xv = [&](int d) { return px0 + d * pw / maxDay; };
-  for (int i = 0; i <= 4; ++i) {
-    const int g = mnG + span * i / 4, y = yv(g);
-    ui_hline(v, px0, y, pw, P.brd, 110);
-    char t[10]; snprintf(t, sizeof t, "%d.%d", g / 1000, (g % 1000) / 100);
+  for (int g = mnG; g <= mxG; g += 500) {
+    const int y = yv(g);
+    ui_hline(v, px0, y, pw, P.brd, g == mnG ? 200 : 90);
+    char t[10]; snprintf(t, sizeof t, "%d,%d", g / 1000, (g % 1000) / 100);
     ui_label(v, t, &ui_f13, P.faint, 14, y - 9, 42, LV_TEXT_ALIGN_RIGHT);
   }
   for (int i = 0; i <= 4; ++i) {
-    char t[8]; snprintf(t, sizeof t, "d%d", maxDay * i / 4);
-    ui_label(v, t, &ui_f13, P.faint, px0 + pw * i / 4 - 20, base + 6, 40, LV_TEXT_ALIGN_CENTER);
+    char t[12];
+    const int wk = (maxDay * i / 4 + 3) / 7;
+    if (i == 0) snprintf(t, sizeof t, "ur."); else snprintf(t, sizeof t, "%d tyg", wk);
+    if (i == 4) ui_label(v, t, &ui_f13, P.faint, px0 + pw - 48, base + 6, 48, LV_TEXT_ALIGN_RIGHT);
+    else ui_label(v, t, &ui_f13, P.faint, px0 + pw * i / 4 - 24, base + 6, 48, LV_TEXT_ALIGN_CENTER);
   }
-  // pasma: zielone = zakres WHO (3-97 pc), zolte = oczekiwany przyrost od wypisu
-  for (int k = 0; k < NC; ++k) {
-    const int x0 = px0 + k * pw / NC, x1 = px0 + (k + 1) * pw / NC;
-    int ya = yv(bmx[k]), yb = yv(bmn[k]);
-    ui_box(v, x0, ya, x1 - x0, yb - ya < 2 ? 2 : yb - ya, 0, P.good, 55);
-    if (gb[k]) { ya = yv(gh[k]); yb = yv(gl[k]); ui_box(v, x0, ya, x1 - x0, yb - ya < 2 ? 2 : yb - ya, 0, P.warn, 70); }
-  }
-  // mediana WHO
+  // mediana WHO: cienka przerywana linia
   for (int k = 0; k <= 40; ++k) {
     const int d = maxDay * k / 40; int a, md, b; ui_who_band(d, m.wBirthG, &a, &md, &b);
     uiWtMedPts[k].x = xv(d); uiWtMedPts[k].y = yv(md);
   }
   lv_obj_t *ml = lv_line_create(v);
   lv_line_set_points(ml, uiWtMedPts, 41);
-  lv_obj_set_style_line_width(ml, 2, 0); lv_obj_set_style_line_color(ml, P.good, 0); lv_obj_set_pos(ml, 0, 0);
-  // pomiary
+  lv_obj_set_style_line_width(ml, 2, 0); lv_obj_set_style_line_color(ml, P.muted, 0);
+  lv_obj_set_style_line_opa(ml, 200, 0); lv_obj_set_pos(ml, 0, 0);
+  // waga dziecka
   const int n = m.wpN > UI_WPTS ? UI_WPTS : m.wpN;
   for (int i = 0; i < n; ++i) { uiWtActPts[i].x = xv(m.wpDay[i]); uiWtActPts[i].y = yv(m.wpG[i]); }
   lv_obj_t *al = lv_line_create(v);
   lv_line_set_points(al, uiWtActPts, n);
-  lv_obj_set_style_line_width(al, 3, 0); lv_obj_set_style_line_color(al, P.acc, 0);
+  lv_obj_set_style_line_width(al, 4, 0); lv_obj_set_style_line_color(al, P.acc, 0);
   lv_obj_set_style_line_rounded(al, true, 0); lv_obj_set_pos(al, 0, 0);
-  for (int i = 0; i < n; ++i) if (n <= 24 || i == n - 1) ui_dot(v, uiWtActPts[i].x, uiWtActPts[i].y, i == n - 1 ? 5 : 3, P.acc);
+  for (int i = 0; i < n; ++i) if (n <= 16 || i == n - 1) ui_dot(v, uiWtActPts[i].x, uiWtActPts[i].y, i == n - 1 ? 6 : 4, i == n - 1 ? P.acc : P.card);
+  for (int i = 0; i < n - 1; ++i) if (n <= 16) { lv_obj_t *d = ui_box(v, uiWtActPts[i].x - 4, uiWtActPts[i].y - 4, 8, 8, 4, P.card); lv_obj_set_style_border_width(d, 3, 0); lv_obj_set_style_border_color(d, P.acc, 0); }
+  // opis ostatniego pomiaru
+  char t[16]; snprintf(t, sizeof t, "%d,%02d kg", m.wpG[n - 1] / 1000, (m.wpG[n - 1] % 1000) / 10);
+  int lx = uiWtActPts[n - 1].x - 70; if (lx < px0) lx = px0;
+  int ly = uiWtActPts[n - 1].y - 28; if (ly < top - 8) ly = top - 8;
+  ui_label(v, t, &ui_f15, P.ink, lx, ly, 74, LV_TEXT_ALIGN_RIGHT);
+  // legenda
+  ui_box(v, px0 + 4, base + 28, 18, 4, 2, P.acc);
+  ui_label(v, "waga", &ui_f13, P.ink2, px0 + 28, base + 20);
+  ui_box(v, px0 + 96, base + 29, 22, 2, 1, P.muted);
+  ui_label(v, "mediana WHO", &ui_f13, P.ink2, px0 + 126, base + 20);
 }
 static void ui_weight_view_gain(lv_obj_t *v, const UiModel &m, bool any) {
   if (!any) { ui_label(v, "Za mało pomiarów w odstępie kilku dni,\naby policzyć trend. Zważ dziecko za kilka dni.", &ui_f15, P.muted, 30, 120, 400); return; }
@@ -1092,16 +1093,24 @@ static void ui_build_weight(const UiModel &m, bool anim) {
   }
   bool any = false; for (int i = 0; i < UI_WEEKS; ++i) any |= m.weekHas[i];
   if (m.wpN < 2) { ui_label(p, "Dodaj co najmniej dwa pomiary wagi,\naby zobaczyć wykresy i trend przyrostu.", &ui_f15, P.muted, 30, 130, 400); return; }
-  uiWtSub = ui_label(p, "waga na tle normy WHO", &ui_f13, P.muted, 22, 36, 226);
-  // dwa widoki w tym samym miejscu; przelacza je ui_dash_tick (co ~3,5 s)
-  uiWtViewA = ui_box(p, 0, 0, 480, 240, 0, P.bg, LV_OPA_TRANSP);
-  uiWtViewB = ui_box(p, 0, 0, 480, 240, 0, P.bg, LV_OPA_TRANSP);
+  uiWtSub = ui_label(p, "waga dziecka na tle mediany WHO", &ui_f13, P.muted, 22, 36, 226);
+  // dwa widoki w tym samym miejscu; przelacza je dotkniecie wykresu
+  uiWtViewA = ui_box(p, 0, 0, 480, 242, 0, P.bg, LV_OPA_TRANSP);
+  uiWtViewB = ui_box(p, 0, 0, 480, 242, 0, P.bg, LV_OPA_TRANSP);
+  lv_obj_t *vs[2] = {uiWtViewA, uiWtViewB};
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_add_flag(vs[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(vs[i], LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_flag(vs[i], LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(vs[i], ui_weight_click_cb, LV_EVENT_CLICKED, nullptr);
+  }
   ui_weight_view_weight(uiWtViewA, m);
   ui_weight_view_gain(uiWtViewB, m, any);
   lv_obj_add_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN);
   uiWtShown = 0; uiWtTicks = 0;
-  uiWtDot[0] = ui_box(p, 22, 62, 14, 5, 2, P.acc);
-  uiWtDot[1] = ui_box(p, 40, 62, 14, 5, 2, P.brd);
+  uiWtDot[0] = ui_box(p, 22, 63, 14, 5, 2, P.acc);
+  uiWtDot[1] = ui_box(p, 40, 63, 14, 5, 2, P.brd);
+  ui_label(p, "dotknij wykres, by zmienić", &ui_f13, P.faint, 62, 55);
 
   // stale kafelki: przyrost od urodzenia i z ostatnich 2 tygodni
   char v1[12], s1[40], v2[12], s2[40];
@@ -1252,7 +1261,6 @@ static void ui_diag_cb(lv_event_t *) { if (uiOnDiagnostics) uiOnDiagnostics(); }
 
 static void ui_dash_tick(lv_timer_t *t) {   // 500 ms: sygnalizator "czas na karmienie" (biel/czerwien jak dawniej)
   (void)t;
-  if (uiDashScr && uiDashCur == 3 && uiWtViewA && uiWtViewB && ++uiWtTicks >= 7) { uiWtTicks = 0; ui_weight_toggle(); }
   if (!uiDashScr || uiDashCur != 0 || !uiDashCounterCard || !uiDashHasData) return;
   const bool alarm = uiDashM.hasLastFeed && uiDashM.sinceFeedMin >= uiDashM.alarmMin;
   if (!alarm) return;
