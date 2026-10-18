@@ -7,8 +7,8 @@ pogoda, tryb nocny, diagnostyka, powiadomienia) jest bez zmian.
 ## Ekrany
 | Ekran | Opis |
 |---|---|
-| Start | animowany ekran z leśną sceną i świetlikami, kroki startu (Wi‑Fi, NTP, pamięć, pogoda, dane z WWW) i pasek postępu |
-| Tablica (wygaszacz) | duży zegar, pogoda z animowaną ikoną, pierścień czasu od karmienia, statystyki dnia, ubiór, wskazówka dnia |
+| Start | statyczna leśna scena z animowanym **jeżem** (mruganie, rumieńce, podskok), kroki startu (Wi‑Fi, NTP, pamięć, pogoda, dane z WWW) i pasek postępu; odświeżany tylko między krokami |
+| Tablica (wygaszacz) | duży zegar, pogoda z animowaną ikoną, pierścień czasu od karmienia, statystyki dnia (karmień dziś, mleka dziś, średnia przerwa), ubiór, wskazówka dnia |
 | Panel (dotknij tablicy) | 6 kart: **Dziś · Mleko · Odstępy · Waga · Sen · Kąpiel** — przełączane dotykiem w dolny pasek lub przeciągnięciem w bok; wykresy rosną z animacją |
 
 * Logo (lewy górny róg panelu) → powrót na tablicę. Długie przytrzymanie zegara → diagnostyka.
@@ -32,3 +32,9 @@ obciążać RGB‑panelu 480×480.
 Mleko 5 dni (matki/modyfikowane/mieszane) · przerwy dzisiaj + rytm 3 dni · przyrost wagi (trend tygodniowy,
 regresja z okna ±7 dni) · sen nocny wg karmień (początek karmienia wieczornego +90 min … następne karmienie −10 min)
 · kalendarz kąpieli (co 3 dni).
+
+## Strona „Waga” (v4.1)
+Dwa wykresy w jednym miejscu, przełączane same co ~3,5 s (wskaźnik dwóch kresek pod tytułem): waga na tle normy WHO
+(pasmo P3–P97, mediana, pasmo przyrostu od wypisu) oraz przyrost tygodniowy (g/dzień). Pod nimi stałe kafelki
+„Od urodzenia” i „Ostatnie 2 tygodnie” (g/dzień + norma). Szczegóły i uwagi o stabilności obrazu, PSRAM i wątkach:
+sekcja „v4.1” w `README.md`.

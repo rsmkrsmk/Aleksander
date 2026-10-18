@@ -169,6 +169,32 @@ Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i w
 
 Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
 
+### v4.1 (gałąź `v4.1-claude-pazdziernik`) — nowy interfejs urządzenia, stabilność obrazu i pamięci
+
+**Pliki:** główny szkic to `v3.ino` + `ui_modern.h`, `ui_fonts.h`, `ui_assets.h`, `config.h` (muszą leżeć w jednym folderze; nie trzymać drugiej kopii `.ino`). Opis interfejsu: `UI_NOWY_INTERFEJS.md`. Symulator PC i skrypty: `tools/sim/` (`make sim_ui`, `make sim_fw`; `extract_glue.py` zapisuje `glue_extract.h` — **nie commitować**, usunąć po użyciu).
+
+**Interfejs (`ui_modern.h`)**
+- Ekran startowy: **jeż** (uśmiech, mruganie, rumieńce, podskok co 2. mrugnięcie) na statycznym tle — bez świetlików i animacji tła (powodowały przesunięcia obrazu). Bootscreen jest odświeżany **tylko między krokami startu** (`bootStep`, `bootPumpFor`), bez osobnego wątku (wątek głodził IDLE0 → `task_wdt`).
+- Tablica (wygaszacz): mniej animacji (bez obrotu promieni, pulsu dysku, bujania księżyca; 2 migające gwiazdki w ikonie pogody; 3 krople/płatki bez obrotu). Kafelki: „karmień dziś”, **„mleka dziś”** (suma ml z dziś, `m.statVal[1]`), „średnia przerwa”.
+- Strona **Waga**: dwa widoki w tym samym miejscu, przełączane same co ~3,5 s (7 ticków timera 500 ms w `ui_dash_tick`): (1) waga na tle normy WHO (pasmo P3–P97, mediana, żółte pasmo przyrostu od wypisu 2850 g, linia pomiarów), (2) przyrost g/dzień tydzień po tygodniu. Pod nimi stałe kafelki „Od urodzenia” (g/dzień, +g w N dni) i „Ostatnie 2 tygodnie” (g/dzień, norma 25–30 / 15–20 / 10–15 g). Dane liczy `uiFillCharts` (pola `wpN/wpDay/wpG/wSince/wGainTotal/w14…` w `UiModel`); tablice WHO i pasma są w `ui_modern.h` (kopia z `web-php/ui/app.js`). Wskaźniki widoków są zerowane w `ui_page_reset(3)`, `uiDashCreate`, `uiDashDestroy` (nie zostawiać wiszących wskaźników).
+- Duże bufory UI (`uiBars`, `uiFeedTs`, `uiFeedFirst`, `uiWts`) są w **PSRAM** (`ui_alloc_big`) — wewnętrzny RAM jest deficytowy (TLS/Wi‑Fi potrzebują dużych ciągłych bloków; po dodaniu nowego UI brak RAM dawał „błąd TLS” i niepełne pobrania CSV).
+
+**Obraz panelu RGB (przesuwanie „jak na rolce”)**
+- Zegar pikseli: **6 MHz** (`RGB_PCLK_NORMAL_HZ`). 12 MHz powodowało przesunięcie obrazu (bounce buffer nie nadąża) — nie zwiększać.
+- Przyczyna przesunięć: odczyt/zapis flasha wyłącza cache pamięci zewnętrznej i głodzi DMA panelu. Środki zaradcze: `FlashWriteGuard` (na czas zapisu obniża PCLK do 1 MHz i potem przywraca + `requestRgbResync()`), użyty w zapisach CSV/ustawień, `copyLittleFsFile` (backup), montażu LittleFS w `setup()` oraz przy wczytywaniu pliku backupu do wysyłki; `requestRgbResync()` po krokach startu; `LineReader` (czytnik CSV z buforem 512 B i `delay(1)` po każdym odświeżeniu bufora); cache pogody zapisywany najwyżej co 30 min i tylko po zmianie.
+- Pętla `loop()` synchronizuje render z VSYNC (`rgbVsyncCount`, czekanie max 40 ms przed `lv_timer_handler()`), dotyk czytany co 5 ms (`lastTouchPollUs`), `checkSleepNotifications()` co 1 s.
+
+**Wątki / restarty**
+- `telegramTask` (rdzeń 0) **nie może dotykać LVGL ani globali czytanych w `loop()`** (rdzeń 1). `downloadCsvFromHost()` tylko ustawia `hostMirrorChanged = true`; odświeżenie (`applyHostMirrorUpdate()`: `loadLatestEntries`, `invalidateDayStats`, aktualizacja ekranu/wygaszacza) robi `loop()` oraz `syncOnBoot()`. Naruszenie tej zasady dawało restart (LoadProhibited) po dotknięciu ekranu.
+- Restart `rst:0x1 (POWERON)` bez komunikatu paniki to zwykle zasilanie/USB (zasilacz 5 V/2 A, krótki kabel), nie firmware.
+
+**Telegram — backup CSV (`sendBackupViaTelegram`)**
+- Plik jest wczytywany **jednorazowo do PSRAM** (pod `FlashWriteGuard`, limit 1 MB; przy braku pamięci awaryjnie czytanie porcjami), a transmisja TLS idzie bez dostępu do flasha (czytanie z flasha w trakcie wysyłki przesuwało obraz).
+- Każdy zapis do gniazda jest kontrolowany (`writeAll`: pętla na `client.write`, błąd przy rozłączeniu lub braku postępu 8 s) — wcześniej częściowy zapis dawał `Content-Length` niezgodny z danymi i brak odpowiedzi (kod 0), choć wiadomość tekstowa przechodziła. Oczekiwanie na odpowiedź do 15 s. Ponawianie co 30 s do skutku bez zmian. Log błędu: „Telegram: backup — blad zapisu do gniazda”.
+- `uploadCsvToHost()` nadal pisze bez kontroli częściowych zapisów (ewentualna kolejna poprawka wg wzoru `writeAll`).
+
+**Znane niewiadome:** dokładnej przyczyny przesunięć obrazu tuż po starcie nigdy nie potwierdzono na sprzęcie (środki zaradcze powyżej ją łagodzą); dokładne miejsce dawnego Guru Meditation wymagałoby zdekodowania backtrace (ESP Exception Decoder).
+
 ### v4 — Hosting jako źródło prawdy (architektura)
 - **Odwróciło:** model danych — **hosting staje się źródłem prawdy**, urządzenie **wyświetlaczem** z lokalną kopią CSV (mirror).
 - **Dodało:** polling rewizji — urządzenie co 10 s sprawdza `GET /api/revision`; gdy rewizja się zmieniła, pobiera pełny CSV przez `GET /api/export.csv` i aktualizuje lokalny mirror oraz ekran LVGL.
