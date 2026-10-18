@@ -251,8 +251,8 @@ static void uiBootCreate() {
   lv_obj_set_style_bg_grad_stop(s, 255, 0);
 
   // gwiazdy (migocza z roznym rytmem)
-  static const int8_t sx[] = {30, 78, 120, 176, 236, 290, 330, 392, 442, 60, 214, 420};
-  static const int8_t sy[] = {40, 110, 26, 76, 18, 92, 150, 120, 52, 180, 140, 190};
+  static const int16_t sx[] = {30, 78, 120, 176, 236, 290, 330, 392, 442, 60, 214, 420};
+  static const int16_t sy[] = {40, 110, 26, 76, 18, 92, 150, 120, 52, 180, 140, 190};
   for (int i = 0; i < 12; ++i) {
     lv_obj_t *st = ui_img(s, &sp_star4, sx[i] * 1 + (i % 3) * 3 + (i > 7 ? 0 : 0), sy[i]);
     if (i % 2) lv_image_set_scale(st, 150);
@@ -564,8 +564,8 @@ static void uiSaverCreate(bool night) {
   lv_obj_set_style_border_width(hero, 2, 0);
   lv_obj_set_style_border_color(hero, P.brd, 0);
   if (night) {
-    static const int8_t sx[] = {30, 70, 120, 168, 214, 262, 300, 352, 14, 252};
-    static const int8_t sy[] = {18, 62, 24, 90, 40, 70, 22, 110, 118, 130};
+    static const int16_t sx[] = {30, 70, 120, 168, 214, 262, 300, 352, 14, 252};
+    static const int16_t sy[] = {18, 62, 24, 90, 40, 70, 22, 110, 118, 130};
     for (int i = 0; i < 10; ++i) {
       lv_obj_t *st = ui_img(hero, &sp_star4, sx[i] + (i > 5 ? 20 : 0), sy[i]);
       lv_image_set_scale(st, 120 + (i % 3) * 40);
