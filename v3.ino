@@ -550,6 +550,9 @@ struct LineReader {
         len = f.read(buf, sizeof(buf));
         pos = 0;
         if (len == 0) break;
+        // Odczyt flasha chwilowo wylacza cache pamieci zewnetrznej (panel RGB glodzony =>
+        // przesuniecie obrazu). Krotka przerwa po kazdym bloku daje DMA czas na uzupelnienie bufora.
+        delay(1);
       }
       const uint8_t c = buf[pos++];
       if (c == '\n') break;
@@ -565,6 +568,9 @@ struct LineReader {
         len = f.read(buf, sizeof(buf));
         pos = 0;
         if (len == 0) break;
+        // Odczyt flasha chwilowo wylacza cache pamieci zewnetrznej (panel RGB glodzony =>
+        // przesuniecie obrazu). Krotka przerwa po kazdym bloku daje DMA czas na uzupelnienie bufora.
+        delay(1);
       }
       const uint8_t *p = buf + pos;
       const uint8_t *nl = static_cast<const uint8_t *>(memchr(p, '\n', len - pos));
@@ -2216,6 +2222,7 @@ bool parseWebDateTime(const String &value, time_t &result) {
 
 // Kopiowanie plikow w obrębie LittleFS (uzywane przez backup i import).
 bool copyLittleFsFile(const char *srcPath, const char *dstPath) {
+  FlashWriteGuard flashGuard; // zapis do flasha = cache pamieci wylaczony => obnizamy zegar pikseli
   File src = LittleFS.open(srcPath, FILE_READ);
   if (!src) return false;
   File dst = LittleFS.open(dstPath, FILE_WRITE);
@@ -5659,6 +5666,7 @@ void bootStep(uint8_t idx, uint8_t state) {
     uiBootStep(idx, state);
     if (state != 0 && idx == BOOT_STEP_COUNT - 1) uiBootSetStatus("Gotowe!");
   }
+  requestRgbResync();  // po kazdym blokujacym kroku: wyprostuj ewentualny dryf obrazu
   bootPumpLvgl();
 }
 
@@ -5804,7 +5812,10 @@ void setup() {
 
   // Krok 3: Pamiec danych (LittleFS).
   bootStep(2, 0);
-  storageReady = initialiseStorage();
+  {
+    FlashWriteGuard storageGuard;   // montaz/ewentualny format LittleFS tez wylacza cache pamieci
+    storageReady = initialiseStorage();
+  }
   if (storageReady) {
     Serial.printf("LittleFS: uzywane %u KB z %u KB.\n",
                   static_cast<unsigned>(LittleFS.usedBytes() / 1024),
@@ -5911,6 +5922,7 @@ void setup() {
   }
   bootPumpFor(900);  // chwila na pokazanie "Gotowe!" — render synchroniczny, bez blokujacych operacji
   bootPumpStop();
+  requestRgbResync();
 
   // Pusty ekran glowny z initScreens() nie jest juz potrzebny (panel budujemy dynamicznie).
   if (homeScreen) {
