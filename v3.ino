@@ -405,6 +405,7 @@ void feedWatchdog();
 void showBootScreen();
 void bootStep(uint8_t idx, uint8_t state);
 void bootPumpLvgl();
+void bootPumpFor(uint32_t ms);
 void updateBootSyncUi();
 void syncOnBoot();
 bool appendEntry(const char *entryType, time_t when, int ml, int piersLeft = -1, int piersRight = -1);
@@ -533,6 +534,49 @@ struct CsvEntry {
   int piersLeft;
   int piersRight;
 };
+// Szybki czytnik linii z bufora 512 B (zamiast Stream::readStringUntil, ktory czyta bajt po
+// bajcie z kontrola timeoutu — przy plikach CSV po kilkaset KB to setki ms blokady petli).
+struct LineReader {
+  File &f;
+  uint8_t buf[512];
+  size_t pos = 0, len = 0;
+  explicit LineReader(File &file) : f(file) {}
+  bool more() { return pos < len || f.available() > 0; }
+  // Wersja bez alokacji: kopiuje do cap-1 znakow, reszte dluzszej linii pomija. Zwraca dlugosc.
+  size_t nextBuf(char *dst, size_t cap) {
+    size_t n = 0;
+    for (;;) {
+      if (pos >= len) {
+        len = f.read(buf, sizeof(buf));
+        pos = 0;
+        if (len == 0) break;
+      }
+      const uint8_t c = buf[pos++];
+      if (c == '\n') break;
+      if (n + 1 < cap) dst[n++] = static_cast<char>(c);
+    }
+    dst[n] = 0;
+    return n;
+  }
+  String next() {
+    String out;
+    for (;;) {
+      if (pos >= len) {
+        len = f.read(buf, sizeof(buf));
+        pos = 0;
+        if (len == 0) break;
+      }
+      const uint8_t *p = buf + pos;
+      const uint8_t *nl = static_cast<const uint8_t *>(memchr(p, '\n', len - pos));
+      const size_t n = nl ? static_cast<size_t>(nl - p) : len - pos;
+      if (n) out.concat(reinterpret_cast<const char *>(p), static_cast<unsigned int>(n));
+      pos += n + (nl ? 1 : 0);
+      if (nl) break;
+    }
+    return out;
+  }
+};
+
 
 // Bezpieczny odczyt weatherState (zapisywanego z weatherTask na rdzeniu 0).
 // Umieszczone TU (za definicjami typow), bo to pierwsza funkcja pliku — patrz uwaga
@@ -1250,9 +1294,9 @@ void loadLatestEntries() {
   String milkPastText;
   const time_t nowLimit = time(nullptr) + 60;
 
-  file.readStringUntil('\n'); // pominięcie nagłówka
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
+  LineReader lr(file); lr.next(); // pominięcie nagłówka
+  while (lr.more()) {
+    String line = lr.next();
     // Zamiast line.trim() (nowy String): usuwamy tylko koncowy CR/LF (1 modyfikacja
     // w miejscu) — P3: mniej alokacji przy kazdym przebiegu pliku.
     while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
@@ -1342,12 +1386,12 @@ void recomputeFeedingRhythm() {
 
   File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
   if (!file) return;
-  file.readStringUntil('\n');
+  LineReader lr(file); lr.next();
   time_t prev = 0;
   long sumMin = 0;
   int gapCount = 0;
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
+  while (lr.more()) {
+    String line = lr.next();
     // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
     while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
       line.remove(line.length() - 1);
@@ -1426,6 +1470,10 @@ static bool sleepHourIsNight(int hour) {
 // (nowe przebudzenie) albo gdy dziecko spi.
 void checkSleepNotifications() {
   if (!sleepTelegramEnabled || !timeIsValid) return;
+  // Sprawdzenie co 1 s wystarcza (okna snu liczone sa w minutach) — oszczedza CPU w petli.
+  static uint32_t lastCheckMs = 0;
+  if (millis() - lastCheckMs < 1000) return;
+  lastCheckMs = millis();
   // Reset flag przy nowym oknie czuwania lub podczas snu.
   if (sleepInProgress || lastWakeTime != sleepNotifyAnchor) {
     sleepNotifyAnchor = lastWakeTime;
@@ -1518,11 +1566,11 @@ bool deleteEntryByIndex(int entryIndex, String &removedDescription) {
   // naglowku, liczona dla KAZDEJ linii — takze pustej i nieparsowalnej. Musimy liczyc
   // tak samo, inaczej usuniemy niewlasciwy wpis. Zachowujemy wiersze bez zmian
   // (bez trim), pomijamy wylacznie ten o pasujacym indeksie.
-  src.readStringUntil('\n'); // pomijamy naglowek zrodla
+  LineReader lr(src); lr.next(); // pomijamy naglowek zrodla
   int dataIndex = 0;
   bool removedFound = false;
-  while (src.available()) {
-    String line = src.readStringUntil('\n');
+  while (lr.more()) {
+    String line = lr.next();
     // Usuwamy tylko koncowy CR/LF, bez naruszania tresci wiersza.
     while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
       line.remove(line.length() - 1);
@@ -1589,13 +1637,13 @@ bool updateFeeding(int feedLineIndex, time_t when, int motherMl, int modifiedMl,
   strftime(newDate, sizeof(newDate), "%Y-%m-%d", &newTm);
   strftime(newTime, sizeof(newTime), "%H:%M", &newTm);
 
-  src.readStringUntil('\n'); // pomijamy naglowek zrodla
+  LineReader lr(src); lr.next(); // pomijamy naglowek zrodla
   int dataIndex = 0;
   bool feedFound = false;
   String oldFeedDate = "";       // stary czas karmienia — po nim rozpoznajemy sparowane mleko
   String oldFeedTime = "";
-  while (src.available()) {
-    String line = src.readStringUntil('\n');
+  while (lr.more()) {
+    String line = lr.next();
     while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
       line.remove(line.length() - 1);
     }
@@ -1829,9 +1877,9 @@ String entriesForDay(time_t day, bool compact) {
   String details;
   const String targetDate = dateIso(day);
 
-  file.readStringUntil('\n');
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
+  LineReader lr(file); lr.next();
+  while (lr.more()) {
+    String line = lr.next();
     // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
     while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
       line.remove(line.length() - 1);
@@ -1946,10 +1994,10 @@ void refreshDayStats() {
   if (storageReady) {
     File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
     if (file) {
-      file.readStringUntil('\n');
+      LineReader lr(file); lr.next();
       time_t openSleepStart = 0; // otwarty SEN_START (plik jest chronologiczny)
-      while (file.available()) {
-        String line = file.readStringUntil('\n');
+      while (lr.more()) {
+        String line = lr.next();
         // P3: koncowe CR/LF usuwamy w miejscu (bez trim() — nowy String na wiersz).
         while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
           line.remove(line.length() - 1);
@@ -2211,10 +2259,10 @@ void populateDayEntries(lv_obj_t *container, time_t day) {
   const String targetDate = dateIso(day);
   int rowY = 0;
   int recordCount = 0;
-  file.readStringUntil('\n');
+  LineReader lr(file); lr.next();
 
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
+  while (lr.more()) {
+    String line = lr.next();
     // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
     while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
       line.remove(line.length() - 1);
@@ -2506,10 +2554,10 @@ void createFeedingChartScreen() {
   if (storageReady) {
     File file = LittleFS.open(DATA_FILE_PATH, FILE_READ);
     if (file) {
-      file.readStringUntil('\n');
+      LineReader lr(file); lr.next();
       int dataIndex = 0;
-      while (file.available()) {
-        String line = file.readStringUntil('\n');
+      while (lr.more()) {
+        String line = lr.next();
         // P3: koncowe CR/LF usuwamy w miejscu (bez trim()).
         while (line.length() && (line[line.length() - 1] == '\r' || line[line.length() - 1] == '\n')) {
           line.remove(line.length() - 1);
@@ -3423,9 +3471,9 @@ static void uiFillCharts(UiModel &m) {
     if (file) {
       char line[112];
       bool header = true;
-      while (file.available()) {
-        const size_t n = file.readBytesUntil('\n', line, sizeof(line) - 1);
-        line[n] = 0;
+      LineReader lr(file);
+      while (lr.more()) {
+        const size_t n = lr.nextBuf(line, sizeof(line));
         if (header) { header = false; continue; }
         size_t len = n;
         while (len && (line[len - 1] == '\r' || line[len - 1] == ' ')) line[--len] = 0;
@@ -5265,6 +5313,15 @@ bool saveWeatherCache() {
   // a plikowe I/O robimy bez trzymania mutexa.
   const WeatherState snap = snapshotWeather();
   if (!snap.valid) return false;
+  // Oszczednosc flasha: cache sluzy tylko do szybkiego startu, wiec zapisujemy go
+  // najwyzej raz na 30 min i tylko gdy tresc sie zmienila.
+  static WeatherState lastSaved = {};
+  static uint32_t lastSaveMs = 0;
+  static bool savedOnce = false;
+  if (savedOnce && (millis() - lastSaveMs < 30UL * 60UL * 1000UL ||
+                    memcmp(&lastSaved, &snap, sizeof(snap)) == 0)) {
+    return true;
+  }
   FlashWriteGuard flashGuard; // obnizony zegar pikseli na czas zapisu
   File file = LittleFS.open(WEATHER_CACHE_FILE, FILE_WRITE);
   if (!file) return false;
@@ -5272,6 +5329,7 @@ bool saveWeatherCache() {
   const bool saved = file.write(reinterpret_cast<const uint8_t *>(&magic), sizeof(magic)) == sizeof(magic) &&
                      file.write(reinterpret_cast<const uint8_t *>(&snap), sizeof(snap)) == sizeof(snap);
   file.close();
+  if (saved) { lastSaved = snap; lastSaveMs = millis(); savedOnce = true; }
   return saved;
 }
 
@@ -5482,61 +5540,33 @@ void requestWeatherFetch() {
 // po uruchomieniu LVGL, aktualizowany przy kazdym etapie startu.
 constexpr uint8_t BOOT_STEP_COUNT = 5; // kroki: Wi-Fi, zegar, pamiec, pogoda, dane z WWW (ui_modern.h)
 
-// --- Pompa LVGL na czas startu ---------------------------------------------------
-// Kroki startu (Wi-Fi, NTP, pobieranie danych) BLOKUJA setup() nawet na kilkanascie
-// sekund — wczesniej animacje ekranu startowego zamarzaly i "przeskakiwaly" przy kazdym
-// takim kroku. Teraz osobne zadanie FreeRTOS (rdzen 0) renderuje LVGL z czestotliwoscia
-// odswiezania panelu, a kazde wywolanie LVGL z setup() jest chronione muteksem.
-static SemaphoreHandle_t bootLvMutex = nullptr;
-static TaskHandle_t bootPumpTask = nullptr;
-static volatile bool bootPumpRun = false;
+// --- Odswiezanie ekranu startowego MIEDZY krokami ----------------------------------
+// Blokujace kroki startu (Wi-Fi, NTP, flash, pobieranie) NIE sa przerywane rysowaniem:
+// rendering do PSRAM rownolegle z Wi-Fi/zapisem we flashu powodowal przesuniecia obrazu
+// (bufor bounce DMA glodzony przy wylaczonym cache). Ekran odswiezamy tylko w "oknach"
+// miedzy krokami — synchronicznie, z jednego watku, wiec muteks nie jest potrzebny.
+struct BootLvLock { BootLvLock() {} ~BootLvLock() {} };   // zachowane dla czytelnosci wywolan
+static void bootPumpStart() {}
+static void bootPumpStop() { lastLvglTickMs = millis(); }  // loop() przejmuje tick LVGL
 
-struct BootLvLock {
-  BootLvLock() { if (bootLvMutex) xSemaphoreTake(bootLvMutex, portMAX_DELAY); }
-  ~BootLvLock() { if (bootLvMutex) xSemaphoreGive(bootLvMutex); }
-};
-
-static void bootPumpTaskFn(void *) {
-  uint32_t lastMs = millis();
-  uint32_t lastVsync = rgbVsyncCount;
-  while (bootPumpRun) {
-    const uint32_t waitStart = millis();
-    while (rgbVsyncCount == lastVsync && millis() - waitStart < 30 && bootPumpRun) vTaskDelay(1);
-    lastVsync = rgbVsyncCount;
-    if (xSemaphoreTake(bootLvMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-      const uint32_t nowMs = millis();
-      lv_tick_inc(nowMs - lastMs);
-      lastMs = nowMs;
-      lv_timer_handler();
-      xSemaphoreGive(bootLvMutex);
-    }
-    vTaskDelay(1);
-  }
-  bootPumpTask = nullptr;
-  vTaskDelete(nullptr);
-}
-
-static void bootPumpStart() {
-  if (bootPumpTask) return;
-  if (!bootLvMutex) bootLvMutex = xSemaphoreCreateMutex();
-  bootPumpRun = true;
-  if (xTaskCreatePinnedToCore(bootPumpTaskFn, "bootui", 6144, nullptr, 2, &bootPumpTask, 0) != pdPASS) {
-    bootPumpRun = false;
-    bootPumpTask = nullptr;  // brak zadania — fallback: bootPumpLvgl() z setup()
-  }
-}
-
-static void bootPumpStop() {
-  if (!bootPumpTask && !bootPumpRun) return;
-  bootPumpRun = false;
+// Renderuje LVGL przez ~ms milisekund (animacje jeza: mruganie, rumience) — tylko w oknach
+// miedzy blokujacymi krokami. Czeka na VSYNC, zeby klatki byly rowno rozlozone.
+void bootPumpFor(uint32_t ms) {
   const uint32_t t0 = millis();
-  while (bootPumpTask && millis() - t0 < 500) delay(5);
-  lastLvglTickMs = millis();  // loop() przejmuje tick LVGL
+  uint32_t lastVsync = rgbVsyncCount;
+  do {
+    const uint32_t w = millis();
+    while (rgbVsyncCount == lastVsync && millis() - w < 30) delay(1);
+    lastVsync = rgbVsyncCount;
+    const uint32_t nowMs = millis();
+    lv_tick_inc(nowMs - lastLvglTickMs);
+    lastLvglTickMs = nowMs;
+    lv_timer_handler();
+  } while (millis() - t0 < ms);
 }
 
-// Wymusza jedno odswiezenie LVGL (fallback gdy zadanie pompy nie dziala).
+// Wymusza jedno odswiezenie LVGL (po zmianie stanu kroku).
 void bootPumpLvgl() {
-  if (bootPumpTask) return;  // zadanie samo odswieza ekran
   const uint32_t nowMs = millis();
   lv_tick_inc(nowMs - lastLvglTickMs);
   lastLvglTickMs = nowMs;
@@ -5879,7 +5909,7 @@ void setup() {
     BootLvLock lock;
     uiBootProgress(100);
   }
-  delay(900);  // chwila na pokazanie animacji "Gotowe!" (zadanie pompy renderuje ekran)
+  bootPumpFor(900);  // chwila na pokazanie "Gotowe!" — render synchroniczny, bez blokujacych operacji
   bootPumpStop();
 
   // Pusty ekran glowny z initScreens() nie jest juz potrzebny (panel budujemy dynamicznie).
@@ -6035,7 +6065,13 @@ uint32_t lvglNowMs = millis();
     lvglNowMs = millis();
     lv_tick_inc(lvglNowMs - lastLvglTickMs);
     lastLvglTickMs = lvglNowMs;
-    if (touchDriver) lv_indev_read(touchDriver);
+    // GT911 odswieza sie ~100 Hz — czytanie go co 1 ms bylo marnowaniem magistrali I2C i CPU.
+    // Co 5 ms (200 Hz) zostaje zapas na dotkniecia i gesty, a I2C jest ~5x mniej obciazone.
+    static uint32_t lastTouchPollUs = 0;
+    if (touchDriver && workStart - lastTouchPollUs >= 5000) {
+      lastTouchPollUs = workStart;
+      lv_indev_read(touchDriver);
+    }
     samplingWorkUs += micros() - workStart;
   } while (rgbVsyncCount == lastRenderedVsync && millis() - waitStartMs < 40);
   lastRenderedVsync = rgbVsyncCount;
