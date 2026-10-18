@@ -238,7 +238,7 @@ static void ui_boot_blink_cb(lv_timer_t *t) {
   }
   // co drugi raz jez podskakuje z radosci
   if (uiBootHedge && (n++ & 1)) {
-    ui_anim_start(uiBootHedge, ui_cb_y, 44, 26, 190, 120, lv_anim_path_ease_out, 260);
+    ui_anim_start(uiBootHedge, ui_cb_y, 44, 30, 170, 150, lv_anim_path_ease_out, 230);
   }
 }
 static lv_timer_t *uiBootBlinkTimer = nullptr;
@@ -263,17 +263,14 @@ static void uiBootCreate() {
   for (int i = 0; i < 12; ++i) {
     lv_obj_t *st = ui_img(s, &sp_star4, sx[i] * 1 + (i % 3) * 3 + (i > 7 ? 0 : 0), sy[i]);
     if (i % 2) lv_image_set_scale(st, 150);
-    lv_obj_set_style_image_opa(st, 60, 0);
-    ui_anim_start(st, ui_cb_iopa, 40, 255, 900 + i * 170, i * 230, lv_anim_path_ease_in_out, 900 + i * 110, true);
+    lv_obj_set_style_image_opa(st, 170, 0);
   }
 
   // ksiezyc z poswiata, delikatnie unosi sie
   lv_obj_t *glow = ui_img(s, &mk_glow_m, 410 - 70, 70 - 70);
   ui_tint(glow, lv_color_hex(0xFFE9A8), 60);
-  lv_obj_t *moon = ui_img(s, &sp_moon, 410 - 50, 70 - 50);
+  lv_obj_t *moon = ui_img(s, &sp_moon, 410 - 50, 24);
   lv_image_set_scale(moon, 190);
-  ui_anim_start(moon, ui_cb_y, 20, 28, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
-  ui_anim_start(glow, ui_cb_y, 0, 8, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
 
   // wzgorza i sosny (sylwety)
   lv_obj_t *h1 = ui_img(s, &mk_hill_a, -160, 197); ui_tint(h1, lv_color_hex(0x1B4733));
@@ -292,13 +289,10 @@ static void uiBootCreate() {
   // JEZ: wyskakuje z dolu, kolce "oddychaja", mruga, usmiecha sie i co chwile podskakuje
   lv_obj_t *halo = ui_img(s, &mk_glow_xl, 128, -2);
   ui_tint(halo, lv_color_hex(0xBFE8C8), 60);
-  ui_anim_start(halo, ui_cb_iopa, 40, 80, 2200, 0, lv_anim_path_ease_in_out, 2200, true);
   uiBootHedge = ui_box(s, 174, 44, 132, 132, 0, lv_color_black(), LV_OPA_TRANSP);
   lv_obj_t *quills = ui_img(uiBootHedge, &sp_hedge_q, 0, 0);
   lv_image_set_pivot(quills, 66, 100);
   ui_img(uiBootHedge, &sp_hedge_f, 0, 0);
-  ui_anim_start(uiBootHedge, ui_cb_y, 120, 44, 750, 100, lv_anim_path_overshoot);
-  ui_anim_start(quills, ui_cb_scale, 256, 270, 1300, 900, lv_anim_path_ease_in_out, 1300, true);
   // twarz: oczy (z odblaskiem), rumience, usmiech
   uiBootEyeL = ui_box(uiBootHedge, 44, 78, 11, 15, 6, lv_color_hex(0x2B1E16));
   uiBootEyeR = ui_box(uiBootHedge, 77, 78, 11, 15, 6, lv_color_hex(0x2B1E16));
@@ -319,15 +313,12 @@ static void uiBootCreate() {
   lv_obj_set_style_arc_color(uiBootSmile, lv_color_hex(0x5A3D2B), LV_PART_MAIN);
   lv_obj_set_style_arc_rounded(uiBootSmile, true, LV_PART_MAIN);
   lv_obj_set_style_arc_width(uiBootSmile, 0, LV_PART_INDICATOR);
-  ui_anim_start(uiBootSmile, ui_cb_opa, 0, 255, 500, 800);
   if (!uiBootBlinkTimer) uiBootBlinkTimer = lv_timer_create(ui_boot_blink_cb, 2600, nullptr);
 
   // tytul
   lv_obj_t *t1 = ui_label(s, "Leśny Dziennik", &ui_f24, lv_color_hex(0xBFE0C4), 0, 190, 480, LV_TEXT_ALIGN_CENTER);
   lv_obj_t *t2 = ui_label(s, "Aleksander", &ui_f48, lv_color_hex(0xFFF3D6), 0, 212, 480, LV_TEXT_ALIGN_CENTER);
-  ui_anim_start(t1, ui_cb_opa, 0, 255, 700, 500);
-  ui_anim_start(t2, ui_cb_opa, 0, 255, 800, 800);
-  ui_anim_start(t2, ui_cb_y, 232, 212, 800, 800);
+  (void)t1; (void)t2;
 
   // lista krokow na ciemnej, polprzezroczystej karcie
   ui_box(s, 70, 282, 340, 134, 22, lv_color_hex(0x07150F), 150);
@@ -346,16 +337,7 @@ static void uiBootCreate() {
   uiBootPct = ui_label(s, "", &ui_f13, lv_color_hex(0xBFE0C4), 408, 428, 60);
   uiBootStatus = ui_label(s, "Uruchamianie…", &ui_f15, lv_color_hex(0xBFE0C4), 0, 450, 480, LV_TEXT_ALIGN_CENTER);
 
-  // swietliki (rojenie)
-  for (int i = 0; i < 8; ++i) {
-    UiFly &f = uiFlies[i];
-    static const lv_image_dsc_t *const fg[3] = {&mk_glow_f1, &mk_glow_f2, &mk_glow_f3};
-    f.img = ui_img(s, fg[i % 3], 0, 0);
-    ui_tint(f.img, lv_color_hex(0xFFEFA0));
-    f.cx = 40 + i * 55; f.cy = 250 + (i % 4) * 38; f.rx = 28 + (i % 3) * 12; f.ry = 16 + (i % 2) * 14;
-    f.sp = 0.5f + 0.13f * i; f.ph = i * 1.7f;
-  }
-  if (!uiBootTimer) uiBootTimer = lv_timer_create(ui_boot_tick, 16, nullptr);
+  // (swietliki usuniete na ekranie startowym: stabilnosc obrazu)
   lv_screen_load(s);
 }
 
