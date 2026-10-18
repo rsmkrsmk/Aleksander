@@ -4237,6 +4237,37 @@ bool sendBackupViaTelegram(const String &fileName) {
   }
   const size_t fileSize = file.size();
 
+  // Odczyt z flasha wylacza cache pamieci zewnetrznej i glodzi DMA panelu (obraz sie
+  // przesuwa). Dlatego plik wczytujemy JEDNORAZOWO do PSRAM (pod FlashWriteGuard, ktory
+  // na ten czas obniza zegar pikseli), a sama transmisja TLS idzie juz bez dostepu do
+  // flasha. Gdy brak pamieci (plik bardzo duzy) — awaryjnie czytamy porcjami jak dawniej.
+  uint8_t *fileBuf = nullptr;
+  if (fileSize > 0 && fileSize <= 1024 * 1024) {
+#ifdef ESP_PLATFORM
+    fileBuf = static_cast<uint8_t *>(heap_caps_malloc(fileSize, MALLOC_CAP_SPIRAM));
+#endif
+    if (fileBuf) {
+      size_t got = 0;
+      {
+        FlashWriteGuard flashGuard;
+        while (got < fileSize) {
+          const size_t n = file.read(fileBuf + got, (fileSize - got) < 4096 ? (fileSize - got) : 4096);
+          if (n == 0) break;
+          got += n;
+          feedWatchdog();
+          delay(1);
+        }
+      }
+      if (got != fileSize) {
+        Serial.println("Telegram: backup — blad odczytu pliku do pamieci.");
+        free(fileBuf);
+        file.close();
+        return false;
+      }
+      file.close();
+    }
+  }
+
   feedWatchdog(); // wysylka dokumentu przez TLS trwa dluzej — chronimy watchdog
   WiFiClientSecure client;
   client.setInsecure();
@@ -4248,7 +4279,7 @@ bool sendBackupViaTelegram(const String &fileName) {
     char lastErrBuf[128];
     const int errCode = client.lastError(lastErrBuf, sizeof(lastErrBuf));
     Serial.printf("Telegram: backup — blad TLS (kod=%d msg=%s)\n", errCode, lastErrBuf);
-    file.close();
+    if (fileBuf) free(fileBuf); else file.close();
     return false;
   }
   Serial.println("Telegram: TLS handshake do telegram OK.");
@@ -4290,12 +4321,19 @@ bool sendBackupViaTelegram(const String &fileName) {
   int chunkNo = 0;
   size_t sentFile = 0;
   while (sendOk && sentFile < fileSize) {
-    const size_t n = file.read(chunk, sizeof(chunk));
+    size_t n;
+    const uint8_t *src;
+    if (fileBuf) {
+      n = (fileSize - sentFile) < sizeof(chunk) ? (fileSize - sentFile) : sizeof(chunk);
+      src = fileBuf + sentFile;
+    } else {
+      n = file.read(chunk, sizeof(chunk));
+      src = chunk;
+    }
     if (n == 0) break;
-    sendOk = writeAll(chunk, n);
+    sendOk = writeAll(src, n);
     sentFile += n;
-    // Okresowy restart DMA panelu — profilaktyka dryfu obrazu podczas transmisji.
-    if ((++chunkNo & 0x07) == 0) { requestRgbResync(); feedWatchdog(); }
+    if ((++chunkNo & 0x0F) == 0) feedWatchdog();
     delay(1);  // oddaj CPU stosowi Wi-Fi/TLS
   }
   if (sendOk && sentFile == fileSize) sendOk = writeAll(reinterpret_cast<const uint8_t *>(tail.c_str()), tail.length());
@@ -4304,7 +4342,7 @@ bool sendBackupViaTelegram(const String &fileName) {
     Serial.printf("Telegram: backup — blad zapisu do gniazda (%u/%u B).\n",
                   static_cast<unsigned>(sentFile), static_cast<unsigned>(fileSize));
     client.stop();
-    file.close();
+    if (fileBuf) free(fileBuf); else file.close();
     requestRgbResync();
     return false;
   }
@@ -4321,7 +4359,7 @@ bool sendBackupViaTelegram(const String &fileName) {
   }
   while (client.available()) client.read();
   client.stop();
-  file.close();
+  if (fileBuf) free(fileBuf); else file.close();
   feedWatchdog();
   requestRgbResync(); // po zakonczeniu transmisji — korekta ewentualnego dryfu
 
@@ -4454,7 +4492,7 @@ bool uploadCsvToHost() {
   }
   while (client.available()) client.read();
   client.stop();
-  file.close();
+  if (fileBuf) free(fileBuf); else file.close();
   feedWatchdog();
   requestRgbResync(); // po zakonczeniu transmisji — korekta ewentualnego dryfu
 
