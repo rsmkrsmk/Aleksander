@@ -28,7 +28,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_home_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_home_s_fill_map};
+static lv_image_dsc_t ic_home_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -55,7 +55,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_home_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_home_s_line_map};
+static lv_image_dsc_t ic_home_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -101,7 +101,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_home_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_home_m_fill_map};
+static lv_image_dsc_t ic_home_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -147,7 +147,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_home_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_home_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_home_m_line_map};
+static lv_image_dsc_t ic_home_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -174,7 +174,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bottle_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_bottle_s_fill_map};
+static lv_image_dsc_t ic_bottle_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -201,7 +201,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_s_line_map[] = {
   0,0,0,0,0,0,0,0,2,77,123,128,128,122,76,2,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bottle_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_bottle_s_line_map};
+static lv_image_dsc_t ic_bottle_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -247,7 +247,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bottle_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_bottle_m_fill_map};
+static lv_image_dsc_t ic_bottle_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -293,7 +293,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bottle_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_bottle_m_line_map};
+static lv_image_dsc_t ic_bottle_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -377,7 +377,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bottle_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_bottle_l_fill_map};
+static lv_image_dsc_t ic_bottle_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -461,7 +461,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bottle_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bottle_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_bottle_l_line_map};
+static lv_image_dsc_t ic_bottle_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -488,7 +488,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_clock_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_clock_s_fill_map};
+static lv_image_dsc_t ic_clock_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -515,7 +515,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_clock_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_clock_s_line_map};
+static lv_image_dsc_t ic_clock_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -561,7 +561,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_clock_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_clock_m_fill_map};
+static lv_image_dsc_t ic_clock_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -607,7 +607,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_clock_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_clock_m_line_map};
+static lv_image_dsc_t ic_clock_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -691,7 +691,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_clock_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_clock_l_fill_map};
+static lv_image_dsc_t ic_clock_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -775,7 +775,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_clock_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_clock_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_clock_l_line_map};
+static lv_image_dsc_t ic_clock_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -802,7 +802,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_chart_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_chart_s_fill_map};
+static lv_image_dsc_t ic_chart_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -829,7 +829,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_chart_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_chart_s_line_map};
+static lv_image_dsc_t ic_chart_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -875,7 +875,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_chart_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_chart_m_fill_map};
+static lv_image_dsc_t ic_chart_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -921,7 +921,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_chart_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_chart_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_chart_m_line_map};
+static lv_image_dsc_t ic_chart_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -948,7 +948,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_weight_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_weight_s_fill_map};
+static lv_image_dsc_t ic_weight_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -975,7 +975,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_weight_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_weight_s_line_map};
+static lv_image_dsc_t ic_weight_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1021,7 +1021,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_weight_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_weight_m_fill_map};
+static lv_image_dsc_t ic_weight_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1067,7 +1067,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_weight_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_weight_m_line_map};
+static lv_image_dsc_t ic_weight_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1151,7 +1151,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_weight_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_weight_l_fill_map};
+static lv_image_dsc_t ic_weight_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1235,7 +1235,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_weight_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_weight_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_weight_l_line_map};
+static lv_image_dsc_t ic_weight_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1262,7 +1262,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_moon_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_moon_s_fill_map};
+static lv_image_dsc_t ic_moon_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1289,7 +1289,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_moon_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_moon_s_line_map};
+static lv_image_dsc_t ic_moon_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1335,7 +1335,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_moon_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_moon_m_fill_map};
+static lv_image_dsc_t ic_moon_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1381,7 +1381,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_moon_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_moon_m_line_map};
+static lv_image_dsc_t ic_moon_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1465,7 +1465,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_moon_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_moon_l_fill_map};
+static lv_image_dsc_t ic_moon_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1549,7 +1549,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_moon_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_moon_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_moon_l_line_map};
+static lv_image_dsc_t ic_moon_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1576,7 +1576,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bath_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_bath_s_fill_map};
+static lv_image_dsc_t ic_bath_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1603,7 +1603,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bath_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_bath_s_line_map};
+static lv_image_dsc_t ic_bath_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1649,7 +1649,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bath_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_bath_m_fill_map};
+static lv_image_dsc_t ic_bath_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1695,7 +1695,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bath_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_bath_m_line_map};
+static lv_image_dsc_t ic_bath_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1779,7 +1779,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bath_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_bath_l_fill_map};
+static lv_image_dsc_t ic_bath_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1863,7 +1863,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bath_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bath_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_bath_l_line_map};
+static lv_image_dsc_t ic_bath_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1890,7 +1890,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_feed_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_feed_s_fill_map};
+static lv_image_dsc_t ic_feed_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1917,7 +1917,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_feed_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_feed_s_line_map};
+static lv_image_dsc_t ic_feed_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -1963,7 +1963,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_feed_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_feed_m_fill_map};
+static lv_image_dsc_t ic_feed_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2009,7 +2009,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_feed_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_feed_m_line_map};
+static lv_image_dsc_t ic_feed_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2093,7 +2093,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_feed_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_feed_l_fill_map};
+static lv_image_dsc_t ic_feed_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2177,7 +2177,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_feed_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_feed_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_feed_l_line_map};
+static lv_image_dsc_t ic_feed_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2204,7 +2204,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_diaper_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_diaper_s_fill_map};
+static lv_image_dsc_t ic_diaper_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2231,7 +2231,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_diaper_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_diaper_s_line_map};
+static lv_image_dsc_t ic_diaper_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2277,7 +2277,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_diaper_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_diaper_m_fill_map};
+static lv_image_dsc_t ic_diaper_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2323,7 +2323,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_diaper_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_diaper_m_line_map};
+static lv_image_dsc_t ic_diaper_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2407,7 +2407,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_diaper_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_diaper_l_fill_map};
+static lv_image_dsc_t ic_diaper_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2491,7 +2491,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_diaper_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_diaper_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_diaper_l_line_map};
+static lv_image_dsc_t ic_diaper_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2518,7 +2518,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_calendar_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_calendar_s_fill_map};
+static lv_image_dsc_t ic_calendar_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2545,7 +2545,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_calendar_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_calendar_s_line_map};
+static lv_image_dsc_t ic_calendar_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2591,7 +2591,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_calendar_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_calendar_m_fill_map};
+static lv_image_dsc_t ic_calendar_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2637,7 +2637,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_calendar_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_calendar_m_line_map};
+static lv_image_dsc_t ic_calendar_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2721,7 +2721,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_calendar_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_calendar_l_fill_map};
+static lv_image_dsc_t ic_calendar_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2805,7 +2805,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_calendar_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_calendar_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_calendar_l_line_map};
+static lv_image_dsc_t ic_calendar_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2832,7 +2832,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_wifi_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_wifi_s_fill_map};
+static lv_image_dsc_t ic_wifi_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2859,7 +2859,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_wifi_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_wifi_s_line_map};
+static lv_image_dsc_t ic_wifi_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2905,7 +2905,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_wifi_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_wifi_m_fill_map};
+static lv_image_dsc_t ic_wifi_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2951,7 +2951,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_wifi_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_wifi_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_wifi_m_line_map};
+static lv_image_dsc_t ic_wifi_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -2978,7 +2978,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_disk_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_disk_s_fill_map};
+static lv_image_dsc_t ic_disk_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3005,7 +3005,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_disk_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_disk_s_line_map};
+static lv_image_dsc_t ic_disk_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3051,7 +3051,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_disk_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_disk_m_fill_map};
+static lv_image_dsc_t ic_disk_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3097,7 +3097,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_disk_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_disk_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_disk_m_line_map};
+static lv_image_dsc_t ic_disk_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3124,7 +3124,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bulb_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_bulb_s_fill_map};
+static lv_image_dsc_t ic_bulb_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3151,7 +3151,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bulb_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_bulb_s_line_map};
+static lv_image_dsc_t ic_bulb_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3197,7 +3197,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bulb_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_bulb_m_fill_map};
+static lv_image_dsc_t ic_bulb_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3243,7 +3243,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bulb_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_bulb_m_line_map};
+static lv_image_dsc_t ic_bulb_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3327,7 +3327,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bulb_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_bulb_l_fill_map};
+static lv_image_dsc_t ic_bulb_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3411,7 +3411,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_bulb_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_bulb_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_bulb_l_line_map};
+static lv_image_dsc_t ic_bulb_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3438,7 +3438,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_shirt_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_shirt_s_fill_map};
+static lv_image_dsc_t ic_shirt_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3465,7 +3465,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_shirt_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_shirt_s_line_map};
+static lv_image_dsc_t ic_shirt_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3511,7 +3511,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_shirt_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_shirt_m_fill_map};
+static lv_image_dsc_t ic_shirt_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3557,7 +3557,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_shirt_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_shirt_m_line_map};
+static lv_image_dsc_t ic_shirt_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3641,7 +3641,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_shirt_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_shirt_l_fill_map};
+static lv_image_dsc_t ic_shirt_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3725,7 +3725,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_shirt_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_shirt_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_shirt_l_line_map};
+static lv_image_dsc_t ic_shirt_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3752,7 +3752,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_back_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_back_s_fill_map};
+static lv_image_dsc_t ic_back_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3779,7 +3779,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_back_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_back_s_line_map};
+static lv_image_dsc_t ic_back_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3825,7 +3825,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_back_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_back_m_fill_map};
+static lv_image_dsc_t ic_back_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3871,7 +3871,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_back_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_back_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_back_m_line_map};
+static lv_image_dsc_t ic_back_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3898,7 +3898,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_drop_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_drop_s_fill_map};
+static lv_image_dsc_t ic_drop_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3925,7 +3925,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_drop_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_drop_s_line_map};
+static lv_image_dsc_t ic_drop_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -3971,7 +3971,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_drop_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_drop_m_fill_map};
+static lv_image_dsc_t ic_drop_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4017,7 +4017,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_drop_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_drop_m_line_map};
+static lv_image_dsc_t ic_drop_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4101,7 +4101,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_drop_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_drop_l_fill_map};
+static lv_image_dsc_t ic_drop_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4185,7 +4185,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_drop_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_drop_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_drop_l_line_map};
+static lv_image_dsc_t ic_drop_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4212,7 +4212,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_zzz_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_zzz_s_fill_map};
+static lv_image_dsc_t ic_zzz_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4239,7 +4239,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_zzz_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_zzz_s_line_map};
+static lv_image_dsc_t ic_zzz_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4285,7 +4285,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_zzz_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_zzz_m_fill_map};
+static lv_image_dsc_t ic_zzz_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4331,7 +4331,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_zzz_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_zzz_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_zzz_m_line_map};
+static lv_image_dsc_t ic_zzz_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4358,7 +4358,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_s_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_sun_s_s_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_sun_s_s_fill_map};
+static lv_image_dsc_t ic_sun_s_s_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,68,66,0,0,0,0,0,0,0,0,0,0,0,
@@ -4385,7 +4385,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_s_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,69,63,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_sun_s_s_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=24,.h=24,.stride=24,.reserved_2=0},.data_size=576,.data=ic_sun_s_s_line_map};
+static lv_image_dsc_t ic_sun_s_s_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4431,7 +4431,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_m_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_sun_s_m_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_sun_s_m_fill_map};
+static lv_image_dsc_t ic_sun_s_m_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4477,7 +4477,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_m_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_sun_s_m_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=32,.h=32,.stride=32,.reserved_2=0},.data_size=1024,.data=ic_sun_s_m_line_map};
+static lv_image_dsc_t ic_sun_s_m_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4561,7 +4561,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_l_fill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_sun_s_l_fill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_sun_s_l_fill_map};
+static lv_image_dsc_t ic_sun_s_l_fill;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -4645,7 +4645,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t ic_sun_s_l_line_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t ic_sun_s_l_line = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=44,.h=44,.stride=44,.reserved_2=0},.data_size=1936,.data=ic_sun_s_l_line_map};
+static lv_image_dsc_t ic_sun_s_l_line;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_sun_disk_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -6315,7 +6315,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_sun_disk_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_sun_disk = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=100,.h=100,.stride=400,.reserved_2=0},.data_size=40000,.data=sp_sun_disk_map};
+static lv_image_dsc_t sp_sun_disk;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_sun_rays_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -7985,7 +7985,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_sun_rays_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_sun_rays = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=100,.h=100,.stride=400,.reserved_2=0},.data_size=40000,.data=sp_sun_rays_map};
+static lv_image_dsc_t sp_sun_rays;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_moon_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -9655,7 +9655,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_moon_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_moon = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=100,.h=100,.stride=400,.reserved_2=0},.data_size=40000,.data=sp_moon_map};
+static lv_image_dsc_t sp_moon;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_cloud_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -11178,7 +11178,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_cloud_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_cloud = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=120,.h=76,.stride=480,.reserved_2=0},.data_size=36480,.data=sp_cloud_map};
+static lv_image_dsc_t sp_cloud;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_cloud_d_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -12701,7 +12701,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_cloud_d_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_cloud_d = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=120,.h=76,.stride=480,.reserved_2=0},.data_size=36480,.data=sp_cloud_d_map};
+static lv_image_dsc_t sp_cloud_d;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_drop_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -12774,7 +12774,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_drop_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_drop = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=16,.h=26,.stride=64,.reserved_2=0},.data_size=1664,.data=sp_drop_map};
+static lv_image_dsc_t sp_drop;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_flake_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,29,
@@ -12873,7 +12873,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_flake_map[] = {
   255,255,255,24,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_flake = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=24,.h=24,.stride=96,.reserved_2=0},.data_size=2304,.data=sp_flake_map};
+static lv_image_dsc_t sp_flake;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_bolt_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -13116,7 +13116,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_bolt_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_bolt = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=30,.h=48,.stride=120,.reserved_2=0},.data_size=5760,.data=sp_bolt_map};
+static lv_image_dsc_t sp_bolt;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_star4_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,196,245,255,26,194,245,255,25,0,0,0,0,
@@ -13186,7 +13186,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_star4_map[] = {
   198,241,255,18,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_star4 = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=20,.h=20,.stride=80,.reserved_2=0},.data_size=1600,.data=sp_star4_map};
+static lv_image_dsc_t sp_star4;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_glow_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -13872,7 +13872,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_glow_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_glow = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=64,.h=64,.stride=256,.reserved_2=0},.data_size=16384,.data=sp_glow_map};
+static lv_image_dsc_t sp_glow;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_leaf_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -14142,7 +14142,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_leaf_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_leaf = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=40,.h=40,.stride=160,.reserved_2=0},.data_size=6400,.data=sp_leaf_map};
+static lv_image_dsc_t sp_leaf;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_bear_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -17049,7 +17049,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_bear_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_bear = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=132,.h=132,.stride=528,.reserved_2=0},.data_size=69696,.data=sp_bear_map};
+static lv_image_dsc_t sp_bear;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_rattle_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -18023,7 +18023,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t sp_rattle_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t sp_rattle = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_ARGB8888,.flags=0,.w=112,.h=52,.stride=448,.reserved_2=0},.data_size=23296,.data=sp_rattle_map};
+static lv_image_dsc_t sp_rattle;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t mk_pine_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -18133,7 +18133,7 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t mk_pine_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
-const lv_image_dsc_t mk_pine = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=40,.h=64,.stride=40,.reserved_2=0},.data_size=2560,.data=mk_pine_map};
+static lv_image_dsc_t mk_pine;
 static const LV_ATTRIBUTE_LARGE_CONST uint8_t mk_hill_map[] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -18836,4 +18836,121 @@ static const LV_ATTRIBUTE_LARGE_CONST uint8_t mk_hill_map[] = {
   255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
   255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 };
-const lv_image_dsc_t mk_hill = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,.w=240,.h=70,.stride=240,.reserved_2=0},.data_size=16800,.data=mk_hill_map};
+static lv_image_dsc_t mk_hill;
+static void ui_assets_init() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  ic_home_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_home_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_home_s_fill.header.flags = 0; ic_home_s_fill.header.w = 24; ic_home_s_fill.header.h = 24; ic_home_s_fill.header.stride = 24; ic_home_s_fill.data_size = 576; ic_home_s_fill.data = ic_home_s_fill_map;
+  ic_home_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_home_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_home_s_line.header.flags = 0; ic_home_s_line.header.w = 24; ic_home_s_line.header.h = 24; ic_home_s_line.header.stride = 24; ic_home_s_line.data_size = 576; ic_home_s_line.data = ic_home_s_line_map;
+  ic_home_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_home_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_home_m_fill.header.flags = 0; ic_home_m_fill.header.w = 32; ic_home_m_fill.header.h = 32; ic_home_m_fill.header.stride = 32; ic_home_m_fill.data_size = 1024; ic_home_m_fill.data = ic_home_m_fill_map;
+  ic_home_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_home_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_home_m_line.header.flags = 0; ic_home_m_line.header.w = 32; ic_home_m_line.header.h = 32; ic_home_m_line.header.stride = 32; ic_home_m_line.data_size = 1024; ic_home_m_line.data = ic_home_m_line_map;
+  ic_bottle_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bottle_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bottle_s_fill.header.flags = 0; ic_bottle_s_fill.header.w = 24; ic_bottle_s_fill.header.h = 24; ic_bottle_s_fill.header.stride = 24; ic_bottle_s_fill.data_size = 576; ic_bottle_s_fill.data = ic_bottle_s_fill_map;
+  ic_bottle_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bottle_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_bottle_s_line.header.flags = 0; ic_bottle_s_line.header.w = 24; ic_bottle_s_line.header.h = 24; ic_bottle_s_line.header.stride = 24; ic_bottle_s_line.data_size = 576; ic_bottle_s_line.data = ic_bottle_s_line_map;
+  ic_bottle_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bottle_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bottle_m_fill.header.flags = 0; ic_bottle_m_fill.header.w = 32; ic_bottle_m_fill.header.h = 32; ic_bottle_m_fill.header.stride = 32; ic_bottle_m_fill.data_size = 1024; ic_bottle_m_fill.data = ic_bottle_m_fill_map;
+  ic_bottle_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bottle_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_bottle_m_line.header.flags = 0; ic_bottle_m_line.header.w = 32; ic_bottle_m_line.header.h = 32; ic_bottle_m_line.header.stride = 32; ic_bottle_m_line.data_size = 1024; ic_bottle_m_line.data = ic_bottle_m_line_map;
+  ic_bottle_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bottle_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bottle_l_fill.header.flags = 0; ic_bottle_l_fill.header.w = 44; ic_bottle_l_fill.header.h = 44; ic_bottle_l_fill.header.stride = 44; ic_bottle_l_fill.data_size = 1936; ic_bottle_l_fill.data = ic_bottle_l_fill_map;
+  ic_bottle_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bottle_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_bottle_l_line.header.flags = 0; ic_bottle_l_line.header.w = 44; ic_bottle_l_line.header.h = 44; ic_bottle_l_line.header.stride = 44; ic_bottle_l_line.data_size = 1936; ic_bottle_l_line.data = ic_bottle_l_line_map;
+  ic_clock_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_clock_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_clock_s_fill.header.flags = 0; ic_clock_s_fill.header.w = 24; ic_clock_s_fill.header.h = 24; ic_clock_s_fill.header.stride = 24; ic_clock_s_fill.data_size = 576; ic_clock_s_fill.data = ic_clock_s_fill_map;
+  ic_clock_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_clock_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_clock_s_line.header.flags = 0; ic_clock_s_line.header.w = 24; ic_clock_s_line.header.h = 24; ic_clock_s_line.header.stride = 24; ic_clock_s_line.data_size = 576; ic_clock_s_line.data = ic_clock_s_line_map;
+  ic_clock_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_clock_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_clock_m_fill.header.flags = 0; ic_clock_m_fill.header.w = 32; ic_clock_m_fill.header.h = 32; ic_clock_m_fill.header.stride = 32; ic_clock_m_fill.data_size = 1024; ic_clock_m_fill.data = ic_clock_m_fill_map;
+  ic_clock_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_clock_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_clock_m_line.header.flags = 0; ic_clock_m_line.header.w = 32; ic_clock_m_line.header.h = 32; ic_clock_m_line.header.stride = 32; ic_clock_m_line.data_size = 1024; ic_clock_m_line.data = ic_clock_m_line_map;
+  ic_clock_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_clock_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_clock_l_fill.header.flags = 0; ic_clock_l_fill.header.w = 44; ic_clock_l_fill.header.h = 44; ic_clock_l_fill.header.stride = 44; ic_clock_l_fill.data_size = 1936; ic_clock_l_fill.data = ic_clock_l_fill_map;
+  ic_clock_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_clock_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_clock_l_line.header.flags = 0; ic_clock_l_line.header.w = 44; ic_clock_l_line.header.h = 44; ic_clock_l_line.header.stride = 44; ic_clock_l_line.data_size = 1936; ic_clock_l_line.data = ic_clock_l_line_map;
+  ic_chart_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_chart_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_chart_s_fill.header.flags = 0; ic_chart_s_fill.header.w = 24; ic_chart_s_fill.header.h = 24; ic_chart_s_fill.header.stride = 24; ic_chart_s_fill.data_size = 576; ic_chart_s_fill.data = ic_chart_s_fill_map;
+  ic_chart_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_chart_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_chart_s_line.header.flags = 0; ic_chart_s_line.header.w = 24; ic_chart_s_line.header.h = 24; ic_chart_s_line.header.stride = 24; ic_chart_s_line.data_size = 576; ic_chart_s_line.data = ic_chart_s_line_map;
+  ic_chart_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_chart_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_chart_m_fill.header.flags = 0; ic_chart_m_fill.header.w = 32; ic_chart_m_fill.header.h = 32; ic_chart_m_fill.header.stride = 32; ic_chart_m_fill.data_size = 1024; ic_chart_m_fill.data = ic_chart_m_fill_map;
+  ic_chart_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_chart_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_chart_m_line.header.flags = 0; ic_chart_m_line.header.w = 32; ic_chart_m_line.header.h = 32; ic_chart_m_line.header.stride = 32; ic_chart_m_line.data_size = 1024; ic_chart_m_line.data = ic_chart_m_line_map;
+  ic_weight_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_weight_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_weight_s_fill.header.flags = 0; ic_weight_s_fill.header.w = 24; ic_weight_s_fill.header.h = 24; ic_weight_s_fill.header.stride = 24; ic_weight_s_fill.data_size = 576; ic_weight_s_fill.data = ic_weight_s_fill_map;
+  ic_weight_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_weight_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_weight_s_line.header.flags = 0; ic_weight_s_line.header.w = 24; ic_weight_s_line.header.h = 24; ic_weight_s_line.header.stride = 24; ic_weight_s_line.data_size = 576; ic_weight_s_line.data = ic_weight_s_line_map;
+  ic_weight_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_weight_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_weight_m_fill.header.flags = 0; ic_weight_m_fill.header.w = 32; ic_weight_m_fill.header.h = 32; ic_weight_m_fill.header.stride = 32; ic_weight_m_fill.data_size = 1024; ic_weight_m_fill.data = ic_weight_m_fill_map;
+  ic_weight_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_weight_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_weight_m_line.header.flags = 0; ic_weight_m_line.header.w = 32; ic_weight_m_line.header.h = 32; ic_weight_m_line.header.stride = 32; ic_weight_m_line.data_size = 1024; ic_weight_m_line.data = ic_weight_m_line_map;
+  ic_weight_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_weight_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_weight_l_fill.header.flags = 0; ic_weight_l_fill.header.w = 44; ic_weight_l_fill.header.h = 44; ic_weight_l_fill.header.stride = 44; ic_weight_l_fill.data_size = 1936; ic_weight_l_fill.data = ic_weight_l_fill_map;
+  ic_weight_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_weight_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_weight_l_line.header.flags = 0; ic_weight_l_line.header.w = 44; ic_weight_l_line.header.h = 44; ic_weight_l_line.header.stride = 44; ic_weight_l_line.data_size = 1936; ic_weight_l_line.data = ic_weight_l_line_map;
+  ic_moon_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_moon_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_moon_s_fill.header.flags = 0; ic_moon_s_fill.header.w = 24; ic_moon_s_fill.header.h = 24; ic_moon_s_fill.header.stride = 24; ic_moon_s_fill.data_size = 576; ic_moon_s_fill.data = ic_moon_s_fill_map;
+  ic_moon_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_moon_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_moon_s_line.header.flags = 0; ic_moon_s_line.header.w = 24; ic_moon_s_line.header.h = 24; ic_moon_s_line.header.stride = 24; ic_moon_s_line.data_size = 576; ic_moon_s_line.data = ic_moon_s_line_map;
+  ic_moon_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_moon_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_moon_m_fill.header.flags = 0; ic_moon_m_fill.header.w = 32; ic_moon_m_fill.header.h = 32; ic_moon_m_fill.header.stride = 32; ic_moon_m_fill.data_size = 1024; ic_moon_m_fill.data = ic_moon_m_fill_map;
+  ic_moon_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_moon_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_moon_m_line.header.flags = 0; ic_moon_m_line.header.w = 32; ic_moon_m_line.header.h = 32; ic_moon_m_line.header.stride = 32; ic_moon_m_line.data_size = 1024; ic_moon_m_line.data = ic_moon_m_line_map;
+  ic_moon_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_moon_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_moon_l_fill.header.flags = 0; ic_moon_l_fill.header.w = 44; ic_moon_l_fill.header.h = 44; ic_moon_l_fill.header.stride = 44; ic_moon_l_fill.data_size = 1936; ic_moon_l_fill.data = ic_moon_l_fill_map;
+  ic_moon_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_moon_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_moon_l_line.header.flags = 0; ic_moon_l_line.header.w = 44; ic_moon_l_line.header.h = 44; ic_moon_l_line.header.stride = 44; ic_moon_l_line.data_size = 1936; ic_moon_l_line.data = ic_moon_l_line_map;
+  ic_bath_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bath_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bath_s_fill.header.flags = 0; ic_bath_s_fill.header.w = 24; ic_bath_s_fill.header.h = 24; ic_bath_s_fill.header.stride = 24; ic_bath_s_fill.data_size = 576; ic_bath_s_fill.data = ic_bath_s_fill_map;
+  ic_bath_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bath_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_bath_s_line.header.flags = 0; ic_bath_s_line.header.w = 24; ic_bath_s_line.header.h = 24; ic_bath_s_line.header.stride = 24; ic_bath_s_line.data_size = 576; ic_bath_s_line.data = ic_bath_s_line_map;
+  ic_bath_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bath_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bath_m_fill.header.flags = 0; ic_bath_m_fill.header.w = 32; ic_bath_m_fill.header.h = 32; ic_bath_m_fill.header.stride = 32; ic_bath_m_fill.data_size = 1024; ic_bath_m_fill.data = ic_bath_m_fill_map;
+  ic_bath_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bath_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_bath_m_line.header.flags = 0; ic_bath_m_line.header.w = 32; ic_bath_m_line.header.h = 32; ic_bath_m_line.header.stride = 32; ic_bath_m_line.data_size = 1024; ic_bath_m_line.data = ic_bath_m_line_map;
+  ic_bath_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bath_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bath_l_fill.header.flags = 0; ic_bath_l_fill.header.w = 44; ic_bath_l_fill.header.h = 44; ic_bath_l_fill.header.stride = 44; ic_bath_l_fill.data_size = 1936; ic_bath_l_fill.data = ic_bath_l_fill_map;
+  ic_bath_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bath_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_bath_l_line.header.flags = 0; ic_bath_l_line.header.w = 44; ic_bath_l_line.header.h = 44; ic_bath_l_line.header.stride = 44; ic_bath_l_line.data_size = 1936; ic_bath_l_line.data = ic_bath_l_line_map;
+  ic_feed_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_feed_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_feed_s_fill.header.flags = 0; ic_feed_s_fill.header.w = 24; ic_feed_s_fill.header.h = 24; ic_feed_s_fill.header.stride = 24; ic_feed_s_fill.data_size = 576; ic_feed_s_fill.data = ic_feed_s_fill_map;
+  ic_feed_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_feed_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_feed_s_line.header.flags = 0; ic_feed_s_line.header.w = 24; ic_feed_s_line.header.h = 24; ic_feed_s_line.header.stride = 24; ic_feed_s_line.data_size = 576; ic_feed_s_line.data = ic_feed_s_line_map;
+  ic_feed_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_feed_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_feed_m_fill.header.flags = 0; ic_feed_m_fill.header.w = 32; ic_feed_m_fill.header.h = 32; ic_feed_m_fill.header.stride = 32; ic_feed_m_fill.data_size = 1024; ic_feed_m_fill.data = ic_feed_m_fill_map;
+  ic_feed_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_feed_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_feed_m_line.header.flags = 0; ic_feed_m_line.header.w = 32; ic_feed_m_line.header.h = 32; ic_feed_m_line.header.stride = 32; ic_feed_m_line.data_size = 1024; ic_feed_m_line.data = ic_feed_m_line_map;
+  ic_feed_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_feed_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_feed_l_fill.header.flags = 0; ic_feed_l_fill.header.w = 44; ic_feed_l_fill.header.h = 44; ic_feed_l_fill.header.stride = 44; ic_feed_l_fill.data_size = 1936; ic_feed_l_fill.data = ic_feed_l_fill_map;
+  ic_feed_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_feed_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_feed_l_line.header.flags = 0; ic_feed_l_line.header.w = 44; ic_feed_l_line.header.h = 44; ic_feed_l_line.header.stride = 44; ic_feed_l_line.data_size = 1936; ic_feed_l_line.data = ic_feed_l_line_map;
+  ic_diaper_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_diaper_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_diaper_s_fill.header.flags = 0; ic_diaper_s_fill.header.w = 24; ic_diaper_s_fill.header.h = 24; ic_diaper_s_fill.header.stride = 24; ic_diaper_s_fill.data_size = 576; ic_diaper_s_fill.data = ic_diaper_s_fill_map;
+  ic_diaper_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_diaper_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_diaper_s_line.header.flags = 0; ic_diaper_s_line.header.w = 24; ic_diaper_s_line.header.h = 24; ic_diaper_s_line.header.stride = 24; ic_diaper_s_line.data_size = 576; ic_diaper_s_line.data = ic_diaper_s_line_map;
+  ic_diaper_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_diaper_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_diaper_m_fill.header.flags = 0; ic_diaper_m_fill.header.w = 32; ic_diaper_m_fill.header.h = 32; ic_diaper_m_fill.header.stride = 32; ic_diaper_m_fill.data_size = 1024; ic_diaper_m_fill.data = ic_diaper_m_fill_map;
+  ic_diaper_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_diaper_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_diaper_m_line.header.flags = 0; ic_diaper_m_line.header.w = 32; ic_diaper_m_line.header.h = 32; ic_diaper_m_line.header.stride = 32; ic_diaper_m_line.data_size = 1024; ic_diaper_m_line.data = ic_diaper_m_line_map;
+  ic_diaper_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_diaper_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_diaper_l_fill.header.flags = 0; ic_diaper_l_fill.header.w = 44; ic_diaper_l_fill.header.h = 44; ic_diaper_l_fill.header.stride = 44; ic_diaper_l_fill.data_size = 1936; ic_diaper_l_fill.data = ic_diaper_l_fill_map;
+  ic_diaper_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_diaper_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_diaper_l_line.header.flags = 0; ic_diaper_l_line.header.w = 44; ic_diaper_l_line.header.h = 44; ic_diaper_l_line.header.stride = 44; ic_diaper_l_line.data_size = 1936; ic_diaper_l_line.data = ic_diaper_l_line_map;
+  ic_calendar_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_calendar_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_calendar_s_fill.header.flags = 0; ic_calendar_s_fill.header.w = 24; ic_calendar_s_fill.header.h = 24; ic_calendar_s_fill.header.stride = 24; ic_calendar_s_fill.data_size = 576; ic_calendar_s_fill.data = ic_calendar_s_fill_map;
+  ic_calendar_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_calendar_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_calendar_s_line.header.flags = 0; ic_calendar_s_line.header.w = 24; ic_calendar_s_line.header.h = 24; ic_calendar_s_line.header.stride = 24; ic_calendar_s_line.data_size = 576; ic_calendar_s_line.data = ic_calendar_s_line_map;
+  ic_calendar_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_calendar_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_calendar_m_fill.header.flags = 0; ic_calendar_m_fill.header.w = 32; ic_calendar_m_fill.header.h = 32; ic_calendar_m_fill.header.stride = 32; ic_calendar_m_fill.data_size = 1024; ic_calendar_m_fill.data = ic_calendar_m_fill_map;
+  ic_calendar_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_calendar_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_calendar_m_line.header.flags = 0; ic_calendar_m_line.header.w = 32; ic_calendar_m_line.header.h = 32; ic_calendar_m_line.header.stride = 32; ic_calendar_m_line.data_size = 1024; ic_calendar_m_line.data = ic_calendar_m_line_map;
+  ic_calendar_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_calendar_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_calendar_l_fill.header.flags = 0; ic_calendar_l_fill.header.w = 44; ic_calendar_l_fill.header.h = 44; ic_calendar_l_fill.header.stride = 44; ic_calendar_l_fill.data_size = 1936; ic_calendar_l_fill.data = ic_calendar_l_fill_map;
+  ic_calendar_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_calendar_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_calendar_l_line.header.flags = 0; ic_calendar_l_line.header.w = 44; ic_calendar_l_line.header.h = 44; ic_calendar_l_line.header.stride = 44; ic_calendar_l_line.data_size = 1936; ic_calendar_l_line.data = ic_calendar_l_line_map;
+  ic_wifi_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_wifi_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_wifi_s_fill.header.flags = 0; ic_wifi_s_fill.header.w = 24; ic_wifi_s_fill.header.h = 24; ic_wifi_s_fill.header.stride = 24; ic_wifi_s_fill.data_size = 576; ic_wifi_s_fill.data = ic_wifi_s_fill_map;
+  ic_wifi_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_wifi_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_wifi_s_line.header.flags = 0; ic_wifi_s_line.header.w = 24; ic_wifi_s_line.header.h = 24; ic_wifi_s_line.header.stride = 24; ic_wifi_s_line.data_size = 576; ic_wifi_s_line.data = ic_wifi_s_line_map;
+  ic_wifi_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_wifi_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_wifi_m_fill.header.flags = 0; ic_wifi_m_fill.header.w = 32; ic_wifi_m_fill.header.h = 32; ic_wifi_m_fill.header.stride = 32; ic_wifi_m_fill.data_size = 1024; ic_wifi_m_fill.data = ic_wifi_m_fill_map;
+  ic_wifi_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_wifi_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_wifi_m_line.header.flags = 0; ic_wifi_m_line.header.w = 32; ic_wifi_m_line.header.h = 32; ic_wifi_m_line.header.stride = 32; ic_wifi_m_line.data_size = 1024; ic_wifi_m_line.data = ic_wifi_m_line_map;
+  ic_disk_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_disk_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_disk_s_fill.header.flags = 0; ic_disk_s_fill.header.w = 24; ic_disk_s_fill.header.h = 24; ic_disk_s_fill.header.stride = 24; ic_disk_s_fill.data_size = 576; ic_disk_s_fill.data = ic_disk_s_fill_map;
+  ic_disk_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_disk_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_disk_s_line.header.flags = 0; ic_disk_s_line.header.w = 24; ic_disk_s_line.header.h = 24; ic_disk_s_line.header.stride = 24; ic_disk_s_line.data_size = 576; ic_disk_s_line.data = ic_disk_s_line_map;
+  ic_disk_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_disk_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_disk_m_fill.header.flags = 0; ic_disk_m_fill.header.w = 32; ic_disk_m_fill.header.h = 32; ic_disk_m_fill.header.stride = 32; ic_disk_m_fill.data_size = 1024; ic_disk_m_fill.data = ic_disk_m_fill_map;
+  ic_disk_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_disk_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_disk_m_line.header.flags = 0; ic_disk_m_line.header.w = 32; ic_disk_m_line.header.h = 32; ic_disk_m_line.header.stride = 32; ic_disk_m_line.data_size = 1024; ic_disk_m_line.data = ic_disk_m_line_map;
+  ic_bulb_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bulb_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bulb_s_fill.header.flags = 0; ic_bulb_s_fill.header.w = 24; ic_bulb_s_fill.header.h = 24; ic_bulb_s_fill.header.stride = 24; ic_bulb_s_fill.data_size = 576; ic_bulb_s_fill.data = ic_bulb_s_fill_map;
+  ic_bulb_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bulb_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_bulb_s_line.header.flags = 0; ic_bulb_s_line.header.w = 24; ic_bulb_s_line.header.h = 24; ic_bulb_s_line.header.stride = 24; ic_bulb_s_line.data_size = 576; ic_bulb_s_line.data = ic_bulb_s_line_map;
+  ic_bulb_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bulb_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bulb_m_fill.header.flags = 0; ic_bulb_m_fill.header.w = 32; ic_bulb_m_fill.header.h = 32; ic_bulb_m_fill.header.stride = 32; ic_bulb_m_fill.data_size = 1024; ic_bulb_m_fill.data = ic_bulb_m_fill_map;
+  ic_bulb_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bulb_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_bulb_m_line.header.flags = 0; ic_bulb_m_line.header.w = 32; ic_bulb_m_line.header.h = 32; ic_bulb_m_line.header.stride = 32; ic_bulb_m_line.data_size = 1024; ic_bulb_m_line.data = ic_bulb_m_line_map;
+  ic_bulb_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bulb_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_bulb_l_fill.header.flags = 0; ic_bulb_l_fill.header.w = 44; ic_bulb_l_fill.header.h = 44; ic_bulb_l_fill.header.stride = 44; ic_bulb_l_fill.data_size = 1936; ic_bulb_l_fill.data = ic_bulb_l_fill_map;
+  ic_bulb_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_bulb_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_bulb_l_line.header.flags = 0; ic_bulb_l_line.header.w = 44; ic_bulb_l_line.header.h = 44; ic_bulb_l_line.header.stride = 44; ic_bulb_l_line.data_size = 1936; ic_bulb_l_line.data = ic_bulb_l_line_map;
+  ic_shirt_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_shirt_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_shirt_s_fill.header.flags = 0; ic_shirt_s_fill.header.w = 24; ic_shirt_s_fill.header.h = 24; ic_shirt_s_fill.header.stride = 24; ic_shirt_s_fill.data_size = 576; ic_shirt_s_fill.data = ic_shirt_s_fill_map;
+  ic_shirt_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_shirt_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_shirt_s_line.header.flags = 0; ic_shirt_s_line.header.w = 24; ic_shirt_s_line.header.h = 24; ic_shirt_s_line.header.stride = 24; ic_shirt_s_line.data_size = 576; ic_shirt_s_line.data = ic_shirt_s_line_map;
+  ic_shirt_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_shirt_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_shirt_m_fill.header.flags = 0; ic_shirt_m_fill.header.w = 32; ic_shirt_m_fill.header.h = 32; ic_shirt_m_fill.header.stride = 32; ic_shirt_m_fill.data_size = 1024; ic_shirt_m_fill.data = ic_shirt_m_fill_map;
+  ic_shirt_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_shirt_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_shirt_m_line.header.flags = 0; ic_shirt_m_line.header.w = 32; ic_shirt_m_line.header.h = 32; ic_shirt_m_line.header.stride = 32; ic_shirt_m_line.data_size = 1024; ic_shirt_m_line.data = ic_shirt_m_line_map;
+  ic_shirt_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_shirt_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_shirt_l_fill.header.flags = 0; ic_shirt_l_fill.header.w = 44; ic_shirt_l_fill.header.h = 44; ic_shirt_l_fill.header.stride = 44; ic_shirt_l_fill.data_size = 1936; ic_shirt_l_fill.data = ic_shirt_l_fill_map;
+  ic_shirt_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_shirt_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_shirt_l_line.header.flags = 0; ic_shirt_l_line.header.w = 44; ic_shirt_l_line.header.h = 44; ic_shirt_l_line.header.stride = 44; ic_shirt_l_line.data_size = 1936; ic_shirt_l_line.data = ic_shirt_l_line_map;
+  ic_back_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_back_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_back_s_fill.header.flags = 0; ic_back_s_fill.header.w = 24; ic_back_s_fill.header.h = 24; ic_back_s_fill.header.stride = 24; ic_back_s_fill.data_size = 576; ic_back_s_fill.data = ic_back_s_fill_map;
+  ic_back_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_back_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_back_s_line.header.flags = 0; ic_back_s_line.header.w = 24; ic_back_s_line.header.h = 24; ic_back_s_line.header.stride = 24; ic_back_s_line.data_size = 576; ic_back_s_line.data = ic_back_s_line_map;
+  ic_back_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_back_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_back_m_fill.header.flags = 0; ic_back_m_fill.header.w = 32; ic_back_m_fill.header.h = 32; ic_back_m_fill.header.stride = 32; ic_back_m_fill.data_size = 1024; ic_back_m_fill.data = ic_back_m_fill_map;
+  ic_back_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_back_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_back_m_line.header.flags = 0; ic_back_m_line.header.w = 32; ic_back_m_line.header.h = 32; ic_back_m_line.header.stride = 32; ic_back_m_line.data_size = 1024; ic_back_m_line.data = ic_back_m_line_map;
+  ic_drop_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_drop_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_drop_s_fill.header.flags = 0; ic_drop_s_fill.header.w = 24; ic_drop_s_fill.header.h = 24; ic_drop_s_fill.header.stride = 24; ic_drop_s_fill.data_size = 576; ic_drop_s_fill.data = ic_drop_s_fill_map;
+  ic_drop_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_drop_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_drop_s_line.header.flags = 0; ic_drop_s_line.header.w = 24; ic_drop_s_line.header.h = 24; ic_drop_s_line.header.stride = 24; ic_drop_s_line.data_size = 576; ic_drop_s_line.data = ic_drop_s_line_map;
+  ic_drop_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_drop_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_drop_m_fill.header.flags = 0; ic_drop_m_fill.header.w = 32; ic_drop_m_fill.header.h = 32; ic_drop_m_fill.header.stride = 32; ic_drop_m_fill.data_size = 1024; ic_drop_m_fill.data = ic_drop_m_fill_map;
+  ic_drop_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_drop_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_drop_m_line.header.flags = 0; ic_drop_m_line.header.w = 32; ic_drop_m_line.header.h = 32; ic_drop_m_line.header.stride = 32; ic_drop_m_line.data_size = 1024; ic_drop_m_line.data = ic_drop_m_line_map;
+  ic_drop_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_drop_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_drop_l_fill.header.flags = 0; ic_drop_l_fill.header.w = 44; ic_drop_l_fill.header.h = 44; ic_drop_l_fill.header.stride = 44; ic_drop_l_fill.data_size = 1936; ic_drop_l_fill.data = ic_drop_l_fill_map;
+  ic_drop_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_drop_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_drop_l_line.header.flags = 0; ic_drop_l_line.header.w = 44; ic_drop_l_line.header.h = 44; ic_drop_l_line.header.stride = 44; ic_drop_l_line.data_size = 1936; ic_drop_l_line.data = ic_drop_l_line_map;
+  ic_zzz_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_zzz_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_zzz_s_fill.header.flags = 0; ic_zzz_s_fill.header.w = 24; ic_zzz_s_fill.header.h = 24; ic_zzz_s_fill.header.stride = 24; ic_zzz_s_fill.data_size = 576; ic_zzz_s_fill.data = ic_zzz_s_fill_map;
+  ic_zzz_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_zzz_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_zzz_s_line.header.flags = 0; ic_zzz_s_line.header.w = 24; ic_zzz_s_line.header.h = 24; ic_zzz_s_line.header.stride = 24; ic_zzz_s_line.data_size = 576; ic_zzz_s_line.data = ic_zzz_s_line_map;
+  ic_zzz_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_zzz_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_zzz_m_fill.header.flags = 0; ic_zzz_m_fill.header.w = 32; ic_zzz_m_fill.header.h = 32; ic_zzz_m_fill.header.stride = 32; ic_zzz_m_fill.data_size = 1024; ic_zzz_m_fill.data = ic_zzz_m_fill_map;
+  ic_zzz_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_zzz_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_zzz_m_line.header.flags = 0; ic_zzz_m_line.header.w = 32; ic_zzz_m_line.header.h = 32; ic_zzz_m_line.header.stride = 32; ic_zzz_m_line.data_size = 1024; ic_zzz_m_line.data = ic_zzz_m_line_map;
+  ic_sun_s_s_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_sun_s_s_fill.header.cf = LV_COLOR_FORMAT_A8; ic_sun_s_s_fill.header.flags = 0; ic_sun_s_s_fill.header.w = 24; ic_sun_s_s_fill.header.h = 24; ic_sun_s_s_fill.header.stride = 24; ic_sun_s_s_fill.data_size = 576; ic_sun_s_s_fill.data = ic_sun_s_s_fill_map;
+  ic_sun_s_s_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_sun_s_s_line.header.cf = LV_COLOR_FORMAT_A8; ic_sun_s_s_line.header.flags = 0; ic_sun_s_s_line.header.w = 24; ic_sun_s_s_line.header.h = 24; ic_sun_s_s_line.header.stride = 24; ic_sun_s_s_line.data_size = 576; ic_sun_s_s_line.data = ic_sun_s_s_line_map;
+  ic_sun_s_m_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_sun_s_m_fill.header.cf = LV_COLOR_FORMAT_A8; ic_sun_s_m_fill.header.flags = 0; ic_sun_s_m_fill.header.w = 32; ic_sun_s_m_fill.header.h = 32; ic_sun_s_m_fill.header.stride = 32; ic_sun_s_m_fill.data_size = 1024; ic_sun_s_m_fill.data = ic_sun_s_m_fill_map;
+  ic_sun_s_m_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_sun_s_m_line.header.cf = LV_COLOR_FORMAT_A8; ic_sun_s_m_line.header.flags = 0; ic_sun_s_m_line.header.w = 32; ic_sun_s_m_line.header.h = 32; ic_sun_s_m_line.header.stride = 32; ic_sun_s_m_line.data_size = 1024; ic_sun_s_m_line.data = ic_sun_s_m_line_map;
+  ic_sun_s_l_fill.header.magic = LV_IMAGE_HEADER_MAGIC; ic_sun_s_l_fill.header.cf = LV_COLOR_FORMAT_A8; ic_sun_s_l_fill.header.flags = 0; ic_sun_s_l_fill.header.w = 44; ic_sun_s_l_fill.header.h = 44; ic_sun_s_l_fill.header.stride = 44; ic_sun_s_l_fill.data_size = 1936; ic_sun_s_l_fill.data = ic_sun_s_l_fill_map;
+  ic_sun_s_l_line.header.magic = LV_IMAGE_HEADER_MAGIC; ic_sun_s_l_line.header.cf = LV_COLOR_FORMAT_A8; ic_sun_s_l_line.header.flags = 0; ic_sun_s_l_line.header.w = 44; ic_sun_s_l_line.header.h = 44; ic_sun_s_l_line.header.stride = 44; ic_sun_s_l_line.data_size = 1936; ic_sun_s_l_line.data = ic_sun_s_l_line_map;
+  sp_sun_disk.header.magic = LV_IMAGE_HEADER_MAGIC; sp_sun_disk.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_sun_disk.header.flags = 0; sp_sun_disk.header.w = 100; sp_sun_disk.header.h = 100; sp_sun_disk.header.stride = 400; sp_sun_disk.data_size = 40000; sp_sun_disk.data = sp_sun_disk_map;
+  sp_sun_rays.header.magic = LV_IMAGE_HEADER_MAGIC; sp_sun_rays.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_sun_rays.header.flags = 0; sp_sun_rays.header.w = 100; sp_sun_rays.header.h = 100; sp_sun_rays.header.stride = 400; sp_sun_rays.data_size = 40000; sp_sun_rays.data = sp_sun_rays_map;
+  sp_moon.header.magic = LV_IMAGE_HEADER_MAGIC; sp_moon.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_moon.header.flags = 0; sp_moon.header.w = 100; sp_moon.header.h = 100; sp_moon.header.stride = 400; sp_moon.data_size = 40000; sp_moon.data = sp_moon_map;
+  sp_cloud.header.magic = LV_IMAGE_HEADER_MAGIC; sp_cloud.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_cloud.header.flags = 0; sp_cloud.header.w = 120; sp_cloud.header.h = 76; sp_cloud.header.stride = 480; sp_cloud.data_size = 36480; sp_cloud.data = sp_cloud_map;
+  sp_cloud_d.header.magic = LV_IMAGE_HEADER_MAGIC; sp_cloud_d.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_cloud_d.header.flags = 0; sp_cloud_d.header.w = 120; sp_cloud_d.header.h = 76; sp_cloud_d.header.stride = 480; sp_cloud_d.data_size = 36480; sp_cloud_d.data = sp_cloud_d_map;
+  sp_drop.header.magic = LV_IMAGE_HEADER_MAGIC; sp_drop.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_drop.header.flags = 0; sp_drop.header.w = 16; sp_drop.header.h = 26; sp_drop.header.stride = 64; sp_drop.data_size = 1664; sp_drop.data = sp_drop_map;
+  sp_flake.header.magic = LV_IMAGE_HEADER_MAGIC; sp_flake.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_flake.header.flags = 0; sp_flake.header.w = 24; sp_flake.header.h = 24; sp_flake.header.stride = 96; sp_flake.data_size = 2304; sp_flake.data = sp_flake_map;
+  sp_bolt.header.magic = LV_IMAGE_HEADER_MAGIC; sp_bolt.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_bolt.header.flags = 0; sp_bolt.header.w = 30; sp_bolt.header.h = 48; sp_bolt.header.stride = 120; sp_bolt.data_size = 5760; sp_bolt.data = sp_bolt_map;
+  sp_star4.header.magic = LV_IMAGE_HEADER_MAGIC; sp_star4.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_star4.header.flags = 0; sp_star4.header.w = 20; sp_star4.header.h = 20; sp_star4.header.stride = 80; sp_star4.data_size = 1600; sp_star4.data = sp_star4_map;
+  sp_glow.header.magic = LV_IMAGE_HEADER_MAGIC; sp_glow.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_glow.header.flags = 0; sp_glow.header.w = 64; sp_glow.header.h = 64; sp_glow.header.stride = 256; sp_glow.data_size = 16384; sp_glow.data = sp_glow_map;
+  sp_leaf.header.magic = LV_IMAGE_HEADER_MAGIC; sp_leaf.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_leaf.header.flags = 0; sp_leaf.header.w = 40; sp_leaf.header.h = 40; sp_leaf.header.stride = 160; sp_leaf.data_size = 6400; sp_leaf.data = sp_leaf_map;
+  sp_bear.header.magic = LV_IMAGE_HEADER_MAGIC; sp_bear.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_bear.header.flags = 0; sp_bear.header.w = 132; sp_bear.header.h = 132; sp_bear.header.stride = 528; sp_bear.data_size = 69696; sp_bear.data = sp_bear_map;
+  sp_rattle.header.magic = LV_IMAGE_HEADER_MAGIC; sp_rattle.header.cf = LV_COLOR_FORMAT_ARGB8888; sp_rattle.header.flags = 0; sp_rattle.header.w = 112; sp_rattle.header.h = 52; sp_rattle.header.stride = 448; sp_rattle.data_size = 23296; sp_rattle.data = sp_rattle_map;
+  mk_pine.header.magic = LV_IMAGE_HEADER_MAGIC; mk_pine.header.cf = LV_COLOR_FORMAT_A8; mk_pine.header.flags = 0; mk_pine.header.w = 40; mk_pine.header.h = 64; mk_pine.header.stride = 40; mk_pine.data_size = 2560; mk_pine.data = mk_pine_map;
+  mk_hill.header.magic = LV_IMAGE_HEADER_MAGIC; mk_hill.header.cf = LV_COLOR_FORMAT_A8; mk_hill.header.flags = 0; mk_hill.header.w = 240; mk_hill.header.h = 70; mk_hill.header.stride = 240; mk_hill.data_size = 16800; mk_hill.data = mk_hill_map;
+}
+

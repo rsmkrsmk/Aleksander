@@ -61,7 +61,9 @@ def build(ttf, wght, size, name, out, only=None, bpp=4):
     L.append("static const uint16_t %s_ul[] = {%s};" % (name, ",".join(str(c - base) for c in codes)))
     L.append("static const lv_font_fmt_txt_cmap_t %s_cm[] = {{.range_start=%d,.range_length=%d,.glyph_id_start=1,.unicode_list=%s_ul,.glyph_id_ofs_list=NULL,.list_length=%d,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};" % (name, base, codes[-1] - base + 1, name, len(codes)))
     L.append("static const lv_font_fmt_txt_dsc_t %s_dsc = {.glyph_bitmap=%s_bmp,.glyph_dsc=%s_gd,.cmaps=%s_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=%d,.kern_classes=0,.bitmap_format=0};" % (name, name, name, name, bpp))
-    L.append("const lv_font_t %s = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=%d,.base_line=%d,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&%s_dsc};" % (name, line_h, base_line, name))
+    # Bez designated initializers (kolejnosc pol lv_font_t zalezy od wersji LVGL) — pola ustawiane w init.
+    L.append("static lv_font_t %s;" % name)
+    L.append("static void %s_init() { %s.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; %s.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; %s.line_height = %d; %s.base_line = %d; %s.subpx = LV_FONT_SUBPX_NONE; %s.underline_position = -1; %s.underline_thickness = 1; %s.dsc = &%s_dsc; }" % (name, name, name, name, line_h, name, base_line, name, name, name, name, name))
     return "\n".join(L) + "\n", len(bitmap)
 
 FONTS = [  # (nazwa, plik, waga, px, tylko_znaki)
@@ -84,6 +86,7 @@ if __name__ == '__main__':
             txt, n = build(root + '/' + f, w, px, name, None, only)
             parts.append(txt); tot += n
             print(name, px, 'px', n, 'B')
+        parts.append('static void ui_fonts_init() {\n  static bool done = false;\n  if (done) return;\n  done = true;\n' + ''.join('  %s_init();\n' % f[0] for f in FONTS) + '}\n')
         open(outh, 'w').write("\n".join(parts))
         print('razem', tot // 1024, 'KB bitmap')
     else:

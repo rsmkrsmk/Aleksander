@@ -441,7 +441,8 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f13_gd[] = {
 static const uint16_t ui_f13_ul[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,144,151,179,183,211,215,228,229,230,231,248,249,289,290,291,292,314,315,345,346,347,348,8179,8180,8185,8188,8189,8190,8194,8198,8332,8560,8561,8562,8563};
 static const lv_font_fmt_txt_cmap_t ui_f13_cm[] = {{.range_start=32,.range_length=8564,.glyph_id_start=1,.unicode_list=ui_f13_ul,.glyph_id_ofs_list=NULL,.list_length=130,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f13_dsc = {.glyph_bitmap=ui_f13_bmp,.glyph_dsc=ui_f13_gd,.cmaps=ui_f13_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f13 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=19,.base_line=5,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f13_dsc};
+static lv_font_t ui_f13;
+static void ui_f13_init() { ui_f13.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f13.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f13.line_height = 19; ui_f13.base_line = 5; ui_f13.subpx = LV_FONT_SUBPX_NONE; ui_f13.underline_position = -1; ui_f13.underline_thickness = 1; ui_f13.dsc = &ui_f13_dsc; }
 
 /* Czcionka ui_f15: Nunito[wght].ttf wght=700 15px 4bpp (tools/lvfont.py) */
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t ui_f15_bmp[] = {
@@ -959,7 +960,8 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f15_gd[] = {
 static const uint16_t ui_f15_ul[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,144,151,179,183,211,215,228,229,230,231,248,249,289,290,291,292,314,315,345,346,347,348,8179,8180,8185,8188,8189,8190,8194,8198,8332,8560,8561,8562,8563};
 static const lv_font_fmt_txt_cmap_t ui_f15_cm[] = {{.range_start=32,.range_length=8564,.glyph_id_start=1,.unicode_list=ui_f15_ul,.glyph_id_ofs_list=NULL,.list_length=130,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f15_dsc = {.glyph_bitmap=ui_f15_bmp,.glyph_dsc=ui_f15_gd,.cmaps=ui_f15_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f15 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=22,.base_line=6,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f15_dsc};
+static lv_font_t ui_f15;
+static void ui_f15_init() { ui_f15.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f15.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f15.line_height = 22; ui_f15.base_line = 6; ui_f15.subpx = LV_FONT_SUBPX_NONE; ui_f15.underline_position = -1; ui_f15.underline_thickness = 1; ui_f15.dsc = &ui_f15_dsc; }
 
 /* Czcionka ui_f18: Nunito[wght].ttf wght=800 18px 4bpp (tools/lvfont.py) */
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t ui_f18_bmp[] = {
@@ -1629,7 +1631,8 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f18_gd[] = {
 static const uint16_t ui_f18_ul[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,144,151,179,183,211,215,228,229,230,231,248,249,289,290,291,292,314,315,345,346,347,348,8179,8180,8185,8188,8189,8190,8194,8198,8332,8560,8561,8562,8563};
 static const lv_font_fmt_txt_cmap_t ui_f18_cm[] = {{.range_start=32,.range_length=8564,.glyph_id_start=1,.unicode_list=ui_f18_ul,.glyph_id_ofs_list=NULL,.list_length=130,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f18_dsc = {.glyph_bitmap=ui_f18_bmp,.glyph_dsc=ui_f18_gd,.cmaps=ui_f18_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f18 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=26,.base_line=7,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f18_dsc};
+static lv_font_t ui_f18;
+static void ui_f18_init() { ui_f18.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f18.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f18.line_height = 26; ui_f18.base_line = 7; ui_f18.subpx = LV_FONT_SUBPX_NONE; ui_f18.underline_position = -1; ui_f18.underline_thickness = 1; ui_f18.dsc = &ui_f18_dsc; }
 
 /* Czcionka ui_f24: Fredoka[wdth,wght].ttf wght=600 24px 4bpp (tools/lvfont.py) */
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t ui_f24_bmp[] = {
@@ -2621,7 +2624,8 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f24_gd[] = {
 static const uint16_t ui_f24_ul[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,144,151,179,183,211,215,228,229,230,231,248,249,289,290,291,292,314,315,345,346,347,348,8179,8180,8185,8188,8189,8190,8194,8198,8332,8560,8561,8562,8563};
 static const lv_font_fmt_txt_cmap_t ui_f24_cm[] = {{.range_start=32,.range_length=8564,.glyph_id_start=1,.unicode_list=ui_f24_ul,.glyph_id_ofs_list=NULL,.list_length=130,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f24_dsc = {.glyph_bitmap=ui_f24_bmp,.glyph_dsc=ui_f24_gd,.cmaps=ui_f24_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f24 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=30,.base_line=6,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f24_dsc};
+static lv_font_t ui_f24;
+static void ui_f24_init() { ui_f24.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f24.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f24.line_height = 30; ui_f24.base_line = 6; ui_f24.subpx = LV_FONT_SUBPX_NONE; ui_f24.underline_position = -1; ui_f24.underline_thickness = 1; ui_f24.dsc = &ui_f24_dsc; }
 
 /* Czcionka ui_f32: Fredoka[wdth,wght].ttf wght=600 32px 4bpp (tools/lvfont.py) */
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t ui_f32_bmp[] = {
@@ -4225,7 +4229,8 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f32_gd[] = {
 static const uint16_t ui_f32_ul[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,144,151,179,183,211,215,228,229,230,231,248,249,289,290,291,292,314,315,345,346,347,348,8179,8180,8185,8188,8189,8190,8194,8198,8332,8560,8561,8562,8563};
 static const lv_font_fmt_txt_cmap_t ui_f32_cm[] = {{.range_start=32,.range_length=8564,.glyph_id_start=1,.unicode_list=ui_f32_ul,.glyph_id_ofs_list=NULL,.list_length=130,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f32_dsc = {.glyph_bitmap=ui_f32_bmp,.glyph_dsc=ui_f32_gd,.cmaps=ui_f32_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f32 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=40,.base_line=8,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f32_dsc};
+static lv_font_t ui_f32;
+static void ui_f32_init() { ui_f32.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f32.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f32.line_height = 40; ui_f32.base_line = 8; ui_f32.subpx = LV_FONT_SUBPX_NONE; ui_f32.underline_position = -1; ui_f32.underline_thickness = 1; ui_f32.dsc = &ui_f32_dsc; }
 
 /* Czcionka ui_f48: Fredoka[wdth,wght].ttf wght=600 48px 4bpp (tools/lvfont.py) */
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t ui_f48_bmp[] = {
@@ -7648,7 +7653,8 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f48_gd[] = {
 static const uint16_t ui_f48_ul[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,144,151,179,183,211,215,228,229,230,231,248,249,289,290,291,292,314,315,345,346,347,348,8179,8180,8185,8188,8189,8190,8194,8198,8332,8560,8561,8562,8563};
 static const lv_font_fmt_txt_cmap_t ui_f48_cm[] = {{.range_start=32,.range_length=8564,.glyph_id_start=1,.unicode_list=ui_f48_ul,.glyph_id_ofs_list=NULL,.list_length=130,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f48_dsc = {.glyph_bitmap=ui_f48_bmp,.glyph_dsc=ui_f48_gd,.cmaps=ui_f48_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f48 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=59,.base_line=12,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f48_dsc};
+static lv_font_t ui_f48;
+static void ui_f48_init() { ui_f48.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f48.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f48.line_height = 59; ui_f48.base_line = 12; ui_f48.subpx = LV_FONT_SUBPX_NONE; ui_f48.underline_position = -1; ui_f48.underline_thickness = 1; ui_f48.dsc = &ui_f48_dsc; }
 
 /* Czcionka ui_f80: Fredoka[wdth,wght].ttf wght=600 80px 4bpp (tools/lvfont.py) */
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t ui_f80_bmp[] = {
@@ -8471,4 +8477,18 @@ static const lv_font_fmt_txt_glyph_dsc_t ui_f80_gd[] = {
 static const uint16_t ui_f80_ul[] = {0,13,16,17,18,19,20,21,22,23,24,25,26};
 static const lv_font_fmt_txt_cmap_t ui_f80_cm[] = {{.range_start=32,.range_length=27,.glyph_id_start=1,.unicode_list=ui_f80_ul,.glyph_id_ofs_list=NULL,.list_length=13,.type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY}};
 static const lv_font_fmt_txt_dsc_t ui_f80_dsc = {.glyph_bitmap=ui_f80_bmp,.glyph_dsc=ui_f80_gd,.cmaps=ui_f80_cm,.kern_dsc=NULL,.kern_scale=0,.cmap_num=1,.bpp=4,.kern_classes=0,.bitmap_format=0};
-const lv_font_t ui_f80 = {.get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,.get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,.line_height=97,.base_line=19,.subpx=LV_FONT_SUBPX_NONE,.underline_position=-1,.underline_thickness=1,.dsc=&ui_f80_dsc};
+static lv_font_t ui_f80;
+static void ui_f80_init() { ui_f80.get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt; ui_f80.get_glyph_bitmap = lv_font_get_bitmap_fmt_txt; ui_f80.line_height = 97; ui_f80.base_line = 19; ui_f80.subpx = LV_FONT_SUBPX_NONE; ui_f80.underline_position = -1; ui_f80.underline_thickness = 1; ui_f80.dsc = &ui_f80_dsc; }
+
+static void ui_fonts_init() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  ui_f13_init();
+  ui_f15_init();
+  ui_f18_init();
+  ui_f24_init();
+  ui_f32_init();
+  ui_f48_init();
+  ui_f80_init();
+}

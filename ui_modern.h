@@ -23,6 +23,7 @@ struct UiPal {
 static UiPal P;
 
 static void uiApplyTheme(bool night) {
+  ui_fonts_init(); ui_assets_init();
   P.night = night;
   if (!night) {
     P.bg = lv_color_hex(0xF5EDDC);  P.card = lv_color_hex(0xFFFAF0);  P.card2 = lv_color_hex(0xF3E8D0);
@@ -236,6 +237,7 @@ static void ui_boot_blink_cb(lv_timer_t *t) {
 static lv_timer_t *uiBootBlinkTimer = nullptr;
 
 static void uiBootCreate() {
+  ui_fonts_init(); ui_assets_init();
   uiBootScr = lv_obj_create(nullptr);
   lv_obj_t *s = uiBootScr;
   lv_obj_remove_flag(s, LV_OBJ_FLAG_SCROLLABLE);

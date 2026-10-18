@@ -97,9 +97,13 @@ def c_array(name, data):
     lines.append("};")
     return "\n".join(lines)
 
+INIT_LINES = []
+
 def dsc(name, w, h, cf, bpp):
-    return ("const lv_image_dsc_t %s = {.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=%s,.flags=0,.w=%d,.h=%d,.stride=%d,.reserved_2=0},"
-            ".data_size=%d,.data=%s_map};" % (name, cf, w, h, w * bpp, w * h * bpp, name))
+    # Bez designated initializers (kolejnosc pol zalezy od wersji LVGL) — pola ustawiane w ui_assets_init().
+    INIT_LINES.append("  %s.header.magic = LV_IMAGE_HEADER_MAGIC; %s.header.cf = %s; %s.header.flags = 0; %s.header.w = %d; %s.header.h = %d; %s.header.stride = %d; %s.data_size = %d; %s.data = %s_map;"
+                      % (name, name, cf, name, name, w, name, h, name, w * bpp, name, w * h * bpp, name, name))
+    return "static lv_image_dsc_t %s;" % name
 
 def main(out_h, preview=None):
     icon_sizes = {'s': 24, 'm': 32, 'l': 44}
@@ -127,6 +131,7 @@ def main(out_h, preview=None):
             bgra = arr[:, :, [2, 1, 0, 3]].copy()
             parts.append(c_array(key, bgra)); parts.append(dsc(key, w_, h_, 'LV_COLOR_FORMAT_ARGB8888', 4)); total += bgra.size
         sheet_items.append((key, arr))
+    parts.append("static void ui_assets_init() {\n  static bool done = false;\n  if (done) return;\n  done = true;\n" + "\n".join(INIT_LINES) + "\n}\n")
     open(out_h, 'w').write("\n".join(parts) + "\n")
     print('assets:', len(res), 'obrazow,', total // 1024, 'KB')
     if preview:
