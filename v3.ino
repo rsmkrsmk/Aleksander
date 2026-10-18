@@ -4492,7 +4492,7 @@ bool uploadCsvToHost() {
   }
   while (client.available()) client.read();
   client.stop();
-  if (fileBuf) free(fileBuf); else file.close();
+  file.close();
   feedWatchdog();
   requestRgbResync(); // po zakonczeniu transmisji — korekta ewentualnego dryfu
 
