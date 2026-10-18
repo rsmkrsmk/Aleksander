@@ -732,7 +732,7 @@ bool rgbColorTransferDoneCallback(esp_lcd_panel_handle_t panel,
 // sufit plynnosci animacji. 12 MHz daje ~42 FPS (klatka ~24 ms). Gdyby obraz zaczal
 // "plywac"/dryfowac, wroc do 6000000 (jedyna zmiana potrzebna w tym miejscu).
 // Ramka = (480+8+50+14) x (480+8+20+10) = 552 x 518 px.
-constexpr uint32_t RGB_PCLK_NORMAL_HZ = 12000000;
+constexpr uint32_t RGB_PCLK_NORMAL_HZ = 6000000;
 volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje render LVGL z odswiezaniem panelu
 
 // Callback VSYNC: przy KAZDEJ klatce panelu zglaszamy restart DMA panelu. Jest to
