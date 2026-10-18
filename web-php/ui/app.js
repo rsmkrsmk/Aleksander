@@ -93,7 +93,7 @@ function renderStatView(view){
   STAT_VIEWS.forEach(v=>{const el=$('stat-'+v);if(el)el.classList.toggle('hidden',v!==view)});
   document.querySelectorAll('#statTabs .tab').forEach(t=>t.classList.toggle('active',t.dataset.stat===view));
   if(view==='summary'){state.summaryExtra=0;renderSummary()}
-  else if(view==='charts'){if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderGaps()}
+  else if(view==='charts'){if(state.data&&state.data.calendar)renderChart(state.data.calendar);renderGaps();renderNightSleep()}
   else if(view==='rhythm'){renderAnalysis()}
   else if(view==='history'){renderHistory(state.histPeriod)}
 }
@@ -433,11 +433,9 @@ async function openDay(date,label){
     else if(e.type==='ODCIAGANIE')pump+=e.ml||0;
     else if(e.type==='WITAMINA_D')vit=true;
     else if(e.type==='KAPIEL')baths++;
-    else if(e.type==='SEN_START')sStart=toMin(e.time);
-    else if(e.type==='SEN_STOP'&&sStart!=null){const m2=toMin(e.time);if(m2!=null)sleeps.push([sStart,m2]);sStart=null}
   });
+  {const ses=sleepSessions(await loadCsvRows(),Date.now());sleepSpansForDate(ses,date).forEach(x=>sleeps.push([x.a,x.b]))}
   // Sen w toku (SEN_START bez STOP): dla dnia dzisiejszego domykamy "do teraz" — spójnie z paskiem na home.
-  if(sStart!=null&&date===isoDaysAgo(0)){const nowM=new Date().getHours()*60+new Date().getMinutes();if(nowM>sStart)sleeps.push([sStart,nowM])}
   const p=(date||'').split('-');const dObj=new Date(+p[0],(+p[1]||1)-1,+p[2]||1);
   const dowName=Number.isNaN(dObj.getTime())?'':DOW[dObj.getDay()];
 
@@ -613,6 +611,117 @@ async function renderAnalysis(){
   });
 }
 
+
+/* ============================================================================
+   SEN — jedna, spójna logika (sesje chronologiczne) dla statystyk, historii,
+   szczegółów dnia i pocztówki. Wpisy sortujemy po czasie (CSV może mieć je poza
+   kolejnością), STOP bez START ignorujemy, powtórzony START zastępuje poprzedni,
+   a sesje dłuższe niż 14 h (zapomniany STOP) odrzucamy — dzięki temu doba nigdy
+   nie ma więcej niż 24 h snu. Sesja nocna przechodzi przez północ i jest dzielona
+   między dwie doby (część przed północą + część po).
+   ============================================================================ */
+const SLEEP_MAX_MIN=14*60;
+const csvTs=(d,t)=>{const a=(d||'').split('-'),b=(t||'').split(':');if(a.length<3||b.length<2)return null;const v=new Date(+a[0],+a[1]-1,+a[2],+b[0],+b[1]).getTime();return Number.isNaN(v)?null:v};
+const isoLocal=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+function sleepSessions(rows,nowMs){
+  const ev=[];
+  (rows||[]).forEach((r,i)=>{if(r.type!=='SEN_START'&&r.type!=='SEN_STOP')return;const t=csvTs(r.date,r.time);if(t!=null)ev.push({t,type:r.type,i})});
+  ev.sort((a,b)=>a.t-b.t||a.i-b.i);
+  const out=[];let open=null;
+  ev.forEach(e=>{
+    if(e.type==='SEN_START'){open=e.t;return}
+    if(open==null)return;
+    const m=(e.t-open)/60000;
+    if(m>=1&&m<=SLEEP_MAX_MIN)out.push({s:open,e:e.t});
+    open=null;
+  });
+  if(open!=null&&nowMs!=null){const m=(nowMs-open)/60000;if(m>=1&&m<=SLEEP_MAX_MIN)out.push({s:open,e:nowMs,open:true})}
+  return out;
+}
+/* Minuty snu per doba kalendarzowa: {iso:{day,night,naps}} (dzień = 7–21, noc = 21–7). */
+function sleepPerDay(sessions){
+  const ms={};
+  sessions.forEach(x=>{
+    let cur=x.s;
+    while(cur<x.e){
+      const d=new Date(cur);
+      const next=new Date(d.getFullYear(),d.getMonth(),d.getDate(),d.getHours()+1,0,0,0).getTime();
+      const end=Math.min(next,x.e),k=isoLocal(d),h=d.getHours();
+      const o=ms[k]||(ms[k]={day:0,night:0,naps:0});
+      if(h>=21||h<7)o.night+=end-cur;else o.day+=end-cur;
+      cur=end;
+    }
+    const sh=new Date(x.s).getHours();
+    if(!(sh>=21||sh<7)){const k=isoLocal(new Date(x.s));const o=ms[k]||(ms[k]={day:0,night:0,naps:0});o.naps++}
+  });
+  const out={};
+  Object.keys(ms).forEach(k=>{out[k]={day:Math.round(ms[k].day/60000),night:Math.round(ms[k].night/60000),naps:ms[k].naps}});
+  return out;
+}
+/* Fragmenty sesji przycięte do jednej doby: [{a,b,open}] w minutach od północy. */
+function sleepSpansForDate(sessions,date){
+  const p=(date||'').split('-');if(p.length<3)return [];
+  const d0=new Date(+p[0],+p[1]-1,+p[2]).getTime(),d1=new Date(+p[0],+p[1]-1,+p[2]+1).getTime();
+  return sessions.filter(x=>x.e>d0&&x.s<d1).map(x=>({a:Math.round((Math.max(x.s,d0)-d0)/60000),b:Math.round((Math.min(x.e,d1)-d0)/60000),open:!!x.open})).filter(x=>x.b>x.a);
+}
+/* SEN NOCNY wg karmień: dla każdej nocy najdłuższy odstęp między karmieniami, który zaczyna się
+   ostatnim karmieniem wieczornym (17:00–19:59) i kończy pierwszym karmieniem w nocy/nad ranem
+   (po północy, do 09:00). Piersi + butelka w odstępie ≤ 25 min liczymy jako jedno karmienie. */
+const NIGHT_FEED_START_H=[17,20],NIGHT_FEED_END_MAX_H=9,NIGHT_MERGE_MIN=25;
+function nightSleepSeries(rows,lastNights){
+  const ts=(rows||[]).filter(r=>r.type==='KARMIENIE'||(r.type||'').startsWith('MLEKO')).map(r=>csvTs(r.date,r.time)).filter(t=>t!=null).sort((a,b)=>a-b);
+  const feeds=[];
+  ts.forEach(t=>{const L=feeds[feeds.length-1];if(L&&t-L.last<=NIGHT_MERGE_MIN*60000)L.last=t;else feeds.push({first:t,last:t})});
+  const byNight={};
+  for(let i=0;i<feeds.length-1;i++){
+    const a=feeds[i],b=feeds[i+1],da=new Date(a.last),h=da.getHours();
+    if(h<NIGHT_FEED_START_H[0]||h>=NIGHT_FEED_START_H[1])continue;
+    const mid=new Date(da.getFullYear(),da.getMonth(),da.getDate()+1,0,0,0).getTime();
+    const lim=new Date(da.getFullYear(),da.getMonth(),da.getDate()+1,NIGHT_FEED_END_MAX_H,0,0).getTime();
+    if(b.first<mid||b.first>lim)continue;
+    const min=Math.round((b.first-a.last)/60000),k=isoLocal(da);
+    if(!byNight[k]||min>byNight[k].min)byNight[k]={date:k,min,from:new Date(a.last),to:new Date(b.first)};
+  }
+  const res=[];const now=new Date();
+  for(let n=lastNights;n>=1;n--){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-n);const k=isoLocal(d);res.push(byNight[k]||{date:k,min:null})}
+  // noc zaczęta dziś wieczorem — tylko jeśli już się zakończyła
+  const kt=isoLocal(now);if(byNight[kt])res.push(byNight[kt]);
+  return res;
+}
+const hm=d=>`${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmtHM=m=>{const h=Math.floor(m/60),mm=m%60;return h?`${h} h ${pad(mm)} min`:`${mm} min`};
+async function renderNightSleep(){
+  const host=$('nightSleepChart');if(!host)return;host.replaceChildren();
+  const note=$('nightSleepNote');if(note)note.replaceChildren();
+  const rows=await loadCsvRows();
+  const ser=nightSleepSeries(rows,14);
+  const vals=ser.filter(x=>x.min!=null);
+  if(!vals.length){host.append(bcalElem('p','empty','Za mało danych: potrzebne ostatnie karmienie między 17 a 20 i pierwsze karmienie po północy.'));return}
+  const maxH=Math.max(8,Math.ceil(Math.max(...vals.map(x=>x.min))/60)+1),W=440,H=250,padL=30,padR=8,padT=16,padB=34,pw=W-padL-padR,ph=H-padT-padB;
+  const n=ser.length,slot=pw/n,bw=Math.min(24,slot*.64),y=h=>padT+ph-h/maxH*ph;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg wg-svg',role:'img','aria-label':'Długość snu nocnego liczona między karmieniami'});
+  for(let g=0;g<=maxH;g+=2){const yy=y(g);svg.append(svgEl('line',{class:g===0?'wg-zero':'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:padL-5,y:yy+3,'text-anchor':'end'});t.textContent=g+'h';svg.append(t)}
+  const avg=vals.reduce((a,x)=>a+x.min,0)/vals.length;
+  ser.forEach((x,i)=>{
+    const cx=padL+slot*(i+.5),d=x.date.split('-');
+    if(x.min==null){const t=svgEl('text',{class:'wg-none',x:cx,y:y(0)-5,'text-anchor':'middle'});t.textContent='–';svg.append(t)}
+    else{
+      const hh=x.min/60,top=y(hh),bar=svgEl('rect',{class:'wg-bar ns-bar',x:cx-bw/2,y:top,width:bw,height:y(0)-top,rx:Math.min(7,bw/2.4)});
+      const ti=svgEl('title',{});ti.textContent=`noc z ${d[2]}.${d[1]}: ${fmtHM(x.min)} (${hm(x.from)} → ${hm(x.to)})`;bar.append(ti);svg.append(bar);
+      const lt=svgEl('text',{class:'wg-val',x:cx,y:top-5,'text-anchor':'middle'});lt.textContent=(hh).toFixed(1).replace('.',',');svg.append(lt);
+    }
+    const xl=svgEl('text',{class:'axis-txt',x:cx,y:H-16,'text-anchor':'middle'});xl.textContent=`${d[2]}.${d[1]}`;svg.append(xl);
+  });
+  svg.append(svgEl('line',{x1:padL,x2:W-padR,y1:y(avg/60),y2:y(avg/60),stroke:'var(--sleep)','stroke-width':'1.6','stroke-dasharray':'5 4'}));
+  const cap=svgEl('text',{class:'axis-txt',x:padL,y:H-3});cap.textContent='noc rozpoczęta w dniu';svg.append(cap);
+  host.append(svg);
+  const best=vals.reduce((a,x)=>x.min>a.min?x:a,vals[0]),last=vals[vals.length-1];
+  const tile=(k,v,sub)=>{const d=bcalElem('div','wg-stat');d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub));return d};
+  const grid=bcalElem('div','wg-stats');
+  grid.append(tile('Średnia noc',fmtHM(Math.round(avg)),`z ${vals.length} nocy`),tile('Najdłuższa',fmtHM(best.min),`${hm(best.from)} → ${hm(best.to)}`),tile('Ostatnia',fmtHM(last.min),`${hm(last.from)} → ${hm(last.to)}`));
+  if(note)note.append(grid,bcalElem('p','chart-note wg-foot','Sen nocny liczony jako najdłuższy odstęp między ostatnim karmieniem wieczornym (17:00–19:59) a pierwszym karmieniem w nocy lub nad ranem. Pierś i butelka w odstępie do 25 min to jedno karmienie.'));
+}
+
 /* ============================================================================
    HISTORIA — agregacja z /export.csv (tydzień / miesiąc / rok)
    ============================================================================ */
@@ -650,11 +759,11 @@ function aggregateByDay(rows){
       case 'ODCIAGANIE':d.pump+=r.ml;break;
       case 'WITAMINA_D':d.vitD++;break;
       case 'WAGA':d.weightG=r.ml;break;
-      case 'SEN_START':d._sleepStart=toMin(r.time);break;
-      case 'SEN_STOP':if(d._sleepStart!=null){const e=toMin(r.time);if(e!=null&&e>d._sleepStart)d.sleepMin+=e-d._sleepStart;d._sleepStart=null}break;
       case 'KAPIEL':d.baths++;break;
     }
   });
+  const spd=sleepPerDay(sleepSessions(rows,Date.now()));
+  Object.keys(spd).forEach(k=>{get(k).sleepMin=spd[k].day+spd[k].night});
   return days;
 }
 const MONTHS_PL=['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];
@@ -1124,12 +1233,20 @@ function memAgg(es){
     else if(t==='WITAMINA_D')s.vitaminD=true;
     else if(t==='WAGA')s.weightG=e.ml||0;
     else if(t==='KAPIEL')s.bathCount++;
-    else if(t==='SEN_START')open=e.time;
-    else if(t==='SEN_STOP'&&open){let d=toMin(e.time)-toMin(open);if(d<0)d+=1440;spans.push({from:open,to:e.time,min:d});open=null}
   });
-  spans.forEach(sp=>{const h=+sp.from.slice(0,2);if(h>=21||h<7)s.sleepNightMin+=sp.min;else s.sleepDayMin+=sp.min});
-  s.napCount=spans.length;
   return {summary:s,sleepSpans:spans,entries:(es||[]).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''))};
+}
+/* Sen dla pocztówki/wspomnień: z sesji obejmujących sąsiednie doby (noc przez północ), bez wartości > 24 h. */
+async function memApplySleep(r,date){
+  try{
+    const rows=await loadCsvRows();
+    const ses=sleepSessions(rows,Date.now());
+    const per=sleepPerDay(ses)[date]||{day:0,night:0,naps:0};
+    const fm=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;
+    r.summary.sleepDayMin=per.day;r.summary.sleepNightMin=per.night;r.summary.napCount=per.naps;
+    r.sleepSpans=sleepSpansForDate(ses,date).map(x=>({from:fm(x.a),to:x.b>=1440?'24:00':fm(x.b),min:x.b-x.a}));
+  }catch(e){}
+  return r;
 }
 async function openMemory(){
   show('memoryModal');
@@ -1157,6 +1274,7 @@ async function renderMemoryReport(date){
   const rep=$('memoryReport');if(!rep)return;rep.replaceChildren();
   const wait=document.createElement('p');wait.className='hint';wait.textContent='Ładowanie...';rep.append(wait);
   let r;try{r=memAgg((await request(`/api/entries?date=${encodeURIComponent(date)}`).catch(()=>({entries:[]}))).entries||[]);const ti=(state.data&&state.data.nowIso||'').slice(0,10);r.dayOfLife=ti?((state.data&&state.data.developmentDay||0)-Math.round((new Date(ti)-new Date(date))/86400000)):null}catch(e){rep.replaceChildren();const p=document.createElement('p');p.className='hint';p.textContent=e.message;rep.append(p);return}
+  await memApplySleep(r,date);
   rep.replaceChildren();
   const s=r.summary||{};
   state.memDate=date;state.memReport=r;memShowPreview(date,r);
@@ -1314,6 +1432,7 @@ async function downloadPostcard(){
   const date=state.memDate;if(!date)return;
   let r=state.memReport;
   if(!r){try{const ed=await request(`/api/entries?date=${encodeURIComponent(date)}`);r=memAgg((ed&&ed.entries)||[]);const ti=(state.data&&state.data.nowIso||'').slice(0,10);r.dayOfLife=ti?((state.data&&state.data.developmentDay||0)-Math.round((new Date(ti)-new Date(date))/86400000)):null}catch(e){toast(e.message,'err');return}}
+  await memApplySleep(r,date);
   try{
     const url=memPostcard(date,r);
     const a=document.createElement('a');a.href=url;a.download='wspomnienie-'+date+'.png';document.body.append(a);a.click();a.remove();

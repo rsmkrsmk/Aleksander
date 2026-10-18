@@ -349,6 +349,7 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .weight-svg .wg-band{fill:var(--acc);opacity:.13}
 .weight-svg .wg-bar{fill:var(--acc)} .weight-svg .wg-low{fill:var(--feed)} .weight-svg .wg-high{fill:var(--milk)} .weight-svg .wg-neg{fill:var(--danger)}
 .weight-svg .wg-part{opacity:.55}
+.weight-svg .ns-bar{fill:var(--sleep)}
 .weight-svg .wg-val{fill:var(--ink);font-size:10px;font-weight:800;font-family:var(--fu)}
 .weight-svg .wg-none{fill:var(--faint);font-size:12px}
 .wg-legend{display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:center;font-size:.68rem;color:var(--muted);margin:8px 0 14px}
@@ -685,7 +686,8 @@ svg .f{fill:currentColor;fill-opacity:.2}
 
 /* baner Rozwój dziś */
 .tip{margin-top:12px}
-.tip::after{content:"";position:absolute;top:-1px;left:26px;width:78px;height:20px;background:repeating-linear-gradient(-45deg,rgba(233,138,74,.55) 0 7px,rgba(255,249,234,.75) 7px 14px);transform:translateY(-55%) rotate(-3deg);box-shadow:0 1px 2px rgba(0,0,0,.12);border-radius:2px;pointer-events:none}
+.tip::after{content:"";position:absolute;top:-1px;right:16px;width:112px;height:52px;background:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 124 56%22%3E%3Cg stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M33 31 47 47%22 stroke=%22%23e8b6a0%22 stroke-width=%226%22 fill=%22none%22/%3E%3Ccircle cx=%2252%22 cy=%2247%22 r=%226%22 fill=%22none%22 stroke=%22%23f08aa0%22 stroke-width=%223.2%22/%3E%3Ccircle cx=%2225%22 cy=%2222%22 r=%2217%22 fill=%22%23ffd36b%22 stroke=%22%23e5a52f%22 stroke-width=%222.4%22/%3E%3Cpath d=%22M13 15c7 3 17 3 24-1M12 28c8 4 18 4 26-1%22 fill=%22none%22 stroke=%22%23fff6dc%22 stroke-width=%223%22/%3E%3Ccircle cx=%2222%22 cy=%2217%22 r=%222.2%22 fill=%22%23f08aa0%22/%3E%3Ccircle cx=%2231%22 cy=%2226%22 r=%222.2%22 fill=%22%237cc7b8%22/%3E%3Ccircle cx=%2225%22 cy=%225.5%22 r=%222.6%22 fill=%22%23f08aa0%22/%3E%3Ccircle cx=%2296%22 cy=%2216%22 r=%2210%22 fill=%22none%22 stroke=%22%23f08aa0%22 stroke-width=%224%22/%3E%3Cellipse cx=%2296%22 cy=%2234%22 rx=%2219%22 ry=%2210%22 fill=%22%239fd8cf%22 stroke=%22%2358a89a%22 stroke-width=%222.4%22/%3E%3Cellipse cx=%2296%22 cy=%2234%22 rx=%228%22 ry=%224.5%22 fill=%22%23e6f6f2%22 stroke=%22%2358a89a%22 stroke-width=%221.6%22/%3E%3Ccircle cx=%2296%22 cy=%2247%22 r=%226%22 fill=%22%23ffd9c9%22 stroke=%22%23e29b82%22 stroke-width=%222.2%22/%3E%3C/g%3E%3C/svg%3E") center/contain no-repeat;transform:translateY(-52%) rotate(3deg);filter:drop-shadow(0 2px 2px rgba(80,50,20,.18));pointer-events:none}
+:root[data-theme="night"] .tip::after{filter:drop-shadow(0 2px 3px rgba(0,0,0,.45)) brightness(.92)}
 .tip{overflow:visible}
 .tip .tic{background:radial-gradient(circle at 30% 25%,#f4f8e8,#dbe8c6);color:#3f7a52;border-radius:50%;box-shadow:0 0 0 2px var(--card-solid),0 0 0 3.5px #9cbb86;width:44px;height:44px}
 :root[data-theme="night"] .tip .tic{background:#2f3b27;color:#a6dcb3}
@@ -765,6 +767,16 @@ svg .f{fill:currentColor;fill-opacity:.2}
 .btn:active{transform:translateY(3px);box-shadow:0 2px 0 rgba(0,0,0,.22)}
 .btn.ghost{box-shadow:none;border:1.5px dashed var(--brd)}
 .x{border:1.5px dashed var(--brd)}
+@media (max-width:520px){
+.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;row-gap:8px}
+.brand{grid-column:1/2;grid-row:1}
+.brand .bt{font-size:1.15rem;white-space:nowrap}
+.brand .bs{white-space:normal;line-height:1.25}
+.top-right{grid-column:2/3;grid-row:1;flex-direction:column-reverse;align-items:flex-end;gap:6px}
+.clockwrap{grid-column:1/3;grid-row:2;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;width:100%}
+.top-right{display:contents}
+.tgl{grid-column:2/3;grid-row:1;justify-self:end}
+}
 </style>
 </head>
 <body>
@@ -890,6 +902,8 @@ svg .f{fill:currentColor;fill-opacity:.2}
       <div class="sec" style="margin:22px 2px 6px"><span class="eyebrow">Odstępy karmień — dziś</span></div>
       <p class="chart-note" id="gapSummary" style="margin:0 0 10px"></p>
       <div id="gapChart"></div>
+      <div class="sec" style="margin:22px 2px 6px"><h2>Sen nocny</h2><span class="muted-note">między karmieniami, ostatnie 14 nocy</span></div>
+      <section class="card"><div id="nightSleepChart"></div><div id="nightSleepNote"></div></section>
     </section>
 
     <!-- WIDOK: RYTM 3 DNI -->
@@ -1037,6 +1051,6 @@ svg .f{fill:currentColor;fill-opacity:.2}
   });
 })();
 </script>
-<script src="app.js?v=20261018"></script>
+<script src="app.js?v=sen2"></script>
 </body>
 </html>

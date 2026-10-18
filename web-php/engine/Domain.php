@@ -275,10 +275,35 @@ final class Domain
         for ($i = 0; $i < self::STATS_DAY_COUNT; $i++) {
             $d = self::dayOffsetFromToday($i, $now); $days[$i] = $d; $iso[$i] = self::dateIso($d); $stats[$i] = self::emptyDaySummary();
         }
+        // SEN: sesje budujemy z zdarzen posortowanych CHRONOLOGICZNIE (plik CSV moze miec wpisy poza kolejnoscia),
+        // z odrzucaniem sesji dluzszych niz SLEEP_MAX_SESSION_MIN (zapomniany STOP) -> brak "25 h snu w dobie".
+        $sleepEv = [];
+        foreach ($entries as $idx => $e) {
+            if ($e['type'] !== 'SEN_START' && $e['type'] !== 'SEN_STOP') continue;
+            $ts = self::csvDateTimeToDate($e['date'], $e['time']);
+            if ($ts !== null) $sleepEv[] = [$ts->getTimestamp(), $idx, $e['type'], $ts];
+        }
+        usort($sleepEv, function ($a, $b) { return $a[0] <=> $b[0] ?: $a[1] <=> $b[1]; });
         $openSleepStart = null;
+        foreach ($sleepEv as $ev) {
+            if ($ev[2] === 'SEN_START') { $openSleepStart = $ev[3]; continue; }
+            if ($openSleepStart === null) continue;
+            $dur = intdiv($ev[0] - $openSleepStart->getTimestamp(), 60);
+            if ($dur >= 1 && $dur <= Config::SLEEP_MAX_SESSION_MIN) {
+                self::accrueSleepInterval($openSleepStart, $ev[3], $iso, $stats);
+                self::accrueNapCount($openSleepStart, $iso, $stats);
+            }
+            $openSleepStart = null;
+        }
+        if ($openSleepStart !== null) {
+            $dur = intdiv($now->getTimestamp() - $openSleepStart->getTimestamp(), 60);
+            if ($dur >= 1 && $dur <= Config::SLEEP_MAX_SESSION_MIN) {
+                self::accrueSleepInterval($openSleepStart, $now, $iso, $stats);
+                self::accrueNapCount($openSleepStart, $iso, $stats);
+            }
+        }
         foreach ($entries as $e) {
-            if ($e['type'] === 'SEN_START') { $openSleepStart = self::csvDateTimeToDate($e['date'], $e['time']); self::accrueNapCount($openSleepStart, $iso, $stats); continue; }
-            if ($e['type'] === 'SEN_STOP') { if ($openSleepStart !== null) { $stop = self::csvDateTimeToDate($e['date'], $e['time']); if ($stop !== null) self::accrueSleepInterval($openSleepStart, $stop, $iso, $stats); $openSleepStart = null; } continue; }
+            if ($e['type'] === 'SEN_START' || $e['type'] === 'SEN_STOP') continue;
             foreach ($iso as $i => $isoDate) {
                 if ($e['date'] !== $isoDate) continue;
                 $s = &$stats[$i];
@@ -293,7 +318,6 @@ final class Domain
                 unset($s); break;
             }
         }
-        if ($openSleepStart !== null) self::accrueSleepInterval($openSleepStart, $now, $iso, $stats);
         return ['iso' => $iso, 'days' => $days, 'stats' => $stats];
     }
     public static function dayStatsForOffset(array $entries, int $offset, DateTimeImmutable $now): array

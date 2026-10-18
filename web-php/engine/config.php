@@ -41,6 +41,8 @@ final class Config
     // -------------------------------- Sen (Napper) ---------------------------------
     const SLEEP_NIGHT_START_HOUR = 21;
     const SLEEP_NIGHT_END_HOUR = 7;
+    // Najdluzsza wiarygodna pojedyncza sesja snu (min). Dluzsze = zapomniany STOP -> sesja odrzucana (nie liczymy 25 h snu w dobie).
+    const SLEEP_MAX_SESSION_MIN = 840;
     const WAKE_WIN_AGE_DAYS     = [0, 28, 84, 150, 210, 330, 420];
     const WAKE_WIN_MIN_MINUTES  = [35, 60, 75, 120, 150, 180, 240];
     const WAKE_WIN_MAX_MINUTES  = [60, 90, 120, 180, 210, 240, 360];
