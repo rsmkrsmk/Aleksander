@@ -966,7 +966,11 @@ static void ui_weight_toggle() {
   if (uiWtShown) { lv_obj_add_flag(uiWtViewA, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN); }
   else { lv_obj_add_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiWtViewA, LV_OBJ_FLAG_HIDDEN); }
   if (uiWtSub) lv_label_set_text(uiWtSub, uiWtShown ? "przyrost g/dzień co tydzień" : "waga dziecka na tle mediany WHO");
-  for (int i = 0; i < 2; ++i) if (uiWtDot[i]) lv_obj_set_style_bg_color(uiWtDot[i], i == uiWtShown ? P.acc : P.brd, 0);
+  for (int i = 0; i < 2; ++i) if (uiWtDot[i]) {
+    lv_obj_set_style_bg_color(uiWtDot[i], i == uiWtShown ? P.acc : P.brd, 0);
+    lv_obj_set_width(uiWtDot[i], i == uiWtShown ? 20 : 7);
+  }
+  if (uiWtDot[1]) lv_obj_set_x(uiWtDot[1], 22 + (uiWtShown == 0 ? 20 : 7) + 6);
 }
 static void ui_weight_click_cb(lv_event_t *e) {
   (void)e;
@@ -1004,7 +1008,7 @@ static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
   auto xv = [&](int d) { return px0 + d * pw / maxDay; };
   for (int g = mnG; g <= mxG; g += 500) {
     const int y = yv(g);
-    ui_hline(v, px0, y, pw, P.brd, g == mnG ? 200 : 90);
+    ui_hline(v, px0, y, pw, P.brd, g == mnG ? 170 : 70);
     char t[10]; snprintf(t, sizeof t, "%d,%d", g / 1000, (g % 1000) / 100);
     ui_label(v, t, &ui_f13, P.faint, 14, y - 9, 42, LV_TEXT_ALIGN_RIGHT);
   }
@@ -1022,8 +1026,8 @@ static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
   }
   lv_obj_t *ml = lv_line_create(v);
   lv_line_set_points(ml, uiWtMedPts, 41);
-  lv_obj_set_style_line_width(ml, 2, 0); lv_obj_set_style_line_color(ml, P.muted, 0);
-  lv_obj_set_style_line_opa(ml, 200, 0); lv_obj_set_pos(ml, 0, 0);
+  lv_obj_set_style_line_width(ml, 2, 0); lv_obj_set_style_line_color(ml, P.sun, 0);
+  lv_obj_set_pos(ml, 0, 0);
   // waga dziecka
   const int n = m.wpN > UI_WPTS ? UI_WPTS : m.wpN;
   for (int i = 0; i < n; ++i) { uiWtActPts[i].x = xv(m.wpDay[i]); uiWtActPts[i].y = yv(m.wpG[i]); }
@@ -1031,8 +1035,16 @@ static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
   lv_line_set_points(al, uiWtActPts, n);
   lv_obj_set_style_line_width(al, 4, 0); lv_obj_set_style_line_color(al, P.acc, 0);
   lv_obj_set_style_line_rounded(al, true, 0); lv_obj_set_pos(al, 0, 0);
-  for (int i = 0; i < n; ++i) if (n <= 16 || i == n - 1) ui_dot(v, uiWtActPts[i].x, uiWtActPts[i].y, i == n - 1 ? 6 : 4, i == n - 1 ? P.acc : P.card);
-  for (int i = 0; i < n - 1; ++i) if (n <= 16) { lv_obj_t *d = ui_box(v, uiWtActPts[i].x - 4, uiWtActPts[i].y - 4, 8, 8, 4, P.card); lv_obj_set_style_border_width(d, 3, 0); lv_obj_set_style_border_color(d, P.acc, 0); }
+  for (int i = 0; i < n - 1; ++i) if (n <= 16) {   // punkty pomiarow: bialy srodek + zielony pierscien
+    lv_obj_t *d = ui_box(v, uiWtActPts[i].x - 5, uiWtActPts[i].y - 5, 10, 10, 5, P.card);
+    lv_obj_set_style_border_width(d, 3, 0); lv_obj_set_style_border_color(d, P.acc, 0);
+  }
+  { // ostatni pomiar: miekka poswiata + pelna kropka z jasnym obrysem
+    const int lx = uiWtActPts[n - 1].x, ly = uiWtActPts[n - 1].y;
+    ui_box(v, lx - 12, ly - 12, 24, 24, 12, P.acc, 55);
+    lv_obj_t *d = ui_box(v, lx - 7, ly - 7, 14, 14, 7, P.acc);
+    lv_obj_set_style_border_width(d, 3, 0); lv_obj_set_style_border_color(d, P.card, 0);
+  }
   // opis ostatniego pomiaru
   char t[16]; snprintf(t, sizeof t, "%d,%02d kg", m.wpG[n - 1] / 1000, (m.wpG[n - 1] % 1000) / 10);
   int lx = uiWtActPts[n - 1].x - 70; if (lx < px0) lx = px0;
@@ -1041,7 +1053,7 @@ static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
   // legenda
   ui_box(v, px0 + 4, base + 28, 18, 4, 2, P.acc);
   ui_label(v, "waga", &ui_f13, P.ink2, px0 + 28, base + 20);
-  ui_box(v, px0 + 96, base + 29, 22, 2, 1, P.muted);
+  ui_box(v, px0 + 96, base + 28, 22, 3, 1, P.sun);
   ui_label(v, "mediana WHO", &ui_f13, P.ink2, px0 + 126, base + 20);
 }
 static void ui_weight_view_gain(lv_obj_t *v, const UiModel &m, bool any) {
@@ -1108,9 +1120,9 @@ static void ui_build_weight(const UiModel &m, bool anim) {
   ui_weight_view_gain(uiWtViewB, m, any);
   lv_obj_add_flag(uiWtViewB, LV_OBJ_FLAG_HIDDEN);
   uiWtShown = 0; uiWtTicks = 0;
-  uiWtDot[0] = ui_box(p, 22, 63, 14, 5, 2, P.acc);
-  uiWtDot[1] = ui_box(p, 40, 63, 14, 5, 2, P.brd);
-  ui_label(p, "dotknij wykres, by zmienić", &ui_f13, P.faint, 62, 55);
+  uiWtDot[0] = ui_box(p, 22, 63, 20, 7, 3, P.acc);
+  uiWtDot[1] = ui_box(p, 48, 63, 7, 7, 3, P.brd);
+  ui_label(p, "dotknij wykres, by zmienić", &ui_f13, P.faint, 70, 56);
 
   // stale kafelki: przyrost od urodzenia i z ostatnich 2 tygodni
   char v1[12], s1[40], v2[12], s2[40];
