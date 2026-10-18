@@ -108,6 +108,15 @@ struct UiModel {
 
 // Typy pomocnicze dla firmware (wczytywanie CSV) — tutaj, aby prototypy generowane
 // przez Arduino IDE widzialy je przed pierwsza funkcja szkicu.
+// Duze, rzadko uzywane bufory trzymamy w PSRAM, nie w RAM wewnetrznym (.bss): wewnetrzny RAM
+// jest deficytowy (TLS/Wi-Fi potrzebuja ciaglych blokow). Poza ESP (symulator) — zwykly calloc.
+static inline void *ui_alloc_big(size_t bytes) {
+#ifdef ESP_PLATFORM
+  void *p = heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM);
+  if (p) return p;
+#endif
+  return calloc(1, bytes);
+}
 struct UiRow { char date[11]; int hh; int mm; char type[24]; int ml; };
 struct UiWeightPt { int day; int g; };
 
@@ -432,21 +441,21 @@ static void uiWeatherIcon(lv_obj_t *box, int wmo, bool night, bool valid) {
   const UiWx k = valid ? ui_wx_kind(wmo) : UW_CLOUD;
   auto sunAt = [&](int cx, int cy, int sc) {
     lv_obj_t *rays = ui_img_c(box, &sp_sun_rays, cx, cy, sc);
-    ui_anim_start(rays, ui_cb_rot, 0, 3600, 30000, 0, lv_anim_path_linear, 0, true);
+    (void)rays;   // bez obrotu: transformacja calego sprite co klatke kosztuje CPU/PSRAM na tablicy dzialajacej caly dzien
     lv_obj_t *disk = ui_img_c(box, &sp_sun_disk, cx, cy, sc);
-    ui_anim_start(disk, ui_cb_scale, sc, sc + 14, 2200, 0, lv_anim_path_ease_in_out, 2200, true);
+    (void)disk;
   };
   auto moonAt = [&](int cx, int cy, int sc) {
     lv_obj_t *g = ui_img_c(box, &mk_glow_w, cx, cy);
     ui_tint(g, lv_color_hex(0xFFE9A8), 70);
     lv_obj_t *m = ui_img_c(box, &sp_moon, cx, cy, sc);
-    ui_anim_start(m, ui_cb_y, lv_obj_get_y(m), lv_obj_get_y(m) + 4, 2600, 0, lv_anim_path_ease_in_out, 2600, true);
+    (void)m;
   };
   auto stars = [&]() {
     static const int8_t xs[] = {8, 88, 92, 14}; static const int8_t ys[] = {14, 8, 62, 70};
     for (int i = 0; i < 4; ++i) {
       lv_obj_t *s = ui_img_c(box, &sp_star4, xs[i], ys[i], 160 + i * 20);
-      ui_anim_start(s, ui_cb_iopa, 40, 255, 1000 + i * 260, i * 300, lv_anim_path_ease_in_out, 1000 + i * 200, true);
+      if (i < 2) ui_anim_start(s, ui_cb_iopa, 40, 255, 1400 + i * 400, i * 300, lv_anim_path_ease_in_out, 1400 + i * 300, true);
     }
   };
   auto cloudAt = [&](const lv_image_dsc_t *d, int cx, int cy, int sc, int drift, uint32_t dur, uint32_t delay) {
@@ -472,14 +481,13 @@ static void uiWeatherIcon(lv_obj_t *box, int wmo, bool night, bool valid) {
       static const int w_[3] = {70, 54, 64}; static const int x_[3] = {18, 34, 22};
       for (int i = 0; i < 3; ++i) {
         lv_obj_t *b = ui_box(box, x_[i], 60 + i * 11, w_[i], 6, 3, night ? lv_color_hex(0x9FB0C4) : lv_color_hex(0xA9B8CC));
-        ui_anim_start(b, ui_cb_x, x_[i] - 6, x_[i] + 6, 2600 + i * 500, i * 400, lv_anim_path_ease_in_out, 2600 + i * 500, true);
       }
       break;
     }
     case UW_RAIN: {
       cloudAt(&sp_cloud_d, 52, 32, 210, 3, 4000, 0);
       static const int8_t xs[5] = {26, 40, 54, 68, 82};
-      for (int i = 0; i < 5; ++i) {
+      for (int i = 0; i < 5; i += 2) {   // 3 krople zamiast 5
         lv_obj_t *d = ui_img_c(box, &sp_drop, xs[i], 58, 200);
         ui_anim_start(d, ui_cb_y, 52, 84, 800 + (i % 3) * 140, i * 170, lv_anim_path_ease_in, 0, true);
         ui_anim_start(d, ui_cb_iopa, 0, 255, 400 + (i % 3) * 70, i * 170, lv_anim_path_ease_out, 400 + (i % 3) * 70, true);
@@ -489,11 +497,9 @@ static void uiWeatherIcon(lv_obj_t *box, int wmo, bool night, bool valid) {
     case UW_SNOW: {
       cloudAt(&sp_cloud, 52, 32, 210, 3, 4000, 0);
       static const int8_t xs[5] = {26, 40, 54, 68, 82};
-      for (int i = 0; i < 5; ++i) {
+      for (int i = 0; i < 5; i += 2) {   // 3 platki, bez obrotu i bocznego dryfu
         lv_obj_t *f = ui_img_c(box, &sp_flake, xs[i], 58, 200);
         ui_anim_start(f, ui_cb_y, 52, 86, 1900 + i * 160, i * 330, lv_anim_path_linear, 0, true);
-        ui_anim_start(f, ui_cb_x, xs[i] - 12 - 5, xs[i] - 12 + 5, 900 + i * 90, 0, lv_anim_path_ease_in_out, 900 + i * 90, true);
-        ui_anim_start(f, ui_cb_rot, 0, 3600, 5200, 0, lv_anim_path_linear, 0, true);
       }
       break;
     }
@@ -562,7 +568,8 @@ static void uiSaverCreate(bool night) {
     for (int i = 0; i < 10; ++i) {
       lv_obj_t *st = ui_img(hero, &sp_star4, sx[i] + (i > 5 ? 20 : 0), sy[i]);
       lv_image_set_scale(st, 120 + (i % 3) * 40);
-      ui_anim_start(st, ui_cb_iopa, 30, 230, 1100 + i * 190, i * 210, lv_anim_path_ease_in_out, 1100 + i * 130, true);
+      if (i < 4) ui_anim_start(st, ui_cb_iopa, 30, 230, 1600 + i * 300, i * 400, lv_anim_path_ease_in_out, 1600 + i * 250, true);
+      else lv_obj_set_style_image_opa(st, 140, 0);
     }
   } else {
     // dwa delikatne chmurki dryfujace w tle (rzadkie odswiezanie, male pole)
@@ -645,7 +652,7 @@ static void uiSaverCreate(bool night) {
   lv_image_set_scale(rt, 230);
   lv_image_set_pivot(rt, 56, 26);
   lv_obj_set_pos(rt, 358 + 10, 418 + 2);
-  ui_anim_start(rt, ui_cb_rot, -60, 60, 2400, 0, lv_anim_path_ease_in_out, 2400, true);
+  lv_image_set_rotation(rt, -150);   // grzechotka statyczna, lekko przechylona
   ui_retire_screen(oldScr, uiSaverScr);
 }
 static void uiSaverDestroy() {
@@ -737,7 +744,7 @@ static lv_obj_t *uiDashCounterBar = nullptr, *uiDashCounterBarBg = nullptr;
 
 // ---- animowane slupki (pula, bo lv_anim potrzebuje trwalego wskaznika) ----------
 struct UiBarAnim { lv_obj_t *o; int base; int h; int x; int w; };
-static UiBarAnim uiBars[UI_PAGES][48];
+static UiBarAnim (*uiBars)[48] = nullptr;   // [UI_PAGES][48] w PSRAM (alokacja przy pierwszym uzyciu)
 static int uiBarN[UI_PAGES];
 static void ui_cb_bar(void *v, int32_t p) {   // p: 0..256
   UiBarAnim *b = (UiBarAnim *)v;
@@ -747,7 +754,8 @@ static void ui_cb_bar(void *v, int32_t p) {   // p: 0..256
 }
 static lv_obj_t *ui_bar(int page, lv_obj_t *parent, int x, int base, int w, int h, int r, lv_color_t c, bool animate, int idx) {
   lv_obj_t *o = ui_box(parent, x, base - h, w, h < 1 ? 1 : h, r, c);
-  if (uiBarN[page] < 48) {
+  if (!uiBars) uiBars = static_cast<UiBarAnim (*)[48]>(ui_alloc_big(sizeof(UiBarAnim) * 48 * UI_PAGES));
+  if (uiBars && uiBarN[page] < 48) {
     UiBarAnim &b = uiBars[page][uiBarN[page]++];
     b.o = o; b.base = base; b.h = h; b.x = x; b.w = w;
     if (animate && h > 0) {

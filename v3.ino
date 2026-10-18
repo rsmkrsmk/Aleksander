@@ -3442,11 +3442,16 @@ static void uiFillLive(UiModel &m) {
 }
 
 // ---- Czesc "wykresowa": jeden przebieg pliku CSV (rytm, przerwy, waga, sen nocny, kapiele) ----
-static time_t uiFeedTs[400];
-static time_t uiFeedFirst[400];
-static UiWeightPt uiWts[96];
+// Bufory robocze w PSRAM (alokowane raz) — oszczedza ~7 KB deficytowego RAM wewnetrznego.
+static time_t *uiFeedTs = nullptr;
+static time_t *uiFeedFirst = nullptr;
+static UiWeightPt *uiWts = nullptr;
 
 static void uiFillCharts(UiModel &m) {
+  if (!uiFeedTs) uiFeedTs = static_cast<time_t *>(ui_alloc_big(400 * sizeof(time_t)));
+  if (!uiFeedFirst) uiFeedFirst = static_cast<time_t *>(ui_alloc_big(400 * sizeof(time_t)));
+  if (!uiWts) uiWts = static_cast<UiWeightPt *>(ui_alloc_big(96 * sizeof(UiWeightPt)));
+  if (!uiFeedTs || !uiFeedFirst || !uiWts) return;  // brak pamieci — wykresy zostaja puste
   // Reset sekcji wykresowych.
   m.gapN = 0; m.gapOpen = false;
   for (int d = 0; d < UI_RHYTHM_DAYS; ++d) { m.rhN[d] = 0; m.rhLabel[d][0] = 0; }
