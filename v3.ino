@@ -785,9 +785,14 @@ bool rgbColorTransferDoneCallback(esp_lcd_panel_handle_t panel,
 // "plywac"/dryfowac, wroc do 6000000 (jedyna zmiana potrzebna w tym miejscu).
 // Ramka = (480+8+50+14) x (480+8+20+10) = 552 x 518 px.
 constexpr uint32_t RGB_PCLK_NORMAL_HZ = 6000000;
+// Restart DMA panelu przy kazdym VSYNC (odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC).
+// Gdyby powodowal migotanie obrazu — ustawic na false (korekta punktowa przez
+// requestRgbResync() zostaje aktywna niezaleznie od tej flagi).
+constexpr bool RGB_RESTART_EVERY_VSYNC = true;
 volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje render LVGL z odswiezaniem panelu
 
-// Callback VSYNC: przy KAZDEJ klatce panelu zglaszamy restart DMA panelu. Jest to
+// Callback VSYNC: liczy klatki (loop() synchronizuje z nimi render) i przy KAZDEJ
+// klatce zglasza restart DMA panelu. Jest to
 // programowy odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC=y (niedostepnego w Arduino IDE
 // bez menuconfig): kanal GDMA jest resetowany na kazdym VBlank, wiec ewentualny dryf
 // obrazu koryguje sie w ~16 ms zamiast czekac na cykliczny timer. Callback MUSI byc
@@ -802,7 +807,7 @@ bool rgbVsyncCallback(esp_lcd_panel_handle_t panel,
   (void)userCtx;
   rgbVsyncCount = rgbVsyncCount + 1;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-  if (panel) esp_lcd_rgb_panel_restart(panel);
+  if (RGB_RESTART_EVERY_VSYNC && panel) esp_lcd_rgb_panel_restart(panel);
 #endif
   return false;
 }
@@ -840,18 +845,31 @@ bool initialiseNativeRgbPanel() {
   // Dwa framebuffery w PSRAM (double_fb) + bufory bounce DMA. LVGL renderuje
   // do niewidocznego bufora, esp_lcd przelacza je bez kopiowania i bez tearingu.
   config.num_fbs = 2;
-  // bounce_buffer_size_px musi dzielic SCREEN_WIDTH * SCREEN_HEIGHT bez reszty.
-  // DMA uzywa 2 buforow bounce w RAM WEWNETRZNYM (nie PSRAM!): 2 × linie × 480 × 2 B.
-  //   80 linii => 2 × 80 × 480 × 2 = 150 KB (v4: serwer WWW wylaczony, RAM jest)
-  //   48 linii => 2 × 48 × 480 × 2 =  90 KB (poprzedni krok po wylaczeniu WWW)
-  // POWOD ZMIANY: w v3 serwer WWW urzadzenia dzialal na tasku loop/LVGL i przy 80
-  // liniach po starcie Wi-Fi zostawalo ~20 KB wolnego heapu -> panic. W v4 serwer
-  // WWW jest WYLACZONY (web_server_disabled.h): pomiar po Wi-Fi daje ~166 KB wolnego
-  // RAM wewn. (przy 48 liniach). Podniesienie do 80 linii daje WIEKSZE paczki DMA
-  // (mniej transferow na klatke) => szybszy render i gladszy obraz. Zapas po TLS
-  // Telegrama (~45 KB) i tak pozostaje bezpieczny. Linie musza dzielic 230400
-  // bez reszty (80 dzieli: 230400 / (480×80) = 6; dozwolone tez 96/120).
-  config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
+  // --- TRYB BUFOROWANIA OBRAZU (przyczyna trwalego przesuwania obrazu) -----------
+  // DAWNIEJ: "Bounce Buffer with PSRAM Frame Buffer" (bounce_buffer_size_px = 480*80).
+  // Dokumentacja Espressif (esp_lcd, RGB LCD) o tym trybie mowi wprost:
+  //   "the LCD CANNOT function if the external memory cache is disabled,
+  //    such as during OTA or NVS writes to the main flash"
+  // Cache pamieci zewnetrznej jest wylaczany przy KAZDYM kasowaniu/zapisie sektora
+  // flasha (LittleFS: zapis CSV, backup, ustawienia). Wtedy zadanie przepisujace
+  // dane z PSRAM do buforow bounce nie moze pracowac, DMA wysyla "dummy bytes",
+  // adresy rozjezdzaja sie i obraz zostaje przesuniety NA STALE. Obnizanie zegara
+  // pikseli (FlashWriteGuard) wydluzalo tylko zapas czasu buforow (~44 ms przy
+  // 1 MHz), a pelny zapis CSV trwa znacznie dluzej — stad przesuniecia mimo ochrony.
+  //
+  // TERAZ: "Double Frame Buffer in PSRAM" (bez buforow bounce). W tym trybie
+  //   "the LCD peripheral can utilize EDMA to fetch frame data directly from PSRAM,
+  //    bypassing the internal cache"
+  // — kontroler czyta obraz z PSRAM z pominieciem cache, wiec zapis do flasha go
+  // nie zatrzymuje. Koszt: EDMA dzieli pasmo PSRAM z CPU (po polowie), wiec tryb
+  // ten znosi nizszy zegar pikseli. Przy naszych 6 MHz potrzeba 12 MB/s — PSRAM OPI
+  // ma na to duzy zapas. Zysk dodatkowy: bufory bounce zajmowaly 150 KB deficytowego
+  // RAM WEWNETRZNEGO (2 x 80 x 480 x 2 B), ktory wraca do puli dla Wi-Fi/TLS.
+  //
+  // GDYBY po tej zmianie pojawily sie zaklocenia/szum na obrazie (za male pasmo
+  // PSRAM): wrocic do linii ponizej (bufory bounce) ALBO zmniejszyc RGB_PCLK_NORMAL_HZ.
+  //   config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
+  config.bounce_buffer_size_px = 0;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
   // Nie zwiekszamy: glowna bronia przeciw artefaktom jest wiekszy bounce buffer,
@@ -884,7 +902,8 @@ bool initialiseNativeRgbPanel() {
   config.flags.fb_in_psram = 1;
   config.flags.double_fb = 1;
   config.flags.no_fb = 0;
-  config.flags.bb_invalidate_cache = 1;
+  // Flaga dotyczy wylacznie trybu bounce (nieuzywanego) — zerujemy dla jasnosci.
+  config.flags.bb_invalidate_cache = 0;
   
 
   esp_err_t error = esp_lcd_new_rgb_panel(&config, &rgbPanel);
@@ -920,10 +939,18 @@ bool initialiseNativeRgbPanel() {
     Serial.printf("LCD: pobranie dwoch framebufferow blad 0x%x.\n", static_cast<unsigned>(error));
     return false;
   }
-  Serial.printf("LCD: esp_lcd PSRAM framebuffer + bounce DMA OK (%p), VSYNC aktywny.\n",
+  Serial.printf("LCD: esp_lcd 2 x framebuffer w PSRAM (EDMA, bez bounce) OK (%p), VSYNC aktywny.\n",
                 rgbFrameBuffer0);
-  // Diagnostyka RAM: bounce buffery zajmuja deficytowy RAM wewnetrzny. Log pozwala
-  // sprawdzic zapas po inicjalizacji panelu (istotne po zmianie bounce_buffer_size_px).
+  // Diagnostyka: czy sterownik przyjmuje zgloszenie restartu DMA (korekta dryfu obrazu).
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  {
+    const esp_err_t restartTest = esp_lcd_rgb_panel_restart(rgbPanel);
+    Serial.printf("LCD: korekta dryfu (panel_restart) %s (0x%x).\n",
+                  restartTest == ESP_OK ? "dostepna" : "NIEDOSTEPNA",
+                  static_cast<unsigned>(restartTest));
+  }
+#endif
+  // Diagnostyka RAM: bez buforow bounce wraca ~150 KB RAM wewnetrznego.
   Serial.printf("LCD: wolny RAM wewnetrzny po init panelu: %u KB.\n",
                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
   return true;
@@ -948,9 +975,12 @@ void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMa
 // Panel RGB moze stracic synchronizacje DMA przy chwilowym niedoborze pasma
 // (PSRAM/Flash wspoldzielone z Wi-Fi/LittleFS): kontroler LCD zaczyna czytac piksele
 // z przesunietego adresu i caly obraz przesuwa sie pionowo "jak na rolce".
-// GLOWNA profilaktyka to teraz restart DMA przy KAZDYM VSYNC (rgbVsyncCallback) —
+// Glowna przyczyne (bufory bounce niedzialajace przy wylaczonym cache) usunieto,
+// zmieniajac tryb panelu na 2 framebuffery w PSRAM bez bounce — patrz
+// initialiseNativeRgbPanel(). Ponizsze pozostaje jako korekta awaryjna.
+// Drugim zabezpieczeniem jest restart DMA przy KAZDYM VSYNC (rgbVsyncCallback) —
 // odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC, ktorego nie ustawimy w Arduino IDE.
-// Dzieki temu ewentualny dryf koryguje sie w ~16 ms (jedna klatka), a nie po sekundach.
+// Dzieki temu ewentualny dryf koryguje sie w ~1 klatce, a nie po sekundach.
 // esp_lcd_rgb_panel_restart() (tylko ESP32-S3) NIE restartuje natychmiast — ustawia
 // flage, a wlasciwy restart DMA nastepuje przy NASTEPNYM VSYNC, wiec jest bezpieczny
 // (bez migotania/blokowania).
@@ -959,22 +989,28 @@ void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMa
 void requestRgbResync() {
   if (!rgbPanel) return;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-  esp_lcd_rgb_panel_restart(rgbPanel);
+  const esp_err_t restartErr = esp_lcd_rgb_panel_restart(rgbPanel);
+  if (restartErr != ESP_OK) {
+    static bool restartErrLogged = false;   // logujemy raz, by nie zasypac Seriala
+    if (!restartErrLogged) {
+      restartErrLogged = true;
+      Serial.printf("LCD: panel_restart odrzucony (0x%x) — korekta dryfu nie dziala.\n",
+                    static_cast<unsigned>(restartErr));
+    }
+  }
 #else
 #warning "RGB resync (naprawa dryfu obrazu) wylaczony: to nie jest target ESP32-S3."
 #endif
 }
 
 // --- Ochrona obrazu na czas zapisu do flasha (LittleFS) ---------------------------
-// Dokumentacja Espressif (esp_lcd RGB + FAQ): w trybie bounce buffer panel NIE
-// dziala, gdy cache pamieci zewnetrznej jest wylaczony — a tak jest podczas zapisu
-// i kasowania sektorow flasha (PSRAM i flash dziela magistrale SPI). Bufory bounce
-// nie sa wtedy uzupelniane, DMA czyta zle dane i obraz przesuwa sie "jak na rolce"
-// (czesto na stale). Opcji CONFIG_LCD_RGB_ISR_IRAM_SAFE / SPIRAM_XIP_FROM_PSRAM nie da
-// sie wlaczyc w Arduino IDE, wiec stosujemy obejscie zalecane w FAQ Espressif:
-// na czas zapisu OBNIZAMY zegar pikseli (bufor bounce starcza wtedy na dluzej),
-// a po zapisie przywracamy go i zglaszamy restart DMA. Panel moze na ten czas
-// zmigotac — to krotkie (zapisy zdarzaja sie tylko po zmianie danych na WWW).
+// UWAGA: po przejsciu na tryb bez buforow bounce (patrz initialiseNativeRgbPanel)
+// zapis do flasha NIE zatrzymuje juz panelu — EDMA czyta obraz z PSRAM z pominieciem
+// cache. Ta ochrona zostaje jako DRUGA linia obrony: flash i PSRAM dziela magistrale
+// SPI, wiec w czasie zapisu pasmo PSRAM spada ("the bandwidth of the underlying SPI
+// bus will also be shared, leading to display corruption" — dokumentacja Espressif).
+// Na czas zapisu obnizamy zegar pikseli (mniejsze zapotrzebowanie na pasmo), a po
+// zapisie przywracamy go i zglaszamy restart DMA. Panel moze na ten czas zmigotac.
 // Funkcja deklarowana jako "weak": jesli rdzen Arduino jej nie ma, ochrona
 // po prostu sie wylacza (brak bledu linkowania).
 extern "C" esp_err_t esp_lcd_rgb_panel_set_pclk(esp_lcd_panel_handle_t panel,
