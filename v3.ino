@@ -808,6 +808,24 @@ volatile uint32_t rgbLastVsyncUs = 0;        // znacznik ostatniego VSYNC (esp_t
 volatile uint32_t rgbGapIgnoreUntilUs = 0;   // do tej chwili nie oceniamy przerw VSYNC
 volatile uint32_t rgbHardResyncCount = 0;    // licznik (diagnostyka)
 static volatile int flashGuardDepth = 0;     // >0 = trwa zapis do flasha (FlashWriteGuard)
+// Powod zlecenia twardej resynchronizacji (bity, do logu): 1 = zapis flasha, 2 = spozniony
+// VSYNC, 4 = przesunieta faza buforow bounce (wykryte przesuniecie obrazu), 8 = inne.
+volatile uint8_t rgbHardResyncReason = 0;
+// --- Detektor przesuniecia obrazu (faza buforow bounce wzgledem VSYNC) ---------------
+// Sterownik po skopiowaniu ostatniego fragmentu klatki do bufora bounce wywoluje callback
+// "klatka skopiowana". W poprawnym stanie dzieje sie to zawsze w tym samym momencie klatki,
+// wiec czas od tego zdarzenia do VSYNC (faza) jest staly. Gdy kopiowanie rozjedzie sie z
+// DMA o N fragmentow po 80 linii (to jest wlasnie przesuniety obraz), faza zmienia sie
+// o N x ~7,4 ms i tak zostaje. Porownujemy ja z wzorcem zmierzonym po czystym starcie.
+volatile bool rgbFrameCbAvailable = false;
+volatile uint32_t rgbFrameDoneUs = 0;        // ostatnie "klatka skopiowana" (ISR)
+volatile int32_t rgbPhaseUs = -1;            // ostatnia zmierzona faza
+volatile int32_t rgbPhaseRefUs = -1;         // wzorzec fazy (po czystym starcie)
+volatile uint8_t rgbPhaseLearnLeft = 0;      // ile klatek jeszcze do nauki wzorca
+volatile int32_t rgbPhaseLearnSum = 0;
+volatile uint8_t rgbPhaseLearnCnt = 0;
+volatile uint8_t rgbPhaseBadFrames = 0;      // kolejne klatki z faza poza wzorcem
+constexpr int32_t RGB_PHASE_TOL_US = 3000;   // tolerancja (fragment bounce = ~7400 us)
 volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje render LVGL z odswiezaniem panelu
 
 // Callback VSYNC: liczy klatki (loop() synchronizuje z nimi render) i przy KAZDEJ
@@ -819,6 +837,29 @@ volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje 
 // nastepuje przy nastepnym VSYNC), wiec nie robimy tu nic ciezkiego. NIE oznaczamy go
 // IRAM_ATTR: wywolywana funkcja restartu rezyduje we flashu (nie jest IRAM-safe), a
 // przy domyslnym configu (bez CONFIG_LCD_RGB_ISR_IRAM_SAFE) ISR dziala z wlaczonym cache.
+bool rgbFrameDoneCallback(esp_lcd_panel_handle_t panel,
+                          const esp_lcd_rgb_panel_event_data_t *edata,
+                          void *userCtx) {
+  (void)panel; (void)edata; (void)userCtx;
+  rgbFrameDoneUs = static_cast<uint32_t>(esp_timer_get_time());
+  return false;
+}
+// Nazwa pola callbacku zalezy od wersji ESP-IDF w rdzeniu Arduino (on_frame_buf_complete
+// w nowszych, on_bounce_frame_finish w starszych). Wybor w czasie kompilacji (SFINAE),
+// wiec kod kompiluje sie z kazda wersja; gdy zadnego pola nie ma — detektor jest wylaczony.
+struct RgbCbCompat {
+  template <typename T>
+  static auto set(T &cb, int) -> decltype(cb.on_frame_buf_complete = nullptr, bool()) {
+    cb.on_frame_buf_complete = rgbFrameDoneCallback; return true;
+  }
+  template <typename T>
+  static auto set(T &cb, long) -> decltype(cb.on_bounce_frame_finish = nullptr, bool()) {
+    cb.on_bounce_frame_finish = rgbFrameDoneCallback; return true;
+  }
+  template <typename T>
+  static bool set(T &, ...) { return false; }
+};
+
 bool rgbVsyncCallback(esp_lcd_panel_handle_t panel,
                                 const esp_lcd_rgb_panel_event_data_t *edata,
                                 void *userCtx) {
@@ -836,7 +877,37 @@ bool rgbVsyncCallback(esp_lcd_panel_handle_t panel,
     if (RGB_USE_BOUNCE && prevUs != 0 && flashGuardDepth == 0 &&
         static_cast<int32_t>(nowUs - rgbGapIgnoreUntilUs) > 0 &&
         nowUs - prevUs > RGB_FRAME_US + 15000) {
+      rgbHardResyncReason = rgbHardResyncReason | 2;
       rgbHardResyncPending = true;
+    }
+    // Faza buforow bounce (patrz opis przy rgbPhaseRefUs).
+    const uint32_t doneUs = rgbFrameDoneUs;
+    if (RGB_USE_BOUNCE && rgbFrameCbAvailable && doneUs != 0 && flashGuardDepth == 0 &&
+        static_cast<int32_t>(nowUs - rgbGapIgnoreUntilUs) > 0) {
+      const int32_t ph = static_cast<int32_t>(nowUs - doneUs);
+      if (ph >= 0 && ph < static_cast<int32_t>(RGB_FRAME_US) + 5000) {
+        rgbPhaseUs = ph;
+        if (rgbPhaseLearnLeft > 0) {
+          rgbPhaseLearnSum = rgbPhaseLearnSum + ph;
+          rgbPhaseLearnCnt = rgbPhaseLearnCnt + 1;
+          rgbPhaseLearnLeft = rgbPhaseLearnLeft - 1;
+          if (rgbPhaseLearnLeft == 0 && rgbPhaseRefUs < 0) {
+            rgbPhaseRefUs = rgbPhaseLearnSum / rgbPhaseLearnCnt;
+          }
+        } else if (rgbPhaseRefUs >= 0) {
+          const int32_t d = ph - rgbPhaseRefUs;
+          if (d > RGB_PHASE_TOL_US || d < -RGB_PHASE_TOL_US) {
+            rgbPhaseBadFrames = rgbPhaseBadFrames + 1;
+            if (rgbPhaseBadFrames >= 3) {   // 3 klatki z rzedu = trwale przesuniecie
+              rgbPhaseBadFrames = 0;
+              rgbHardResyncReason = rgbHardResyncReason | 4;
+              rgbHardResyncPending = true;
+            }
+          } else {
+            rgbPhaseBadFrames = 0;
+          }
+        }
+      }
     }
   }
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -938,6 +1009,10 @@ bool initialiseNativeRgbPanel() {
   callbacks.on_color_trans_done = rgbColorTransferDoneCallback;
   // Restart DMA przy kazdym VSYNC — glowna profilaktyka dryfu obrazu (patrz rgbVsyncCallback).
   callbacks.on_vsync = rgbVsyncCallback;
+  // Detektor przesuniecia obrazu: callback "klatka skopiowana do buforow bounce".
+  rgbFrameCbAvailable = RGB_USE_BOUNCE && RgbCbCompat::set(callbacks, 0);
+  Serial.printf("LCD: detektor przesuniecia obrazu %s.\n",
+                rgbFrameCbAvailable ? "aktywny" : "NIEDOSTEPNY (brak callbacku w tej wersji rdzenia)");
   error = esp_lcd_rgb_panel_register_event_callbacks(
       rgbPanel, &callbacks, rgbColorTransferDoneSemaphore);
   if (error != ESP_OK) {
@@ -1031,13 +1106,39 @@ void rgbHardResync() {
   if (lastMs != 0 && millis() - lastMs < 700) return; // bez serii mrugniec
   lastMs = millis();
   rgbHardResyncPending = false;
+  const uint8_t reason = rgbHardResyncReason;
+  rgbHardResyncReason = 0;
+  const int32_t phaseBefore = rgbPhaseUs;
   esp_lcd_panel_init(rgbPanel);
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
   esp_lcd_rgb_panel_restart(rgbPanel);                // + korekta przy nastepnym VSYNC
 #endif
   rgbGapIgnoreUntilUs = static_cast<uint32_t>(esp_timer_get_time()) + 300000;
+  rgbPhaseBadFrames = 0;
+  // Bezpiecznik: gdyby resynchronizacja z powodu fazy nie przywracala wzorca (np. wzorzec
+  // zmierzony w zlym momencie), nie mrugamy w kolko — po 3 probach w 5 s uczymy wzorzec od nowa.
+  {
+    static uint32_t lastPhaseFixMs = 0;
+    static uint8_t phaseFixStreak = 0;
+    if (reason == 4) {
+      phaseFixStreak = (millis() - lastPhaseFixMs < 5000) ? phaseFixStreak + 1 : 1;
+      lastPhaseFixMs = millis();
+      if (phaseFixStreak >= 3) {
+        phaseFixStreak = 0;
+        rgbPhaseRefUs = -1;
+        Serial.println("LCD: faza nie wraca do wzorca — wzorzec mierzony od nowa.");
+      }
+    }
+  }
+  if (rgbPhaseRefUs < 0) {             // czysty start (lub ponowna nauka): wzorzec fazy
+    rgbPhaseLearnSum = 0;
+    rgbPhaseLearnCnt = 0;
+    rgbPhaseLearnLeft = 4;
+  }
   rgbHardResyncCount = rgbHardResyncCount + 1;
-  Serial.printf("LCD: twarda resynchronizacja obrazu (#%u).\n", static_cast<unsigned>(rgbHardResyncCount));
+  Serial.printf("LCD: twarda resynchronizacja obrazu (#%u, powod %u, faza %ld us, wzorzec %ld us).\n",
+                static_cast<unsigned>(rgbHardResyncCount), static_cast<unsigned>(reason),
+                static_cast<long>(phaseBefore), static_cast<long>(rgbPhaseRefUs));
 }
 // Czeka na najblizszy VSYNC (max 70 ms) i wykonuje zalegla twarda resynchronizacje.
 void rgbHardResyncAfterVsync() {
@@ -1085,6 +1186,7 @@ struct FlashWriteGuard {
       if (esp_lcd_rgb_panel_set_pclk) esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_NORMAL_HZ);
       requestRgbResync();
       // Zapis mogl rozsynchronizowac bufory bounce — pelny restart strumienia (w loop()).
+      rgbHardResyncReason = rgbHardResyncReason | 1;
       rgbHardResyncPending = true;
     }
   }
@@ -5791,6 +5893,10 @@ void applyHostMirrorUpdate() {
   invalidateDayStats();
   if (homeScreen && lv_screen_active() == homeScreen) updateHomeInformation(false);
   else if (screensaverActive) updateScreensaverContent();
+  // Po pobraniu danych (zapis flasha w telegramTask + ciezkie odswiezenie) — na pewno
+  // wyprostuj obraz jeszcze raz, gdy wszystko juz sie uspokoilo.
+  rgbHardResyncReason = rgbHardResyncReason | 8;
+  rgbHardResyncPending = true;
 }
 
 // Pierwsza synchronizacja z hostingiem wykonana blokujaco podczas startu (v4).
