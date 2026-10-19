@@ -785,10 +785,17 @@ bool rgbColorTransferDoneCallback(esp_lcd_panel_handle_t panel,
 // "plywac"/dryfowac, wroc do 6000000 (jedyna zmiana potrzebna w tym miejscu).
 // Ramka = (480+8+50+14) x (480+8+20+10) = 552 x 518 px.
 constexpr uint32_t RGB_PCLK_NORMAL_HZ = 6000000;
-// Restart DMA panelu przy kazdym VSYNC (odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC).
-// Gdyby powodowal migotanie obrazu — ustawic na false (korekta punktowa przez
-// requestRgbResync() zostaje aktywna niezaleznie od tej flagi).
-constexpr bool RGB_RESTART_EVERY_VSYNC = true;
+// Tryb pracy panelu RGB (jedno miejsce do przelaczenia):
+//   false = 2 framebuffery w PSRAM, EDMA czyta je z pominieciem cache (zapis do flasha
+//           nie zatrzymuje panelu). Restart DMA NIE jest potrzebny i NIE wolno go robic
+//           co klatke — w tym trybie nie ma buforow bounce do wstepnego napelnienia, wiec
+//           kazdy restart (reset FIFO + GDMA przy VSYNC) zostawia puste pierwsze piksele:
+//           czarne mrugniecie, linie przy lewej krawedzi i przesuniecie obrazu.
+//   true  = dawny tryb bounce buffer + FB w PSRAM (restart co VSYNC dziala poprawnie,
+//           ale panel staje sie trwale przesuniety po kazdym zapisie do flasha).
+constexpr bool RGB_USE_BOUNCE = false;
+// Restart DMA co VSYNC (odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC) — tylko dla bounce.
+constexpr bool RGB_RESTART_EVERY_VSYNC = RGB_USE_BOUNCE;
 volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje render LVGL z odswiezaniem panelu
 
 // Callback VSYNC: liczy klatki (loop() synchronizuje z nimi render) i przy KAZDEJ
@@ -866,10 +873,9 @@ bool initialiseNativeRgbPanel() {
   // ma na to duzy zapas. Zysk dodatkowy: bufory bounce zajmowaly 150 KB deficytowego
   // RAM WEWNETRZNEGO (2 x 80 x 480 x 2 B), ktory wraca do puli dla Wi-Fi/TLS.
   //
-  // GDYBY po tej zmianie pojawily sie zaklocenia/szum na obrazie (za male pasmo
-  // PSRAM): wrocic do linii ponizej (bufory bounce) ALBO zmniejszyc RGB_PCLK_NORMAL_HZ.
-  //   config.bounce_buffer_size_px = SCREEN_WIDTH * 80;
-  config.bounce_buffer_size_px = 0;
+  // Przelacznik: RGB_USE_BOUNCE (stala nad tą funkcją). Przy szumie/zakloceniach
+  // obrazu mozna tez obnizyc RGB_PCLK_NORMAL_HZ (mniejsze zapotrzebowanie na pasmo PSRAM).
+  config.bounce_buffer_size_px = RGB_USE_BOUNCE ? SCREEN_WIDTH * 80 : 0;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
   // Nie zwiekszamy: glowna bronia przeciw artefaktom jest wiekszy bounce buffer,
@@ -939,17 +945,8 @@ bool initialiseNativeRgbPanel() {
     Serial.printf("LCD: pobranie dwoch framebufferow blad 0x%x.\n", static_cast<unsigned>(error));
     return false;
   }
-  Serial.printf("LCD: esp_lcd 2 x framebuffer w PSRAM (EDMA, bez bounce) OK (%p), VSYNC aktywny.\n",
-                rgbFrameBuffer0);
-  // Diagnostyka: czy sterownik przyjmuje zgloszenie restartu DMA (korekta dryfu obrazu).
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-  {
-    const esp_err_t restartTest = esp_lcd_rgb_panel_restart(rgbPanel);
-    Serial.printf("LCD: korekta dryfu (panel_restart) %s (0x%x).\n",
-                  restartTest == ESP_OK ? "dostepna" : "NIEDOSTEPNA",
-                  static_cast<unsigned>(restartTest));
-  }
-#endif
+  Serial.printf("LCD: esp_lcd 2 x framebuffer w PSRAM, tryb %s OK (%p), VSYNC aktywny.\n",
+                RGB_USE_BOUNCE ? "bounce" : "EDMA bez bounce", rgbFrameBuffer0);
   // Diagnostyka RAM: bez buforow bounce wraca ~150 KB RAM wewnetrznego.
   Serial.printf("LCD: wolny RAM wewnetrzny po init panelu: %u KB.\n",
                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
@@ -988,6 +985,8 @@ void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMa
 // magistrale (np. zapis do LittleFS/Flash), by zglosic restart bez czekania na VSYNC.
 void requestRgbResync() {
   if (!rgbPanel) return;
+  // Tryb EDMA bez bounce: restart DMA tylko szkodzi (patrz RGB_USE_BOUNCE) — pomijamy.
+  if (!RGB_USE_BOUNCE) return;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
   const esp_err_t restartErr = esp_lcd_rgb_panel_restart(rgbPanel);
   if (restartErr != ESP_OK) {
@@ -1017,7 +1016,9 @@ extern "C" esp_err_t esp_lcd_rgb_panel_set_pclk(esp_lcd_panel_handle_t panel,
                                                uint32_t freq_hz) __attribute__((weak));
 // Pelny bufor bounce (80 linii) starcza przy 1 MHz na ~44 ms (przy 6 MHz tylko ~7 ms),
 // czyli na czas typowego kasowania sektora flasha. Do dostrojenia na urzadzeniu.
-constexpr uint32_t RGB_PCLK_FLASH_SAFE_HZ = 1000000;
+// W trybie EDMA (bez bounce) nie chodzi o czas zapasu buforow, tylko o pasmo wspolnej
+// magistrali: 3 MHz = ~6 MB/s zamiast 12 MB/s, a obraz nie "gasnie" jak przy 1 MHz.
+constexpr uint32_t RGB_PCLK_FLASH_SAFE_HZ = RGB_USE_BOUNCE ? 1000000 : 3000000;
 static int flashGuardDepth = 0;
 
 // RAII: tworzymy na poczatku operacji zapisujacej do flasha; destruktor przywraca zegar.
