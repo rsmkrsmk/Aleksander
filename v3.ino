@@ -33,6 +33,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <vector>
@@ -375,6 +376,8 @@ lv_color_t COLOR_TONAL_GREEN = lv_color_hex(0xE6F1E0);
 void touchRead(lv_indev_t *indev, lv_indev_data_t *data);
 void displayFlush(lv_display_t *display, const lv_area_t *area, uint8_t *pixelMap);
 void requestRgbResync();
+void rgbHardResync();
+void rgbHardResyncAfterVsync();
 void initialiseDisplayPanel();
 void initialiseBacklight();
 void setScreenDimmed(bool dimmed);
@@ -786,16 +789,25 @@ bool rgbColorTransferDoneCallback(esp_lcd_panel_handle_t panel,
 // Ramka = (480+8+50+14) x (480+8+20+10) = 552 x 518 px.
 constexpr uint32_t RGB_PCLK_NORMAL_HZ = 6000000;
 // Tryb pracy panelu RGB (jedno miejsce do przelaczenia):
-//   false = 2 framebuffery w PSRAM, EDMA czyta je z pominieciem cache (zapis do flasha
-//           nie zatrzymuje panelu). Restart DMA NIE jest potrzebny i NIE wolno go robic
-//           co klatke — w tym trybie nie ma buforow bounce do wstepnego napelnienia, wiec
-//           kazdy restart (reset FIFO + GDMA przy VSYNC) zostawia puste pierwsze piksele:
-//           czarne mrugniecie, linie przy lewej krawedzi i przesuniecie obrazu.
-//   true  = dawny tryb bounce buffer + FB w PSRAM (restart co VSYNC dziala poprawnie,
-//           ale panel staje sie trwale przesuniety po kazdym zapisie do flasha).
-constexpr bool RGB_USE_BOUNCE = false;
+//   true  = bounce buffer (2 x 80 linii w RAM wewnetrznym) + 2 framebuffery w PSRAM.
+//           Stabilny obraz przy renderowaniu i dotyku. Slabosc: przy zapisie do flasha
+//           (cache wylaczony) bufory bounce nie sa uzupelniane i obraz moze sie
+//           przesunac — naprawia to TWARDA RESYNCHRONIZACJA (rgbHardResync) po zapisie.
+//   false = tryb EDMA bez bounce (sprawdzony 19.10.2026): przy naszym renderowaniu do
+//           PSRAM brakuje pasma — poziome linie przy lewej krawedzi, czarne mruganie,
+//           przesuwanie w lewo, mocniej przy dotyku (ten sam objaw co w PR #5, ktory
+//           naprawilo wlasnie wprowadzenie buforow bounce). NIE WRACAC do false.
+constexpr bool RGB_USE_BOUNCE = true;
 // Restart DMA co VSYNC (odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC) — tylko dla bounce.
 constexpr bool RGB_RESTART_EVERY_VSYNC = RGB_USE_BOUNCE;
+// Dlugosc klatki panelu: (480+8+50+14) x (480+8+20+10) = 552 x 518 px przy RGB_PCLK_NORMAL_HZ.
+constexpr uint32_t RGB_FRAME_US = static_cast<uint32_t>(552ULL * 518ULL * 1000000ULL / RGB_PCLK_NORMAL_HZ);
+// Twarda resynchronizacja obrazu (patrz rgbHardResync): zadanie + wykrywanie przerw.
+volatile bool rgbHardResyncPending = false;
+volatile uint32_t rgbLastVsyncUs = 0;        // znacznik ostatniego VSYNC (esp_timer, us)
+volatile uint32_t rgbGapIgnoreUntilUs = 0;   // do tej chwili nie oceniamy przerw VSYNC
+volatile uint32_t rgbHardResyncCount = 0;    // licznik (diagnostyka)
+static volatile int flashGuardDepth = 0;     // >0 = trwa zapis do flasha (FlashWriteGuard)
 volatile uint32_t rgbVsyncCount = 0;  // licznik VSYNC — loop() synchronizuje render LVGL z odswiezaniem panelu
 
 // Callback VSYNC: liczy klatki (loop() synchronizuje z nimi render) i przy KAZDEJ
@@ -813,6 +825,20 @@ bool rgbVsyncCallback(esp_lcd_panel_handle_t panel,
   (void)edata;
   (void)userCtx;
   rgbVsyncCount = rgbVsyncCount + 1;
+  // Wykrywanie przerwy: przerwanie VSYNC nie jest IRAM-safe, wiec gdy cache byl wylaczony
+  // (zapis flasha, takze NVS poza naszym kodem), przychodzi z opoznieniem. Spozniony VSYNC
+  // (> klatka + 15 ms) oznacza, ze przerwania uzupelniajace bufory bounce tez staly =>
+  // obraz mogl sie przesunac => zglaszamy twarda resynchronizacje (wykona ja loop()).
+  {
+    const uint32_t nowUs = static_cast<uint32_t>(esp_timer_get_time());
+    const uint32_t prevUs = rgbLastVsyncUs;
+    rgbLastVsyncUs = nowUs;
+    if (RGB_USE_BOUNCE && prevUs != 0 && flashGuardDepth == 0 &&
+        static_cast<int32_t>(nowUs - rgbGapIgnoreUntilUs) > 0 &&
+        nowUs - prevUs > RGB_FRAME_US + 15000) {
+      rgbHardResyncPending = true;
+    }
+  }
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
   if (RGB_RESTART_EVERY_VSYNC && panel) esp_lcd_rgb_panel_restart(panel);
 #endif
@@ -852,29 +878,14 @@ bool initialiseNativeRgbPanel() {
   // Dwa framebuffery w PSRAM (double_fb) + bufory bounce DMA. LVGL renderuje
   // do niewidocznego bufora, esp_lcd przelacza je bez kopiowania i bez tearingu.
   config.num_fbs = 2;
-  // --- TRYB BUFOROWANIA OBRAZU (przyczyna trwalego przesuwania obrazu) -----------
-  // DAWNIEJ: "Bounce Buffer with PSRAM Frame Buffer" (bounce_buffer_size_px = 480*80).
-  // Dokumentacja Espressif (esp_lcd, RGB LCD) o tym trybie mowi wprost:
-  //   "the LCD CANNOT function if the external memory cache is disabled,
-  //    such as during OTA or NVS writes to the main flash"
-  // Cache pamieci zewnetrznej jest wylaczany przy KAZDYM kasowaniu/zapisie sektora
-  // flasha (LittleFS: zapis CSV, backup, ustawienia). Wtedy zadanie przepisujace
-  // dane z PSRAM do buforow bounce nie moze pracowac, DMA wysyla "dummy bytes",
-  // adresy rozjezdzaja sie i obraz zostaje przesuniety NA STALE. Obnizanie zegara
-  // pikseli (FlashWriteGuard) wydluzalo tylko zapas czasu buforow (~44 ms przy
-  // 1 MHz), a pelny zapis CSV trwa znacznie dluzej — stad przesuniecia mimo ochrony.
-  //
-  // TERAZ: "Double Frame Buffer in PSRAM" (bez buforow bounce). W tym trybie
-  //   "the LCD peripheral can utilize EDMA to fetch frame data directly from PSRAM,
-  //    bypassing the internal cache"
-  // — kontroler czyta obraz z PSRAM z pominieciem cache, wiec zapis do flasha go
-  // nie zatrzymuje. Koszt: EDMA dzieli pasmo PSRAM z CPU (po polowie), wiec tryb
-  // ten znosi nizszy zegar pikseli. Przy naszych 6 MHz potrzeba 12 MB/s — PSRAM OPI
-  // ma na to duzy zapas. Zysk dodatkowy: bufory bounce zajmowaly 150 KB deficytowego
-  // RAM WEWNETRZNEGO (2 x 80 x 480 x 2 B), ktory wraca do puli dla Wi-Fi/TLS.
-  //
-  // Przelacznik: RGB_USE_BOUNCE (stala nad tą funkcją). Przy szumie/zakloceniach
-  // obrazu mozna tez obnizyc RGB_PCLK_NORMAL_HZ (mniejsze zapotrzebowanie na pasmo PSRAM).
+  // --- TRYB BUFOROWANIA OBRAZU ------------------------------------------------------
+  // Bounce buffer (2 x 80 linii w RAM wewnetrznym) + 2 framebuffery w PSRAM — przelacznik
+  // i pelne uzasadnienie przy RGB_USE_BOUNCE. Bounce = stabilny obraz przy renderowaniu
+  // (bez niego: linie przy lewej krawedzi, mruganie — sprawdzone). Wada: przy zapisie do
+  // flasha ("the LCD CANNOT function if the external memory cache is disabled") bufory nie
+  // sa uzupelniane i obraz moze sie przesunac — po kazdym zapisie/przerwie wykonujemy
+  // rgbHardResync() (pelny restart strumienia), co go prostuje.
+  // bounce_buffer_size_px musi dzielic 480 x 480 bez reszty (80 linii: 230400/38400 = 6).
   config.bounce_buffer_size_px = RGB_USE_BOUNCE ? SCREEN_WIDTH * 80 : 0;
   config.sram_trans_align = 8;
   // 64 = sprawdzona w przykladach Espressif wartosc (musi byc potega 2).
@@ -908,8 +919,8 @@ bool initialiseNativeRgbPanel() {
   config.flags.fb_in_psram = 1;
   config.flags.double_fb = 1;
   config.flags.no_fb = 0;
-  // Flaga dotyczy wylacznie trybu bounce (nieuzywanego) — zerujemy dla jasnosci.
-  config.flags.bb_invalidate_cache = 0;
+  // Flaga z dawnych wersji IDF (tryb bounce). Ustawienie jak przed zmianami z 19.10.
+  config.flags.bb_invalidate_cache = RGB_USE_BOUNCE ? 1 : 0;
   
 
   esp_err_t error = esp_lcd_new_rgb_panel(&config, &rgbPanel);
@@ -947,7 +958,7 @@ bool initialiseNativeRgbPanel() {
   }
   Serial.printf("LCD: esp_lcd 2 x framebuffer w PSRAM, tryb %s OK (%p), VSYNC aktywny.\n",
                 RGB_USE_BOUNCE ? "bounce" : "EDMA bez bounce", rgbFrameBuffer0);
-  // Diagnostyka RAM: bez buforow bounce wraca ~150 KB RAM wewnetrznego.
+  // Diagnostyka RAM: bufory bounce zajmuja ~150 KB RAM wewnetrznego.
   Serial.printf("LCD: wolny RAM wewnetrzny po init panelu: %u KB.\n",
                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
   return true;
@@ -1002,6 +1013,40 @@ void requestRgbResync() {
 #endif
 }
 
+// --- Twarda resynchronizacja obrazu (tryb bounce) ----------------------------------
+// Dlaczego zwykly restart (esp_lcd_rgb_panel_restart) nie wystarczal: w zrodle sterownika
+// (esp_lcd_panel_rgb.c) restart przy VSYNC resetuje FIFO i DMA, ale pozycje kopiowania
+// do buforow bounce (bounce_pos_px) zeruje TYLKO gdy przekracza 2 bufory. Po przestoju
+// przerwan (zapis flasha) pozycja moze zostac przesunieta o wielokrotnosc 80 linii — i
+// obraz zostaje przesuniety NA STALE mimo restartu co klatke.
+// esp_lcd_panel_init() na dzialajacym panelu wywoluje lcd_rgb_panel_start_transmission():
+// stop LCD, reset FIFO i DMA, bounce_pos_px = 0, ponowne napelnienie obu buforow, start.
+// Bez alokacji i bez dotykania framebufferow/LVGL. Koszt: jedna klatka moze mrugnac.
+// WOLAC TYLKO z rdzenia petli (tam dziala przerwanie panelu), tuz po VSYNC — wtedy
+// najblizsze przerwanie EOF bufora bounce jest odlegle o ~10 ms, wiec nie koliduje.
+void rgbHardResync() {
+  if (!RGB_USE_BOUNCE || !rgbPanel || !rgbHardResyncPending) return;
+  if (flashGuardDepth > 0) return;                    // zapis nadal trwa — po nim
+  static uint32_t lastMs = 0;
+  if (lastMs != 0 && millis() - lastMs < 700) return; // bez serii mrugniec
+  lastMs = millis();
+  rgbHardResyncPending = false;
+  esp_lcd_panel_init(rgbPanel);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  esp_lcd_rgb_panel_restart(rgbPanel);                // + korekta przy nastepnym VSYNC
+#endif
+  rgbGapIgnoreUntilUs = static_cast<uint32_t>(esp_timer_get_time()) + 300000;
+  rgbHardResyncCount = rgbHardResyncCount + 1;
+  Serial.printf("LCD: twarda resynchronizacja obrazu (#%u).\n", static_cast<unsigned>(rgbHardResyncCount));
+}
+// Czeka na najblizszy VSYNC (max 70 ms) i wykonuje zalegla twarda resynchronizacje.
+void rgbHardResyncAfterVsync() {
+  if (!RGB_USE_BOUNCE || !rgbHardResyncPending) return;
+  const uint32_t v = rgbVsyncCount, t = millis();
+  while (rgbVsyncCount == v && millis() - t < 70) delay(1);
+  if (rgbVsyncCount != v) rgbHardResync();
+}
+
 // --- Ochrona obrazu na czas zapisu do flasha (LittleFS) ---------------------------
 // UWAGA: po przejsciu na tryb bez buforow bounce (patrz initialiseNativeRgbPanel)
 // zapis do flasha NIE zatrzymuje juz panelu — EDMA czyta obraz z PSRAM z pominieciem
@@ -1019,16 +1064,16 @@ extern "C" esp_err_t esp_lcd_rgb_panel_set_pclk(esp_lcd_panel_handle_t panel,
 // W trybie EDMA (bez bounce) nie chodzi o czas zapasu buforow, tylko o pasmo wspolnej
 // magistrali: 3 MHz = ~6 MB/s zamiast 12 MB/s, a obraz nie "gasnie" jak przy 1 MHz.
 constexpr uint32_t RGB_PCLK_FLASH_SAFE_HZ = RGB_USE_BOUNCE ? 1000000 : 3000000;
-static int flashGuardDepth = 0;
 
 // RAII: tworzymy na poczatku operacji zapisujacej do flasha; destruktor przywraca zegar.
 // Zagniezdzenia i wywolania z roznych rdzeni sa liczone atomowo.
 struct FlashWriteGuard {
   bool active = false;
   FlashWriteGuard() {
-    if (!rgbPanel || !esp_lcd_rgb_panel_set_pclk) return;
+    if (!rgbPanel) return;
     active = true;
-    if (__atomic_add_fetch(&flashGuardDepth, 1, __ATOMIC_SEQ_CST) == 1) {
+    if (__atomic_add_fetch(const_cast<int *>(&flashGuardDepth), 1, __ATOMIC_SEQ_CST) == 1 &&
+        esp_lcd_rgb_panel_set_pclk) {
       esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_FLASH_SAFE_HZ);
       // Nowy zegar zaczyna dzialac od najblizszego VSYNC (do ~1 klatki panelu).
       delay(70);
@@ -1036,9 +1081,11 @@ struct FlashWriteGuard {
   }
   ~FlashWriteGuard() {
     if (!active) return;
-    if (__atomic_sub_fetch(&flashGuardDepth, 1, __ATOMIC_SEQ_CST) == 0) {
-      esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_NORMAL_HZ);
+    if (__atomic_sub_fetch(const_cast<int *>(&flashGuardDepth), 1, __ATOMIC_SEQ_CST) == 0) {
+      if (esp_lcd_rgb_panel_set_pclk) esp_lcd_rgb_panel_set_pclk(rgbPanel, RGB_PCLK_NORMAL_HZ);
       requestRgbResync();
+      // Zapis mogl rozsynchronizowac bufory bounce — pelny restart strumienia (w loop()).
+      rgbHardResyncPending = true;
     }
   }
   FlashWriteGuard(const FlashWriteGuard &) = delete;
@@ -1118,6 +1165,9 @@ const char *wifiStatusName(wl_status_t status) {
 
 void connectWiFi() {
   // Minimalna, sprawdzona inicjalizacja stacji. Dane pozostają wyłącznie w secrets.h.
+  // Bez zapisu konfiguracji Wi-Fi do NVS (flash): dane i tak sa w secrets.h, a kazdy
+  // zapis NVS wylacza cache i moze przesunac obraz panelu RGB (tryb bounce).
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);
@@ -5813,6 +5863,7 @@ void bootStep(uint8_t idx, uint8_t state) {
     if (state != 0 && idx == BOOT_STEP_COUNT - 1) uiBootSetStatus("Gotowe!");
   }
   requestRgbResync();  // po kazdym blokujacym kroku: wyprostuj ewentualny dryf obrazu
+  rgbHardResyncAfterVsync();  // zapis flasha w kroku (LittleFS/CSV/NVS) => pelny restart strumienia
   bootPumpLvgl();
 }
 
@@ -6069,6 +6120,8 @@ void setup() {
   bootPumpFor(900);  // chwila na pokazanie "Gotowe!" — render synchroniczny, bez blokujacych operacji
   bootPumpStop();
   requestRgbResync();
+  rgbHardResyncPending = true;   // start zawsze konczymy czystym strumieniem obrazu
+  rgbHardResyncAfterVsync();
 
   // Pusty ekran glowny z initScreens() nie jest juz potrzebny (panel budujemy dynamicznie).
   if (homeScreen) {
@@ -6233,6 +6286,8 @@ uint32_t lvglNowMs = millis();
     }
     samplingWorkUs += micros() - workStart;
   } while (rgbVsyncCount == lastRenderedVsync && millis() - waitStartMs < 40);
+  // Tuz po VSYNC: ewentualna twarda resynchronizacja obrazu (po zapisie flasha / przerwie).
+  if (rgbVsyncCount != lastRenderedVsync) rgbHardResync();
   lastRenderedVsync = rgbVsyncCount;
   const uint32_t afterDelayStartUs = micros();
 
