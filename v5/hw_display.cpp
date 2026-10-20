@@ -43,6 +43,10 @@ static volatile uint32_t vsyncCount = 0;
 static volatile uint32_t lastVsyncUs = 0;
 static volatile uint32_t gapIgnoreUntilUs = 0;
 static volatile int flashDepth = 0;
+// Restart DMA co VSYNC (jak CONFIG_LCD_RGB_RESTART_IN_VSYNC). WYLACZONY: sterownik sam restartuje,
+// gdy zabraknie przerwan bounce, a restart w KAZDEJ klatce z nieIRAM-owego przerwania potrafi
+// sie spoznic i trwale przesunac obraz (komentarz w esp_lcd_panel_rgb.c). Do testow: polecenie 'r'.
+static volatile bool restartEveryVsync = false;
 static volatile uint32_t flashWrites = 0;
 // Faza: czas od "klatka skopiowana do buforow bounce" do VSYNC. Staly przy poprawnym
 // obrazie; przesuniecie o N x 80 linii zmienia go o N x ~7,4 ms i tak zostaje.
@@ -118,7 +122,7 @@ static bool onVsync(esp_lcd_panel_handle_t p, const esp_lcd_rgb_panel_event_data
       }
     }
   }
-  if (p) esp_lcd_rgb_panel_restart(p);
+  if (p && restartEveryVsync) esp_lcd_rgb_panel_restart(p);
   return false;
 }
 
@@ -214,6 +218,11 @@ void displaySetBacklight(uint8_t duty) { ledcWrite(BACKLIGHT_PIN, duty); }
 
 uint32_t displayVsyncCount() { return vsyncCount; }
 
+bool displayToggleVsyncRestart() {
+  restartEveryVsync = !restartEveryVsync;
+  return restartEveryVsync;
+}
+
 void displayRequestResync(uint8_t reason) {
   resyncReason = resyncReason | reason;
   resyncPending = true;
@@ -231,8 +240,7 @@ void displayResyncIfPending() {
   const uint8_t reason = resyncReason;
   resyncReason = 0;
   const int32_t before = phaseUs;
-  esp_lcd_panel_init(panel);
-  esp_lcd_rgb_panel_restart(panel);
+  esp_lcd_panel_init(panel);   // zatrzymuje i uruchamia strumien od poczatku klatki (pozycja bounce = 0)
   gapIgnoreUntilUs = nowUs() + 300000;
   badFrames = 0;
   // Bezpiecznik: gdy resynchronizacja z powodu fazy nie przywraca wzorca, po 3 probach

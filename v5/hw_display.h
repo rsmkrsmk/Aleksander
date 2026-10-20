@@ -16,6 +16,7 @@ void displayBacklightInit();
 void displaySetBacklight(uint8_t duty);   // 0 = 100% (AP3032 aktywne niskim)
 
 uint32_t displayVsyncCount();       // licznik klatek (VSYNC)
+bool displayToggleVsyncRestart();   // test: restart DMA co VSYNC wl./wyl. (zwraca nowy stan)
 void displayRequestResync(uint8_t reason);
 void displayResyncIfPending();      // wolac TYLKO z petli UI, tuz po VSYNC
 void displayResyncAfterVsync();     // czeka na VSYNC (max 70 ms) i wykonuje zalegla resynchronizacje

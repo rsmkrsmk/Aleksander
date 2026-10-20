@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define FW_VERSION "5.0.2"
+#define FW_VERSION "5.0.3"
 
 // ------------------------------- Dziecko ------------------------------------
 constexpr int BIRTH_DAY = 8;
@@ -63,7 +63,7 @@ constexpr uint8_t BACKLIGHT_DIM_DUTY = 119;
 
 // Okresowa twarda resynchronizacja obrazu (siatka bezpieczenstwa: przesuniecie, ktorego nie
 // wykryje detektor, znika najpozniej po tym czasie). 0 = wylaczone.
-constexpr uint32_t RGB_PERIODIC_RESYNC_MS = 60UL * 1000UL;
+constexpr uint32_t RGB_PERIODIC_RESYNC_MS = 0;   // wylaczone (okresowe mrugniecia nic nie dawaly)
 
 // ------------------------------- Karmienie ----------------------------------
 constexpr int COUNTER_WARN_MIN = 180;   // zolty

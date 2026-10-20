@@ -159,7 +159,6 @@ static void showScreen(UiScreen s) {
   else { buildDiagText(); uiShowDiag(model, diagText); }
   lastLiveMs = lastChartsMs = millis();
   chartsDue = false;
-  displayRequestResync(RESYNC_SCREEN);   // po zbudowaniu nowego ekranu — czysty strumien obrazu
 }
 
 static bool swallowTouch() { return uiScreen() == UiScreen::Saver; }
@@ -287,7 +286,6 @@ void appLoop() {
     storeFree(store);
     store = s;
     chartsDue = true;
-    displayRequestResync(RESYNC_DATA);   // jak w v4.1: po nowych danych wyprostuj obraz jeszcze raz
   }
 
   // Zadania z UI (poza callbackami LVGL).
@@ -315,6 +313,13 @@ void appLoop() {
   if (wantDim != dimmed) { dimmed = wantDim; applyBacklight(); }
   if (uiScreen() == UiScreen::Dash && idle > SAVER_TIMEOUT_MS) showScreen(UiScreen::Saver);
   if (uiScreen() == UiScreen::Diag && idle > DIAG_TIMEOUT_MS) showScreen(UiScreen::Dash);
+
+  // Polecenia testowe z monitora portu: r = restart DMA co VSYNC wl./wyl., h = wyprostuj obraz teraz.
+  while (Serial.available()) {
+    const int ch = Serial.read();
+    if (ch == 'r') Serial.printf("LCD: restart co VSYNC %s\n", displayToggleVsyncRestart() ? "WLACZONY" : "wylaczony");
+    else if (ch == 'h') { displayRequestResync(RESYNC_BOOT); Serial.println("LCD: reczna resynchronizacja."); }
+  }
 
   // Siatka bezpieczenstwa obrazu: okresowa twarda resynchronizacja.
   static uint32_t lastPeriodic = 0;
