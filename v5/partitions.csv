@@ -1,0 +1,7 @@
+# Leśny Dziennik v5 — ESP32-S3, Flash 16 MB, bez OTA.
+# Aplikacja 8 MB (fonty i grafiki ~3 MB), mała partycja LittleFS na cache ostatnich danych.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+phy_init, data, phy,     0xe000,   0x1000,
+factory,  app,  factory, 0x10000,  0x800000,
+spiffs,   data, spiffs,  0x810000, 0x100000,

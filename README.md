@@ -1,281 +1,155 @@
-# Rejestr karmienia Aleksandra — ESP32-S3 Touch LCD 4B
+# Leśny Dziennik Aleksandra — v5 (urządzenie = tylko wyświetlacz)
 
-Projekt prowadzi dotykowy **dziennik opieki** dla płytki Waveshare ESP32-S3-Touch-LCD-4B: karmienia piersią (minuty osobno LEWA/PRAWA), butelki (mleko matki/modyfikowane), pieluchy, odciąganie pokarmu i witaminę D. Urządzenie synchronizuje czas przez Wi‑Fi i NTP, dane zapisuje w pliku CSV w systemie plików **LittleFS** (wewnętrzny Flash), a równolegle serwuje **panel WWW** będący kopią interfejsu — dostępny pod `http://karmienie.local` lub adresem IP. Ekran główny pokazuje zegar, diody statusu, wiek Aleksandra (od 08.08.2026), wskazówkę dnia oraz licznik czasu od ostatniego karmienia z progami kolorów.
+Dziennik opieki nad niemowlęciem na płytce **Waveshare ESP32-S3-Touch-LCD-4B** (480×480, dotyk GT911) z panelem WWW na hostingu (`web-php/`).
 
-> **Nie trzeba używać ani podłączać karty microSD.** Program nie wykorzystuje złącza H3 do przechowywania danych i nie wymaga żadnego dodatkowego modułu ani przewodu.
+W wersji 5:
+- Wpisy dodaje się **wyłącznie na stronie WWW**.
+- Urządzenie pobiera dane z hostingu i je **wyświetla**: tablica, panel z 6 kartami, diagnostyka, pogoda, powiadomienia Telegram.
+- Urządzenie **niczego nie zapisuje na hosting**.
 
-Przed pierwszym uruchomieniem należy uzupełnić nazwę oraz hasło domowej sieci Wi‑Fi w pliku `OfficialWaveshareHelloWorld/secrets.h`. Nie należy przesyłać tego pliku z prawdziwym hasłem do publicznego repozytorium.
+Gałąź `v5` to firmware napisane od nowa na podstawie analizy `ANALIZA_V5.md`. Poprzednia wersja (v4.1, jeden plik `v3.ino`) jest na gałęzi `v4.1-claude-pazdziernik`.
 
-## Zawartość projektu
+---
 
-| Plik | Rola |
+## Zawartość
+
+| Ścieżka | Rola |
 |---|---|
-| `OfficialWaveshareHelloWorld/OfficialWaveshareHelloWorld.ino` | Główny program Arduino: ekran, dotyk, Wi‑Fi/NTP, formularze oraz zapis LittleFS. |
-| `OfficialWaveshareHelloWorld/config.h` | Parametry daty urodzenia, zakresu ml, motywu nocnego, Telegramu i OTA. |
-| `OfficialWaveshareHelloWorld/web_panel.h` | Panel WWW osadzony w pamięci programu (PROGMEM). |
-| `OfficialWaveshareHelloWorld/secrets.h` | Lokalne poświadczenia Wi‑Fi do uzupełnienia przez użytkownika. |
-| `OfficialWaveshareHelloWorld/secrets.h.example` | Bezpieczna kopia wzorcowa pliku Wi‑Fi. |
-| `LVGL_CONFIGURATION/lv_conf.h` | Konfiguracja LVGL 9.3 wymagana przez bibliotekę podczas kompilacji. |
-| `LCD_Official_Config_Test/LCD_Official_Config_Test.ino` | Jedyny zalecany test LCD: konfiguracja producenta z poprawionymi stałymi RGB565, bez LVGL ani Wi‑Fi. |
-| `LCD_TEST_INSTRUCTIONS.md` | Krótka instrukcja kompilacji i interpretacji wyniku jedynego testu LCD. |
-| `PROJECT_DESIGN.md` | Dokumentacja ekranów, modelu danych i zasad działania. |
+| `v5/` | **firmware v5** — folder szkicu Arduino (otwierasz `v5/v5.ino`) |
+| `web-php/` | panel WWW (PHP): źródło danych, formularze, API (`/api/revision`, `/api/export.csv`, `/api/status`) |
+| `tools/sim/`, `tools/sim5/` | symulator PC interfejsu LVGL i testy obliczeń v5 |
+| `tools/genassets.py`, `tools/lvfont.py` | generatory grafik (`ui_assets.h`) i fontów (`ui_fonts.h`) |
+| `ANALIZA_V5.md` | specyfikacja: co robi urządzenie, wzory, decyzje projektowe D1–D6 |
+| `ulepszenia19-10-26.md` | przegląd kodu z 19.10.2026 (bezpieczeństwo, hosting, pomysły) |
+| `docs/archiwum/` | dokumenty z wersji v3/v4 (historyczne) |
 
-## Wymagane oprogramowanie
+### Moduły firmware (`v5/`)
 
-Należy zainstalować aktualne Arduino IDE, a następnie dodać w Menedżerze płytek pakiet **esp32 by Espressif Systems** w wersji **3.2.0 lub nowszej**. Producent płytki dla projektów Arduino wskazuje bibliotekę **GFX_Library_for_Arduino** w wersji 1.6.0 lub nowszej oraz **LVGL** 9.3.0. [1]
-
-| Składnik | Wymaganie |
+| Plik | Co robi |
 |---|---|
-| Płytka w Arduino IDE | `ESP32S3 Dev Module` z pakietu `esp32 by Espressif Systems` >= 3.2.0. |
-| Biblioteka pomocnicza panelu | `GFX_Library_for_Arduino` >= 1.6.0 (ekspander i komendy inicjalizacyjne ST7701; obraz obsługuje natywne `esp_lcd`). |
-| Biblioteka interfejsu | `lvgl` 9.3.0. |
-| Dane | Wewnętrzna pamięć Flash ESP32 — LittleFS, bez karty microSD. |
+| `v5.ino` | tylko `setup()`/`loop()` → `app.cpp` |
+| `app.cpp` | kolejność startu (ekran startowy, 5 kroków), pętla UI zsynchronizowana z VSYNC, przełączanie ekranów, przyciemnianie, tryb nocny, diagnostyka |
+| `hw_display.cpp` | ST7701 przez ekspander TCA9554, `esp_lcd` RGB (bounce 80 linii + 2 FB w PSRAM), LVGL DIRECT, podświetlenie, twarda resynchronizacja obrazu, detektor przesunięcia, `FlashWriteGuard` |
+| `hw_touch.cpp` | GT911 (SensorLib) jako wskaźnik LVGL; dotyk tablicy tylko otwiera panel |
+| `net.cpp` | Wi-Fi (bez zapisów NVS), NTP, wspólny klient HTTP(S) z buforem w PSRAM (Content-Length / chunked) |
+| `host_sync.cpp` | **zadanie sieciowe (rdzeń 0)**: rewizja co 10 s → pobranie CSV → parsowanie → przekazanie do UI; pogoda; Telegram; kopia dzienna; cache na flashu |
+| `store.cpp` | parser CSV → tablica wpisów w PSRAM, posortowana po czasie |
+| `stats.cpp` | **wszystkie obliczenia** do ekranu (karmienia, przerwy, rytm, mleko, sen, okno drzemki, waga, noce, kąpiele, wiek, wskazówka) — czysty C++, testowany na PC |
+| `weather.cpp`, `weather_parse.cpp` | Open-Meteo (HTTP), parser, pamięć RTC |
+| `telegram.cpp` | wiadomość startowa, okno drzemki, kopia CSV (`sendDocument`) |
+| `diag.cpp` | watchdog zadań, liczniki uruchomień (RTC), CPU, minimum RAM |
+| `ui.cpp` + `ui_modern.h` | ekrany: start (jeż), tablica, panel (Dziś, Mleko, Odstępy, Waga, Sen, Kąpiel), diagnostyka |
+| `ui_model.h` | dane do wyświetlenia (`UiModel`) |
+| `ui_fonts.h`, `ui_assets.h`, `development_tips.h` | fonty z polskimi znakami, grafiki, wskazówki dnia 0–600 |
+| `app_config.h` | stałe (urodziny, progi, czasy, adresy hostingu) |
+| `secrets.h.example` | wzór pliku z Wi-Fi i Telegramem (`secrets.h` nie trafia do repozytorium) |
+| `partitions.csv` | aplikacja 8 MB + 1 MB LittleFS na cache danych |
+| `lv_conf.h` | konfiguracja LVGL (do skopiowania do bibliotek, patrz niżej) |
 
-Oficjalne demo producenta zawiera również biblioteki pomocnicze, ale ten projekt nie wymaga jego modułów RTC, IMU, audio ani zewnętrznej pamięci SD. [1]
+---
 
-## Obowiązkowa konfiguracja LVGL — naprawa błędu `lv_conf.h`
+## Kompilacja (Arduino IDE)
 
-Błąd `fatal error: ../../lv_conf.h: No such file or directory` oznacza, że biblioteka LVGL nie ma własnego pliku konfiguracyjnego. Samo umieszczenie `lv_conf.h` obok pliku `.ino` **nie wystarcza**. Zgodnie z dokumentacją LVGL plik musi znajdować się **obok katalogu `lvgl`**, bezpośrednio w katalogu bibliotek Arduino. [2]
+1. **Biblioteki i płytka.** Wersje sprawdzone 20.10.2026 kompilacją pełnego szkicu:
 
-Należy skopiować plik `LVGL_CONFIGURATION/lv_conf.h` z dostarczonego archiwum do dokładnie tej lokalizacji:
+   | Składnik | Wersja |
+   |---|---|
+   | esp32 by Espressif | 3.3.12 |
+   | lvgl | 9.3.0 |
+   | GFX Library for Arduino | 1.6.9 |
+   | SensorLib | 0.5.1 |
 
-```text
-C:\\Users\\pc\\Documents\\Arduino\\libraries\\lv_conf.h
+   Starsze 3.2.x powinny działać (kod ma zgodność wsteczną).
+2. **`lv_conf.h`:** skopiuj `v5/lv_conf.h` do folderu bibliotek Arduino, obok folderu `lvgl`, czyli `Dokumenty/Arduino/libraries/lv_conf.h`. Jeśli masz już plik z v4, możesz go zostawić — jest taki sam.
+3. **Sekrety:** w folderze `v5` skopiuj `secrets.h.example` jako `secrets.h` i uzupełnij:
+   - `WIFI_SSID`, `WIFI_PASSWORD`,
+   - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+
+   Stary `secrets.h` z v4 też zadziała, ale **Telegram trzeba dopisać**, bo w v4 był w `config.h`.
+
+   ⚠️ Token bota, który był w publicznym repozytorium, należy unieważnić (@BotFather → `/revoke`) i wpisać nowy.
+4. **Otwórz `v5/v5.ino`.** Folder musi nazywać się `v5`.
+5. **Narzędzia:**
+
+   | Ustawienie | Wartość |
+   |---|---|
+   | Płytka | **ESP32S3 Dev Module** |
+   | PSRAM | **OPI PSRAM** |
+   | Flash Size | **16MB (128Mb)** |
+   | Partition Scheme | **Custom** (zawsze używany jest `v5/partitions.csv`; przy innym wyborze też, ale limit rozmiaru bywa mniejszy) |
+   | USB CDC On Boot | jak dotąd (Enabled, jeśli log Seriala czytasz przez natywny port USB) |
+6. **Wgraj.** Zmiana tablicy partycji czyści stare dane LittleFS z v4. To nic nie szkodzi: dane są na hostingu, a cache odtworzy się po pierwszym pobraniu.
+
+Rozmiar (kompilacja 20.10.2026): program ~2,25 MB z 8 MB, zmienne globalne 62 KB RAM.
+
+---
+
+## Jak działa
+
+```
+Panel WWW (PHP) ──GET /api/revision co 10 s──► zadanie sieciowe (rdzeń 0)
+               ──GET /api/export.csv przy zmianie──► parser → tablica wpisów w PSRAM ──► pętla UI (rdzeń 1)
+               ──GET /api/status co 10 min (ustawienie powiadomień o drzemce)            │
+Open-Meteo ────HTTP co 20 min──► pogoda (RAM + RTC)                                     ├─ stats.cpp → UiModel
+Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie                                └─ LVGL: tablica / panel / diagnostyka
 ```
 
-Po wykonaniu kopiowania układ katalogów ma wyglądać następująco:
+**Ekrany i nawigacja**
+- **Start:** jeż, 5 kroków — Wi-Fi, zegar, pamięć (cache), pogoda, dane z WWW.
+- **Tablica:** zegar, pogoda, drzemka, pierścień od ostatniego karmienia, 3 kafelki dnia, prognoza godzinowa, ubiór, wskazówka dnia.
+- **Panel:** dotknięcie tablicy. 6 kart przełączanych paskiem lub gestem; na karcie Waga dotknięcie wykresu zmienia widok.
+- **Powroty i diagnostyka:** liść w panelu wraca do tablicy; po 2 min bezczynności panel też wraca do tablicy. Długie przytrzymanie zegara w panelu otwiera diagnostykę.
 
-```text
-C:\\Users\\pc\\Documents\\Arduino\\libraries\\
-├── lvgl\\
-│   ├── src\\
-│   └── lvgl.h
-├── GFX_Library_for_Arduino\\
-└── lv_conf.h
+**Tryb nocny** (21:00–7:00): ciemna paleta i jasność ~65%. W dzień ekran przyciemnia się po 60 s.
+
+**Brak internetu przy starcie:** urządzenie pokazuje ostatnie dane z cache. Cache jest zapisywany tylko przy zmianie danych, najwyżej raz na 30 min — to **jedyny zapis do flasha** w pracy urządzenia.
+
+**Powiadomienia o oknie drzemki** włącza się na **stronie WWW** (przełącznik „Sen: powiadomienia Telegram”). Urządzenie tylko odczytuje to ustawienie.
+
+**Stabilność obrazu**
+- Poza rzadkim zapisem cache urządzenie nie dotyka flasha (dane w PSRAM, pogoda w RAM RTC, Wi-Fi bez NVS).
+- Zostają twarda resynchronizacja i detektor przesunięcia jako zabezpieczenie. Ich liczniki są w diagnostyce.
+- Gdyby przesunięcia mimo to wracały, rozwiązaniem u źródła jest kompilacja w PlatformIO z `CONFIG_SPIRAM_XIP_FROM_PSRAM` (patrz `ANALIZA_V5.md`, 7.4).
+
+### Zmiany względem v4.1
+
+**Usunięte:**
+- formularze i zapisy z urządzenia (pielucha, odciąganie), wysyłanie CSV na hosting,
+- stare ekrany LVGL,
+- serwer WWW, mDNS, OTA,
+- lokalna archiwizacja,
+- cache pogody na flashu, ustawienia na flashu.
+
+**Poprawione:**
+- „Śpi od –” — zdarzenia snu z przyszłości (auto-sen panelu WWW) są pomijane,
+- sen liczony z posortowanych zdarzeń, z odrzuceniem sesji > 14 h,
+- średnia przerwa z posortowanych czasów,
+- ostatnia waga = najpóźniejszy pomiar,
+- widok wagi nie wraca sam do wykresu wagi,
+- karta panelu przebudowuje się tylko przy zmianie danych,
+- watchdog obejmuje też zadanie sieciowe,
+- poprawne jednostki timeoutów TLS.
+
+**Wynik obliczeń** porównany z v4.1 na tym samym pliku 40 dni danych (`tools/sim5`): identyczne wykresy tygodni, nocy, kąpieli i wagi.
+
+---
+
+## Testy na PC
+
+```bash
+cd tools/sim5
+g++ -std=c++17 -O1 -I../../v5 test_stats.cpp ../../v5/store.cpp ../../v5/stats.cpp -o test_stats
+python3 ../sim/gen_csv.py                      # syntetyczne dane do /tmp/fw_data.csv
+TZ="CET-1CEST,M3.5.0,M10.5.0/3" ./test_stats /tmp/fw_data.csv
 ```
 
-Nie należy umieszczać pliku w `C:\\Users\\pc\\Documents\\Arduino\\libraries\\lvgl\\lv_conf.h`, ponieważ taka lokalizacja nie usuwa zgłoszonego błędu. Należy zamknąć Arduino IDE, skopiować plik, uruchomić IDE ponownie i dopiero wtedy rozpocząć kompilację. Plik dostarczony z projektem ma aktywną konfigurację dla **LVGL 9.3**, głębię koloru RGB565 (`LV_COLOR_DEPTH 16`) oraz włączone komponenty używane przez program, w tym przyciski, etykiety i suwak.
+Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5.h`, opis w pliku).
 
-## Wewnętrzna pamięć danych
+---
 
-Program podczas pierwszego uruchomienia tworzy w LittleFS plik `/karmienia.csv` z nagłówkiem `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`. Każde następne użycie przycisku **ZAPISZ** dopisuje nowy wiersz; poprzednie rekordy nie są nadpisywane. Kolumny minut piersi są dopisywane dla karmień piersią; starsze/pozostałe wpisy używają tylko czterech pierwszych kolumn.
+## Panel WWW
 
-| Element CSV | Przykład |
-|---|---|
-| Nagłówek | `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min` |
-| Wpis karmienia piersią | `2026-08-18,11:45,KARMIENIE,0,10,8` |
-| Wpis mleka (butelka) | `2026-08-18,12:30,MLEKO_MATKI,90` |
-| Wpis mleka mieszanego | `2026-08-18,12:30,MLEKO_MIESZANE,120` |
-| Zdarzenie snu | `2026-08-18,13:10,SEN_START,0` / `...,SEN_STOP,0` |
-| Waga (gramy w kolumnie ml) | `2026-08-18,09:00,WAGA,4200` |
-
-Obsługiwane typy wpisów: `KARMIENIE`, `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `MLEKO_MIESZANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `ODCIAGANIE`, `WITAMINA_D`, `WAGA`, `SEN_START`, `SEN_STOP`.
-
-**Butelka — rodzaj i ilość:** w formularzu karmienia (panel WWW i strona serwowana przez urządzenie) rodzaj mleka wybiera się dwoma niezależnymi przełącznikami **Matki** / **Modyfikowane**. Można zaznaczyć jeden rodzaj (wtedy jeden suwak ilości) lub **oba naraz** — wtedy zamiast wspólnej ilości pojawiają się **dwa osobne pola** (Matki / Modyfikowane), każde otwiera po kliknięciu małe okno wyboru ilości. Mleko mieszane zapisywane jest jako **dwa osobne wiersze CSV** (`MLEKO_MATKI` + `MLEKO_MODYFIKOWANE`) o tej samej godzinie co karmienie, dzięki czemu można podać różne ilości każdego rodzaju. Zakres ilości: **20–200 ml, skok 10 ml (domyślnie 60)**. W raportach mleko rozbite jest na kategorie Matki / Modyfikowane (oraz historyczne Mieszane dla starych wpisów jednowierszowych `MLEKO_MIESZANE`, które nadal są odczytywane i liczone). (Odciąganie ma osobny, niezmieniony zakres.) *Ekran dotykowy LVGL urządzenia pozostaje bez zmian — tam mieszane zapisuje się jak dotąd.*
-
-**Edycja wpisu karmienia:** przy każdym karmieniu w dzienniku dnia (panel WWW hostingu oraz strona serwowana przez urządzenie) obok przycisku usuwania jest przycisk edycji (✎). Otwiera on formularz z wypełnionymi wartościami, w którym można:
-
-- **dodać mleko** do karmienia, które go nie miało (rozwiń **SZCZEGÓŁY**, wybierz rodzaj i ilość),
-- **zmienić rodzaj/ilość** już zapisanego mleka (w tym przełączyć na `MLEKO_MIESZANE`, zaznaczając oba rodzaje),
-- **usunąć mleko** z karmienia (przycisk **Usuń mleko**, karmienie pozostaje),
-- **zmienić godzinę** karmienia (przesuwa oba sparowane wiersze).
-
-Edycja jest wykonywana **w miejscu** — wiersze nie zmieniają swojej pozycji w pliku (żaden wpis nie „przeskakuje” na koniec). Minuty karmienia piersią pozostają bez zmian. Karmienie i jego mleko to fizycznie dwa wiersze CSV o tej samej godzinie; przy dodawaniu mleka do karmienia bez mleka nowy wiersz `MLEKO_*` jest wstawiany bezpośrednio za wierszem `KARMIENIE`.
-
-Dane pozostają w wewnętrznej pamięci Flash również po zwykłym wyłączeniu urządzenia. Należy jednak zachować ostrożność przy wgrywaniu nowego szkicu lub zmianie ustawień partycji Flash: operacja wymazania Flash może usunąć historię. Cały plik można wyeksportować z panelu WWW (`/export.csv`) oraz zaimportować z powrotem (import robi najpierw kopię bezpieczeństwa). Gdy plik przekroczy 256 KB, urządzenie tworzy jednorazowo kopię archiwalną i sygnalizuje to w diagnostyce (dane nie są usuwane).
-
-## Konfiguracja Wi‑Fi i daty urodzenia
-
-W katalogu `OfficialWaveshareHelloWorld` należy otworzyć plik `secrets.h`, a następnie wpisać dane własnej sieci.
-
-```cpp
-constexpr char WIFI_SSID[] = "NAZWA_TWOJEJ_SIECI";
-constexpr char WIFI_PASSWORD[] = "TWOJE_HASLO";
-```
-
-Data urodzenia jest ustawiona na 08.08.2026. Można ją zmienić wyłącznie w `config.h`.
-
-```cpp
-constexpr int BIRTH_DAY = 8;
-constexpr int BIRTH_MONTH = 8;
-constexpr int BIRTH_YEAR = 2026;
-```
-
-Program używa reguły czasowej dla Polski, włączając automatyczne przejście pomiędzy czasem zimowym a letnim. Dla innej lokalizacji należy zmienić `TIMEZONE_RULE` w `config.h`.
-
-## Kompilacja i wgranie programu
-
-1. W Arduino IDE należy wybrać płytkę **ESP32S3 Dev Module** oraz port USB urządzenia.
-2. W ustawieniach płyty trzeba ustawić **PSRAM: OPI PSRAM** oraz **Flash Size: 16MB (128Mb)**. Jeżeli używany jest natywny port USB-OTG, warto również włączyć USB CDC przy starcie.
-3. W polu **Partition Scheme** należy wybrać wariant dla pamięci 16 MB zawierający **SPIFFS**, np. `16M Flash (3MB APP/9.9MB SPIFFS)`. LittleFS korzysta z tej partycji danych. Nie wybieraj wariantu FATFS.
-4. Należy otworzyć `OfficialWaveshareHelloWorld/OfficialWaveshareHelloWorld.ino` i skompilować szkic. Arduino IDE załaduje pliki `.h` z tego samego katalogu automatycznie.
-5. Bezpośrednio po wgraniu ekran przez chwilę pokaże biały ekran kontrolny z tekstem `Rejestr karmienia / Uruchamianie...`, a następnie program połączy się z Wi‑Fi, pobierze czas z NTP, zainicjalizuje LittleFS i wyświetli ekran główny.
-
-Jeśli płytka nie rozpocznie wgrywania, należy przytrzymać `BOOT`, krótko nacisnąć `RST` albo podłączyć USB ponownie — zależnie od trybu uruchomienia urządzenia.
-
-## Obsługa na ekranie
-
-**Ekran główny** — pasek górny z tytułem, diodami statusu (`W` Wi‑Fi, `P` Pamięć, `C` Czas; zielona = OK, czerwona = błąd) i zegarem. Poniżej: karta **OSTATNIE KARMIENIE** (lewa) oraz wiek Aleksandra (prawa). Pod nimi pasek licznika **OSTATNIE KARMIENIE: X temu** — zielony <3 h, żółty 3–4 h, czerwony ≥4 h od karmienia. Dalej karta **OSTATNIA BUTELKA** (pełna szerokość) oraz przyciski nawigacji w układzie 3×2: **SEN**, **INNE**, **WAGA** (górny rząd) i **KALENDARZ**, **PODSUMOWANIE** (dolny rząd); nad nimi duży przycisk **KARMIENIE**. (Codzienna wskazówka rozwojowa nie jest już pokazywana na ekranie głównym — pozostaje dostępna w panelu WWW oraz na wygaszaczu.)
-
-**Formularz KARMIENIE** — czas z zegara urządzenia przesuwany o ±5 min, minuty piersi LEWA/PRAWA krok po 5 (0–90), a po rozwinięciu SZCZEGÓŁY: rodzaj mleka i ilość suwakiem 10–120 ml. ZAPISZ dopisuje wpis do CSV.
-
-**SEN** — dedykowany ekran śledzenia snu wzorowany na aplikacji Napper (patrz sekcja *Funkcje dodatkowe*): przycisk **ZASNĄŁ / OBUDZIŁ SIĘ** (opisuje fakt), przewidywane okno drzemki wg wieku (kolorowy pasek stanu), oraz bilans dnia (drzemki, sen dzień/noc względem orientacyjnego celu).
-
-**INNE** — szybkie akcje: **PIELUCHA**, **ODCIAG POKARMU**, **DIAGNOSTYKA**.
-
-**PODSUMOWANIE** — dziś + wczoraj z każdym karmieniem osobno (godzina, typ, minuty L/P lub ml); przycisk „+ WCZYTAJ STARSZE DNI" dokłada historię po 7 dni. Na pasku: **COFNIJ** (dwuetapowe usunięcie ostatniego wpisu) i **WIT.D** (dawka dzienna).
-
-Pełny opis ekranów i formatu danych znajduje się w `PROJECT_DESIGN.md`.
-
-## Funkcje dodatkowe
-
-| Funkcja | Opis |
-|---|---|
-| **SEN (wake windows)** | Śledzenie snu wzorowane na Napper: okna czuwania i zapotrzebowanie na sen wg wieku, przewidywanie następnej drzemki (pasek stanu: za wcześnie / okno drzemki / przekroczone), bilans dobowy snu (drzemki, sen dzień/noc vs cel). Dostępne na urządzeniu (przycisk **SEN**), w panelu WWW i skrótowo na wygaszaczu |
-| Powiadomienia snu | Telegram raz na okno czuwania (wejście w okno drzemki i przekroczenie). Włącznik **„Sen: powiadomienia Telegram"** w DIAGNOSTYCE (urządzenie i WWW), zapisywany trwale w `/ustawienia.cfg` |
-| Wykres wagi (WWW) | Krzywa pomiarów na tle mediany WHO i oczekiwanego zakresu (min–max) oraz **pasma przyrostu od wagi wypisowej** (2850 g od 10.08.2026: 25–30 g/d do ~3 mies., 15–20 g/d do ~6 mies.) |
-| Panel WWW | Kopie wszystkich widoków jako popupy (w tym **SEN**); eksport CSV (`/export.csv`); import CSV; polling co 10 s |
-| Motyw nocny | 21:00–7:00 ciemna paleta + przyciemnione podświetlenie (na urządzeniu i w WWW) |
-| Cofnij | Bezpieczne, atomowe usunięcie ostatniego wpisu (urządzenie i WWW) |
-| **Edycja karmienia** | Zmiana mleka (dodanie / rodzaj / ilość / usunięcie) i godziny istniejącego karmienia **w miejscu**, bez zmiany kolejności wierszy w CSV. Dostępna w panelu WWW i na stronie serwowanej przez urządzenie (przycisk ✎ przy karmieniu). Endpoint `POST /api/update-feeding` (`feedLine`, `when`, oraz `milkMother`/`milkModified`/`milkMl` albo `milkRemove=1`). Po zapisie uruchamia synchronizację z hostingiem |
-| Backup | Automatyczna dzienna kopia `/karmienia_backup.csv`; miękka rotacja (archiwum) po przekroczeniu 256 KB |
-| **Synchronizacja z hostingiem (v4)** | **Hosting jest źródłem prawdy.** Urządzenie co 10 s sprawdza `GET /api/revision`; gdy rewizja się zmieniła, pobiera pełny CSV (`GET /api/export.csv`) i aktualizuje lokalny mirror + ekran. Zapis z urządzenia: lokalny zapis + push pełnego CSV (`POST /api/upload-data`); polling wraca aktualizacje. Token `PANEL_UPLOAD_TOKEN` wymagany przy zapisach z urządzenia (patrz „Znane długi / TODO”) |
-| Telegram | Powiadomienia o wpisach do drugiego rodzica — uzupełnij `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID` w `config.h` (puste = wyłączone). Wysyłka w osobnym zadaniu (nie blokuje UI) |
-| OTA | **Wyłączone w v4** (zakomentowane). Wgrywanie firmware wyłącznie przez USB |
-| mDNS | **Wyłączone w v4** (zakomentowane). Dostęp po adresie IP |
-| NTP | Re-synchronizacja zegara co 6 h |
-| Wygaszacz | Po 2 min bezczynności: duży zegar z datą, ostatnie karmienie (kolor) + informacja o oknie drzemki, wskazówka rozwojowa, statystyki dnia, pogoda z Open-Meteo z ikoną, opisem, min/max, 3h prognozą i poradą ubioru |
-| Pogoda | Open-Meteo (HTTP, darmowe, bez klucza API), `apparent_temperature`, cache w LittleFS |
-
-Przy starcie w Monitorze Portu Serial dostępna jest inwentaryzacja partycji i wolnego miejsca (aplikacja, dane, Flash/Heap/PSRAM, zajętość LittleFS).
-
-## Diagnostyka
-
-| Objaw | Najbardziej prawdopodobna przyczyna i rozwiązanie |
-|---|---|
-| Zegar pokazuje „Brak potwierdzonego czasu” | Sprawdź `secrets.h`, zasięg Wi‑Fi oraz czy sieć ma dostęp do internetu. |
-| Status `Pamiec: BLAD` | Sprawdź, czy `Partition Scheme` zawiera `SPIFFS` i wgraj szkic ponownie. Jeżeli błąd pozostaje, wymaż Flash w Arduino IDE i wgraj program ponownie; spowoduje to usunięcie danych. |
-| Kompilacja kończy się błędem braku biblioteki | Zainstaluj `GFX_Library_for_Arduino` oraz `lvgl` w podanej wersji. |
-  | Ekran jest czarny po wgraniu starszej wersji szkicu | Wgraj obecną wersję. Poprzednie szkice pomijały wymaganą sekwencję pinów `5` i `6` ekspandera TCA9554 przed uruchomieniem panelu. Oficjalny przykład Waveshare wykonuje tę sekwencję, aby uruchomić panel ST7701. |
-  | Ekran nadal jest czarny po wgraniu obecnej wersji | Wgraj wyłącznie `LCD_Official_Config_Test/LCD_Official_Config_Test.ino` (szkic diagnostyczny z sekwencją uruchomienia oficjalnego przykładu `01_HelloWorld`). Prześlij pełny log z monitora portu, zwłaszcza komunikaty rozpoczynające się od `LCD:`. |
-| Po aktualizacji programu brakuje historii | Sprawdź ustawienia wgrywania; wymazanie Flash lub zmiana schematu partycji usuwa dane LittleFS. |
-
-## Znane długi / TODO (bezpieczeństwo)
-
-- **Token API (`/api/*`)** — w v4 urządzenie pisze dane przez hosting, dlatego **wymagany jest token zapisu** (`PANEL_UPLOAD_TOKEN` w `config.h` + `UPLOAD_TOKEN` na hostingu). Obecnie pusty = rozwiązanie testowe. Każdy, kto zna URL, może nadpisać dane na hostingu. Przed wyjściem poza testy: ustawić wspólny sekret po obu stronach.
-- **Token Telegrama jawny w repo** — `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` są wpisane w `config.h` w publicznym repozytorium. Zalecane: zrewokować bota u @BotFather i przenieść sekrety poza repo (np. do `secrets.h`, który nie jest publikowany).
-
-## Historia zmian
-
-Poniżej chronologiczny wykaz wprowadzonych zmian (od najnowszych). Każda pozycja opisuje **co zmieniła** i **co dodała**.
-
-### v4.1 (gałąź `v4.1-claude-pazdziernik`) — nowy interfejs urządzenia, stabilność obrazu i pamięci
-
-**Pliki:** główny szkic to `v3.ino` + `ui_modern.h`, `ui_fonts.h`, `ui_assets.h`, `config.h` (muszą leżeć w jednym folderze; nie trzymać drugiej kopii `.ino`). Opis interfejsu: `UI_NOWY_INTERFEJS.md`. Symulator PC i skrypty: `tools/sim/` (`make sim_ui`, `make sim_fw`; `extract_glue.py` zapisuje `glue_extract.h` — **nie commitować**, usunąć po użyciu).
-
-**Interfejs (`ui_modern.h`)**
-- Ekran startowy: **jeż** (uśmiech, mruganie, rumieńce, podskok co 2. mrugnięcie) na statycznym tle — bez świetlików i animacji tła (powodowały przesunięcia obrazu). Bootscreen jest odświeżany **tylko między krokami startu** (`bootStep`, `bootPumpFor`), bez osobnego wątku (wątek głodził IDLE0 → `task_wdt`).
-- Tablica (wygaszacz): mniej animacji (bez obrotu promieni, pulsu dysku, bujania księżyca; 2 migające gwiazdki w ikonie pogody; 3 krople/płatki bez obrotu). Kafelki: „karmień dziś”, **„mleka dziś”** (suma ml z dziś, `m.statVal[1]`), „średnia przerwa”.
-- Strona **Waga**: dwa widoki w tym samym miejscu, **przełączane dotknięciem wykresu** (bez timera; przeciągnięcie w bok nadal zmienia stronę — `ui_weight_click_cb` ignoruje gest). (1) prosty wykres wagi: gruba linia z punktami + cienka mediana WHO jako odniesienie, oś w kg i tygodniach życia, opis ostatniego pomiaru, legenda; (2) przyrost g/dzień tydzień po tygodniu. Pod nimi stałe kafelki „Od urodzenia” (g/dzień, +g w N dni) i „Ostatnie 2 tygodnie” (g/dzień, norma 25–30 / 15–20 / 10–15 g). Dane liczy `uiFillCharts` (pola `wpN/wpDay/wpG/wSince/wGainTotal/w14…` w `UiModel`); mediana WHO z tablic w `ui_modern.h` (kopia z `web-php/ui/app.js`). Wskaźniki widoków zerowane w `ui_page_reset(3)`, `uiDashCreate`, `uiDashDestroy`. Wcześniejsza wersja z pasmami WHO P3–P97 i przyrostu była nieczytelna — celowo usunięta.
-- Duże bufory UI (`uiBars`, `uiFeedTs`, `uiFeedFirst`, `uiWts`) są w **PSRAM** (`ui_alloc_big`) — wewnętrzny RAM jest deficytowy (TLS/Wi‑Fi potrzebują dużych ciągłych bloków; po dodaniu nowego UI brak RAM dawał „błąd TLS” i niepełne pobrania CSV).
-
-**Obraz panelu RGB (przesuwanie „jak na rolce”)**
-- **Tryb panelu: bounce buffer + 2 FB w PSRAM (`RGB_USE_BOUNCE = true`).** 19.10.2026 sprawdzono tryb EDMA bez bounce (`false`): obraz nie przesuwał się przy zapisie, ale przy renderowaniu brakowało pasma PSRAM — poziome linie przy lewej krawędzi, czarne mruganie, przesuwanie w lewo, mocniej przy dotyku (ten sam objaw co w PR #5, który naprawiło właśnie wprowadzenie bounce). **Nie wracać do `false`.**
-- **Przyczyna przesunięć w trybie bounce:** dokumentacja Espressif — *„the LCD CANNOT function if the external memory cache is disabled”*; cache jest wyłączany przy każdym zapisie/kasowaniu flasha (LittleFS, NVS). Przerwania uzupełniające bufory bounce stoją, a po wznowieniu pozycja kopiowania (`bounce_pos_px`) bywa przesunięta. Zwykły restart DMA przy VSYNC (`esp_lcd_rgb_panel_restart`) zeruje ją **tylko gdy przekracza 2 bufory** (źródło `esp_lcd_panel_rgb.c`), więc obraz mógł zostać przesunięty na stałe mimo restartu co klatkę.
-- **Naprawa — twarda resynchronizacja `rgbHardResync()`:** ponowne `esp_lcd_panel_init()` na działającym panelu wywołuje `lcd_rgb_panel_start_transmission()`: stop LCD, reset FIFO i DMA, `bounce_pos_px = 0`, napełnienie obu buforów, start (bez alokacji, bez dotykania FB/LVGL; koszt: jedno mrugnięcie). Zlecana flagą `rgbHardResyncPending`: (1) po każdym zapisie pod `FlashWriteGuard`, (2) przez detektor w `rgbVsyncCallback` — spóźniony VSYNC (> klatka + 15 ms) = przerwania stały, (3) na końcu startu i po krokach startu. Wykonywana **tylko na rdzeniu pętli, tuż po VSYNC** (`loop()`, `rgbHardResyncAfterVsync()`), nie częściej niż co 700 ms, nigdy w trakcie zapisu. W logu: „LCD: twarda resynchronizacja obrazu (#N)”.
-- **Detektor przesunięcia obrazu (faza bounce):** callback sterownika „klatka skopiowana do buforów bounce” (`on_frame_buf_complete` / starsze `on_bounce_frame_finish`, wybór przez SFINAE w `RgbCbCompat`) zapisuje czas; w `rgbVsyncCallback` liczona jest faza (VSYNC − to zdarzenie). W poprawnym stanie jest stała; przesunięty obraz = kopiowanie rozjechane o N × 80 linii = faza zmieniona o N × ~7,4 ms. Wzorzec mierzony po czystym starcie (4 klatki po pierwszej twardej resynchronizacji); 3 klatki z rzędu poza tolerancją ±3 ms → twarda resynchronizacja (powód 4). Bezpiecznik: 3 takie resynchronizacje w 5 s → wzorzec mierzony od nowa (bez mrugania w kółko). Dodatkowo resynchronizacja po każdym `applyHostMirrorUpdate()` (powód 8). Log: „LCD: twarda resynchronizacja obrazu (#N, powod R, faza X us, wzorzec Y us)” — powody bitowo: 1 zapis flasha, 2 spóźniony VSYNC, 4 przesunięta faza, 8 nowe dane z WWW. Start loguje „detektor przesuniecia obrazu aktywny/NIEDOSTEPNY”.
-- `WiFi.persistent(false)` — Wi‑Fi nie zapisuje konfiguracji do NVS (każdy taki zapis wyłączał cache).
-- Zegar pikseli: **6 MHz** (`RGB_PCLK_NORMAL_HZ`). 12 MHz powodowało przesunięcie obrazu — nie zwiększać.
-- Restart DMA przy każdym VSYNC (`RGB_RESTART_EVERY_VSYNC`, tylko w trybie bounce) + punktowo `requestRgbResync()`.
-- `FlashWriteGuard`: na czas zapisu obniża PCLK do 1 MHz (więcej zapasu buforów), potem przywraca i zleca twardą resynchronizację. Działa też, gdy rdzeń nie ma `esp_lcd_rgb_panel_set_pclk` (wtedy tylko resynchronizacja).
-- Pozostałe: `LineReader` (czytnik CSV z buforem 512 B i `delay(1)`), cache pogody zapisywany najwyżej co 30 min i tylko po zmianie, plik backupu wczytywany jednorazowo do PSRAM.
-- Pętla `loop()` synchronizuje render z VSYNC (`rgbVsyncCount`, czekanie max 40 ms przed `lv_timer_handler()`), dotyk czytany co 5 ms (`lastTouchPollUs`), `checkSleepNotifications()` co 1 s.
-
-**Wątki / restarty**
-- `telegramTask` (rdzeń 0) **nie może dotykać LVGL ani globali czytanych w `loop()`** (rdzeń 1). `downloadCsvFromHost()` tylko ustawia `hostMirrorChanged = true`; odświeżenie (`applyHostMirrorUpdate()`: `loadLatestEntries`, `invalidateDayStats`, aktualizacja ekranu/wygaszacza) robi `loop()` oraz `syncOnBoot()`. Naruszenie tej zasady dawało restart (LoadProhibited) po dotknięciu ekranu.
-- Restart `rst:0x1 (POWERON)` bez komunikatu paniki to zwykle zasilanie/USB (zasilacz 5 V/2 A, krótki kabel), nie firmware.
-
-**Telegram — backup CSV (`sendBackupViaTelegram`)**
-- Plik jest wczytywany **jednorazowo do PSRAM** (pod `FlashWriteGuard`, limit 1 MB; przy braku pamięci awaryjnie czytanie porcjami), a transmisja TLS idzie bez dostępu do flasha (czytanie z flasha w trakcie wysyłki przesuwało obraz).
-- Każdy zapis do gniazda jest kontrolowany (`writeAll`: pętla na `client.write`, błąd przy rozłączeniu lub braku postępu 8 s) — wcześniej częściowy zapis dawał `Content-Length` niezgodny z danymi i brak odpowiedzi (kod 0), choć wiadomość tekstowa przechodziła. Oczekiwanie na odpowiedź do 15 s. Ponawianie co 30 s do skutku bez zmian. Log błędu: „Telegram: backup — blad zapisu do gniazda”.
-- `uploadCsvToHost()` nadal pisze bez kontroli częściowych zapisów (ewentualna kolejna poprawka wg wzoru `writeAll`).
-
-**Znane niewiadome:** skuteczność twardej resynchronizacji potwierdza dopiero praca na sprzęcie — sprawdzić log („LCD: twarda resynchronizacja obrazu (#N)”) i obraz po zapisie CSV; dokładne miejsce dawnego Guru Meditation wymagałoby zdekodowania backtrace (ESP Exception Decoder).
-
-### v4 — Hosting jako źródło prawdy (architektura)
-- **Odwróciło:** model danych — **hosting staje się źródłem prawdy**, urządzenie **wyświetlaczem** z lokalną kopią CSV (mirror).
-- **Dodało:** polling rewizji — urządzenie co 10 s sprawdza `GET /api/revision`; gdy rewizja się zmieniła, pobiera pełny CSV przez `GET /api/export.csv` i aktualizuje lokalny mirror oraz ekran LVGL.
-- **Dodało:** endpoint hostingu `GET /api/revision` (`rev`/`count`/`updatedAt`, licznik w `/karmienia.rev`, inkrementowany przy każdej mutacji).
-- **Zapis (hybryda):** `appendEntry` zapisuje lokalnie + pushuje pełny CSV (`requestHostSync`); polling wraca aktualizacje. Pełny refactor zapisu przez `POST /api/*` planowany w v4.1.
-- **Wyłączyło (flagami):** serwer WWW urządzenia (`FEATURE_DEVICE_WEB=0`), **mDNS** (`FEATURE_MDNS=0`), **OTA** (`FEATURE_OTA=0`) — kod zachowany, powrót = flaga 1. `otaInProgress` pozostaje (zawsze false). Wgrywanie firmware wyłącznie przez USB.
-- **Przygotowało:** migrację do **MySQL** (docelowa baza) — `MysqlRepository.php`, `schema.sql`, fallback na CSV już są; aktywacja później.
-- **Zostawia:** Telegram (powiadomienia), pogodę, NTP, watchdog na urządzeniu.
-
-### Mleko mieszane — dwie osobne ilości (matki + modyfikowane)
-- **Zmieniło:** koncepcję mleka mieszanego. Gdy w formularzu karmienia zaznaczone są **oba** rodzaje (Matki + Modyfikowane), zamiast jednej wspólnej ilości pojawiają się **dwa osobne pola** — każde otwiera po kliknięciu małe okno wyboru ilości (jak przy wyborze daty). Dzięki temu można podać różne ilości mleka matki i modyfikowanego.
-- **Zmieniło:** model danych. Mleko mieszane zapisywane jest teraz jako **dwa osobne wiersze CSV** `MLEKO_MATKI,X` + `MLEKO_MODYFIKOWANE,Y` o tej samej godzinie co karmienie (zamiast jednego wiersza `MLEKO_MIESZANE`). Statystyki i wykresy liczą je poprawnie w kategoriach Matki/Modyfikowane.
-- **Dodało:** kontrakt API `milkMotherMl` + `milkModifiedMl` (osobne ilości) w `POST /api/entry` i `POST /api/update-feeding`. Zachowano **wsteczną zgodność** ze starym formatem (`milkMother`/`milkModified` + wspólne `milkMl`; przy obu rodzajach `milkMl` dzielone równo). Edycja karmienia (`updateFeeding`) usuwa wszystkie sparowane wiersze mleka o starym czasie i wstawia nowe wg wybranych ilości — in‑place, z zachowaniem kolejności i minut piersi.
-- **Zachowało:** pełną obsługę **historycznych** wpisów jednowierszowych `MLEKO_MIESZANE` przy odczycie, statystykach i wykresach (przy edycji takiego wpisu ilość jest rozbijana na oba rodzaje).
-- **Zakres:** panel WWW hostingu, strona WWW serwowana przez urządzenie oraz logika API firmware. **Ekran dotykowy LVGL urządzenia pozostał bez zmian** (świadoma decyzja).
-
-### Poprawki po testach edycji: responsywność serwera WWW i „ostatnie karmienie"
-- **Naprawiło:** błędną godzinę w kartach **OSTATNIE KARMIENIE / OSTATNIA BUTELKA** na ekranie głównym. `loadLatestEntries()` brał ostatni wiersz danego typu **fizycznie w pliku**, zakładając, że plik jest ściśle chronologiczny (append-only). Po dodaniu edycji karmienia **w miejscu** to założenie przestało obowiązywać (edytowany wiersz zostaje na swojej pozycji), więc pokazywana była godzina niewłaściwego wpisu. Teraz wybierany jest wpis o **najpóźniejszym czasie** (porównanie po znaczniku czasu), także w szybkiej ścieżce `appendEntry()`.
-- **Naprawiło:** „ospały" serwer WWW serwowany z urządzenia. `webServer.handleClient()` był wołany raz na iterację pętli (a iteracja to ciężki render LVGL + ~8 ms próbkowania dotyku), przez co żądanie HTTP czekało na kolejne obiegi (serwer Arduino potrzebuje kilku wywołań na jedno żądanie). Teraz — **gdy klient jest połączony** — serwer jest obsługiwany także pomiędzy próbkami dotyku (kilkukrotnie w iteracji), co znacząco przyspiesza odpowiedzi bez zmiany płynności renderu.
-
-### Stabilność: odzyskanie RAM wewnętrznego (restart przy ładowaniu strony WWW)
-- **Naprawiło:** restart urządzenia przy pierwszym wejściu na stronę WWW serwowaną z urządzenia. Przyczyną był skrajnie niski wolny **RAM wewnętrzny** (~20 KB) — serwer WWW działa na tym samym zadaniu co LVGL i współdzieli deficytowy heap z Wi‑Fi/TLS/LVGL, więc obsługa żądania (streaming strony + budowa odpowiedzi API) przepychała pamięć za granicę → panic.
-- **Zmieniło:** `bounce_buffer_size_px` panelu RGB z 80 na **40 linii** — bufory bounce DMA żyją w RAM wewnętrznym, więc odzyskuje to ~**75 KB** (ze 150 KB do 75 KB). Ochroną przed dryfem obrazu pozostaje restart DMA panelu przy każdym VSYNC, więc mniejszy bounce jest bezpieczny.
-- **Zmieniło:** `handleApiEntries` buduje odpowiedź **strumieniowo** (jak `handleApiWeightSeries`) zamiast alokować jeden duży `String` (dawniej rezerwacja 4 KB); rezerwacja w `handleApiStatus` zmniejszona do 2560 B.
-- **Dodało:** zabezpieczenie `httpBailIfLowMemory()` — ciężkie handlery (`/`, `/api/status`, `/api/entries`, `/api/weight-series`) przy zbyt niskim wolnym RAM wewn. zwracają **503** zamiast ryzykować panic; zdarzenie jest logowane na Serial.
-
-### Edycja wpisu karmienia (mleko + godzina)
-- **Dodało:** możliwość **edycji istniejącego karmienia** w panelu WWW hostingu oraz na stronie serwowanej przez urządzenie — przycisk edycji (✎) przy każdym karmieniu w dzienniku dnia. Można dodać mleko do karmienia bez mleka, zmienić rodzaj (w tym `MLEKO_MIESZANE`) i ilość, usunąć mleko oraz zmienić godzinę.
-- **Dodało:** endpoint `POST /api/update-feeding` (firmware urządzenia i silnik panelu) — parametry `feedLine`, `when`, oraz `milkMother`/`milkModified`/`milkMl` albo `milkRemove=1`; zaznaczenie obu rodzajów zapisuje `MLEKO_MIESZANE`; walidacja ilości w zakresie 20–200 ml.
-- **Zmieniło:** edycja jest wykonywana **w miejscu** — wiersze CSV zachowują swoją pozycję (żaden wpis nie przenosi się na koniec pliku). Minuty karmienia piersią pozostają bez zmian. Przy dodawaniu mleka do karmienia bez mleka wiersz `MLEKO_*` trafia bezpośrednio za wierszem `KARMIENIE`. Po zapisie dane są synchronizowane z hostingiem.
-- **Uwaga:** fizyczny ekran LVGL urządzenia nie ma edycji — funkcja jest dostępna wyłącznie w interfejsach WWW (świadoma decyzja).
-
-### Wygaszacz — przebudowa karty zegara (PR #17)
-- **Zmieniło:** układ karty zegara na wygaszaczu na dwukolumnowy — zegar (mniejsza czcionka) z datą i dniem tygodnia pod spodem po lewej; po prawej dwa wiersze: ostatnie karmienie i osobny wiersz o drzemce.
-- **Naprawiło:** nachodzenie zawijającego się tekstu (karmienie + drzemka) na zegar, które pojawiło się po dodaniu informacji o śnie.
-
-### SEN — poprawki UX i nazewnictwa (PR #16)
-- **Zmieniło:** nazwy przycisków snu na opisujące **fakt** (co dziecko właśnie zrobiło): **ZASNĄŁ / OBUDZIŁ SIĘ** zamiast trybu rozkazującego. Przycisk na ekranie głównym pokazuje „SEN (śpi)”, gdy dziecko śpi.
-- **Zmieniło:** ekran główny urządzenia — usunięto kartę codziennej wskazówki; w jej miejsce trafiła czytelna karta **OSTATNIE KARMIENIE**, a **OSTATNIA BUTELKA** zajmuje pełną szerokość. Wskazówka rozwojowa pozostaje w panelu WWW i na wygaszaczu.
-- **Dodało:** przycisk **SEN** na stronie głównej panelu WWW.
-- **Usunęło:** duplikat sekcji SEN z ekranu/modala **INNE** (cała obsługa snu jest teraz pod głównym przyciskiem SEN).
-
-### Funkcja SEN — śledzenie snu wzorowane na Napper (PR #12–#15)
-Kompletna, nowa funkcjonalność wdrożona w czterech etapach:
-- **Etap 1 — fundament (PR #12):** tabele wg wieku (okna czuwania, zapotrzebowanie na sen dzień/noc, orientacyjna liczba drzemek), algorytmy predykcji drzemki i bilansu dobowego snu (liczonego w jednym przebiegu pliku CSV, z podziałem noc/dzień 21–07 i snem przez północ), plik trwałych ustawień `/ustawienia.cfg` w LittleFS oraz rozszerzenie `/api/status` o pola snu.
-- **Etap 2 — urządzenie (PR #13):** przycisk **SEN** na ekranie głównym (nowy układ nawigacji 3×2) oraz ekran SEN: stan (śpi/czuwa), przewidywane okno drzemki z kolorowym paskiem stanu, przycisk ZASNĄŁ/OBUDZIŁ SIĘ, bilans dnia.
-- **Etap 3 — panel WWW (PR #14):** modal SEN z tym samym zestawem informacji, odświeżany na żywo.
-- **Etap 4 — powiadomienia i przełącznik (PR #15):** informacja o oknie drzemki na wygaszaczu, powiadomienia **Telegram** (raz na okno czuwania — wejście w okno i przekroczenie, z zabezpieczeniem przed fałszywym alarmem po restarcie) oraz **przełącznik** „Sen: powiadomienia Telegram” w DIAGNOSTYCE (urządzenie i WWW, zapisywany trwale).
-
-### Wykres wagi — pasmo przyrostu od wagi wypisowej (PR #11)
-- **Dodało:** na wykresie wagi w panelu WWW drugie pasmo referencyjne — zakres przyrostu liczony od wagi wyjściowej ze szpitala (2850 g, 10.08.2026): 25–30 g/dobę do ~3 mies., 15–20 g/dobę do ~6 mies. Istniejące pasmo WHO i mediana pozostały bez zmian.
-
-### Przyciski butelki — poprawka layoutu (PR #10)
-- **Naprawiło:** przyciski MATKI/MODYFIKOWANE w formularzu karmienia (sekcja SZCZEGÓŁY), które wychodziły poza obszar karty w poziomie i pionie — dopasowano geometrię do wewnętrznego obszaru karty.
-
-### Responsywność dotyku (PR #9)
-- **Zmieniło:** sposób odpytywania dotyku — I²C podniesiony do 400 kHz (Fast Mode), sztywne opóźnienie w pętli rozbite na krótsze próbki, a urządzenie wejściowe LVGL przełączone w tryb zdarzeniowy i odpytywane częściej niż pełny render.
-- **Efekt:** dotyk reaguje natychmiast, bez konieczności przytrzymywania palca. Dodano też zabezpieczenie przed przypadkowym „przeciekaniem” dotknięcia po wyjściu z wygaszacza.
-
-### Dryf obrazu panelu RGB + błąd kompilacji (PR #8)
-- **Naprawiło:** okresowe pionowe przesunięcie całego obrazu („jak na rolce”) — dodano cykliczny restart DMA panelu przy VSYNC (programowy odpowiednik `CONFIG_LCD_RGB_RESTART_IN_VSYNC`), wywoływany profilaktycznie i po zapisie do LittleFS. Naprawiono także błąd kompilacji wynikający z kolejności prototypów w pliku `.ino`.
-
-### Wydajność: Telegram, CSV, hardening (PR #7)
-- **Zmieniło:** wysyłkę Telegrama przeniesiono do osobnego zadania FreeRTOS — nie blokuje już interfejsu ani dotyku. Zredukowano wielokrotne skany pliku CSV do jednego przebiegu.
-- **Dodało:** miękką rotację pliku danych (archiwum po przekroczeniu progu), rezerwację bufora odpowiedzi API, spójny dostęp do danych pogody przez mutex, walidację czasu zdarzeń i weryfikację zapisu do pliku.
-
-### Bootscreen — poprawka napisu (PR #6)
-- **Zmieniło:** napis imienia na ekranie startowym z „ALEKSANDRA” na „ALEKSANDER”.
-
-### Artefakty RGB + responsywność (PR #5)
-- **Naprawiło:** minimalne poziome linie po lewej stronie ekranu — zwiększono bufor bounce DMA panelu RGB. Wstępnie poprawiono też częstotliwość odczytu dotyku (pełne rozwiązanie w PR #9).
-
-## Źródła
-
-[1] [Waveshare — ESP32-S3-Touch-LCD-4B Wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4B)
-
-[2] [LVGL 9.3 — Arduino: konfiguracja lv_conf.h](https://lvgl.io/docs/open/9.3/details/integration/framework/arduino)
+Opis w `web-php/README.md`. Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
+- API nie ma uwierzytelniania (P0),
+- auto-sen przy każdym karmieniu dopisuje zdarzenia w przyszłości (P1),
+- zapisy CSV mają wyścigi (P1).

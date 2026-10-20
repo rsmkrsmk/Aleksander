@@ -1,0 +1,8 @@
+# Sekrety (Wi-Fi, Telegram) — tylko lokalnie. Wzor: v5/secrets.h.example
+secrets.h
+v5/secrets.h
+# Pliki generowane przez symulator
+tools/sim/glue_extract.h
+tools/sim5/test_stats
+build/
+*.raw

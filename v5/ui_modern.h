@@ -12,6 +12,9 @@
 #include <string.h>
 #include "ui_fonts.h"
 #include "ui_assets.h"
+#ifdef ESP_PLATFORM
+#include <esp_heap_caps.h>
+#endif
 
 // ------------------------------- Paleta / motyw ------------------------------
 struct UiPal {
@@ -50,72 +53,9 @@ static void uiApplyTheme(bool night) {
   }
 }
 
-// -------------------------------- Dane do wyswietlenia ------------------------
-struct UiHour { bool has; uint8_t h, m; int temp; };
-struct UiDay {              // jedna doba (do wykresow)
-  char label[8];            // "18.10"
-  int feed, milkMother, milkModified, milkMixed;
-  int sleepDayMin, sleepNightMin;
-  int wet, dirty; bool bath;
-};
-constexpr int UI_MAX_GAPS = 16;
-constexpr int UI_RHYTHM_DAYS = 3;
-constexpr int UI_RHYTHM_MAX = 16;
-constexpr int UI_WEEKS = 10;
-constexpr int UI_WPTS = 48;   // maks. punktow pomiarow wagi na wykresie
-constexpr int UI_NIGHTS = 14;
-struct UiModel {
-  bool night = false;
-  bool wifiOk = false, storageOk = false, timeOk = false;
-  char clockHH[4] = "--", clockMM[4] = "--";
-  char dateLine[40] = "";
-  char ageText[48] = "";
-  // karmienie
-  bool hasLastFeed = false; int sinceFeedMin = 0; char nextFeedClock[8] = "";
-  char lastFeedTxt[40] = ""; char lastBottleTxt[40] = "";
-  int warnMin = 180, alarmMin = 240;
-  // drzemka / sen
-  bool sleeping = false; int sleepingMin = 0;
-  char napLine[48] = ""; uint8_t napState = 0;  // 0 brak, 1 info, 2 zolty, 3 czerwony
-  // statystyki dnia
-  int feedCount = 0, longestGapMin = 0, avgGapMin = 0;
-  char statVal[3][14] = {"-", "-", "-"};
-  // pogoda
-  bool weatherValid = false; int wmo = 0, temp = 0, feels = 0, tmin = 0, tmax = 0;
-  char weatherDesc[40] = ""; char dress[120] = "";
-  UiHour hours[3] = {};
-  char tip[240] = "";
-  char lastFeedEntry[48] = ""; char lastBottleEntry[48] = "";
-  // 5 ostatnich dob (days[4] = dzis)
-  UiDay days[5] = {};
-  // przerwy dzis: poczatek (min od polnocy) + dlugosc (min) + otwarta przerwa
-  int gapN = 0; int gapStart[UI_MAX_GAPS] = {}; int gapLen[UI_MAX_GAPS] = {}; bool gapOpen = false;
-  // rytm 3 dni: pora karmien (min od polnocy); [0]=dzis, [1]=wczoraj, [2]=przedwczoraj
-  int rhN[UI_RHYTHM_DAYS] = {}; int rhT[UI_RHYTHM_DAYS][UI_RHYTHM_MAX] = {};
-  char rhLabel[UI_RHYTHM_DAYS][8] = {};
-  // waga
-  int weightN = 0; int weekVal[UI_WEEKS] = {}; bool weekHas[UI_WEEKS] = {}; bool weekPartial[UI_WEEKS] = {};
-  int weekNo[UI_WEEKS] = {}; int lastWeightG = 0; char lastWeightDate[12] = "";
-  // wykres wagi (dzien zycia + gramy) i statystyki przyrostu (kafelki na stronie "Waga")
-  int wpN = 0; int wpDay[UI_WPTS] = {}; int wpG[UI_WPTS] = {};
-  int wBirthG = 3080, wTodayDay = 0, wLastDay = 0;
-  bool wHasSince = false; int wSince = 0, wGainTotal = 0;
-  bool wHas14 = false; int w14 = 0;
-  // sen nocny: minuty (-1 brak), poczatek i koniec (min od polnocy)
-  int nightMin[UI_NIGHTS] = {}; int nightFrom[UI_NIGHTS] = {}; int nightTo[UI_NIGHTS] = {}; char nightLabel[UI_NIGHTS][8] = {};
-  int sleepTodayDay = 0, sleepTodayNight = 0, sleepNeedDay = 0, sleepNeedNight = 0;
-  // kapiele: miesiac biezacy
-  char bathMonth[24] = ""; int bathFirstDow = 0, bathDays = 30, bathToday = 1; uint32_t bathMask = 0;
-  int bathInterval = 3, bathSinceDays = -1, bathNextDay = 0; char bathLastTxt[32] = "", bathNextTxt[40] = "";
-  // kafelki "dzis"
-  int todayFeed = 0, todayMl = 0, todayDiapers = 0; bool todayBath = false;
-};
+#include "ui_model.h"
 
-
-// Typy pomocnicze dla firmware (wczytywanie CSV) — tutaj, aby prototypy generowane
-// przez Arduino IDE widzialy je przed pierwsza funkcja szkicu.
-// Duze, rzadko uzywane bufory trzymamy w PSRAM, nie w RAM wewnetrznym (.bss): wewnetrzny RAM
-// jest deficytowy (TLS/Wi-Fi potrzebuja ciaglych blokow). Poza ESP (symulator) — zwykly calloc.
+// Duze, rzadko uzywane bufory UI trzymamy w PSRAM (RAM wewnetrzny jest deficytowy).
 static inline void *ui_alloc_big(size_t bytes) {
 #ifdef ESP_PLATFORM
   void *p = heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM);
@@ -123,8 +63,6 @@ static inline void *ui_alloc_big(size_t bytes) {
 #endif
   return calloc(1, bytes);
 }
-struct UiRow { char date[11]; int hh; int mm; char type[24]; int ml; };
-struct UiWeightPt { int day; int g; };
 
 // ------------------------------- Pomocnicze rysowanie ------------------------
 static inline lv_obj_t *ui_box(lv_obj_t *p, int x, int y, int w, int h, int r, lv_color_t c, lv_opa_t o = LV_OPA_COVER) {
@@ -780,6 +718,7 @@ static void ui_bars_stop_all() {   // wywolac PRZED usunieciem ekranu: anim slup
 // Strona "Waga": dwa widoki (wykres wagi / wykres przyrostu) przelaczane same co ~3,5 s.
 static lv_obj_t *uiWtViewA = nullptr, *uiWtViewB = nullptr, *uiWtSub = nullptr, *uiWtDot[2] = {nullptr, nullptr};
 static int uiWtShown = 0, uiWtTicks = 0;
+static int uiWtPref = 0;   // wybrany widok wagi — zachowany przy przebudowie strony (np. nowe dane)
 static lv_point_precise_t uiWtMedPts[41];
 static lv_point_precise_t uiWtActPts[UI_WPTS];
 static void ui_page_reset(int page) {
@@ -971,6 +910,7 @@ static void ui_weight_toggle() {
     lv_obj_set_width(uiWtDot[i], i == uiWtShown ? 20 : 7);
   }
   if (uiWtDot[1]) lv_obj_set_x(uiWtDot[1], 22 + (uiWtShown == 0 ? 20 : 7) + 6);
+  uiWtPref = uiWtShown;
 }
 static void ui_weight_click_cb(lv_event_t *e) {
   (void)e;
@@ -1123,6 +1063,7 @@ static void ui_build_weight(const UiModel &m, bool anim) {
   uiWtDot[0] = ui_box(p, 22, 63, 20, 7, 3, P.acc);
   uiWtDot[1] = ui_box(p, 48, 63, 7, 7, 3, P.brd);
   ui_label(p, "dotknij wykres, by zmienić", &ui_f13, P.faint, 70, 56);
+  if (uiWtPref == 1) ui_weight_toggle();   // przebudowa strony nie cofa wybranego widoku
 
   // stale kafelki: przyrost od urodzenia i z ostatnich 2 tygodni
   char v1[12], s1[40], v2[12], s2[40];
@@ -1283,6 +1224,7 @@ static void ui_dash_tick(lv_timer_t *t) {   // 500 ms: sygnalizator "czas na kar
 }
 
 static void uiDashCreate(bool night) {
+  uiWtPref = 0;
   uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr;
   if (uiDashTimer) { lv_timer_delete(uiDashTimer); uiDashTimer = nullptr; }
   lv_obj_t *oldScr = uiDashScr; uiDashScr = nullptr;
@@ -1385,4 +1327,48 @@ static void uiDashUpdate(const UiModel &m, bool rebuild) {
     lv_obj_set_width(uiDashCounterBar, w);
     lv_obj_set_style_bg_color(uiDashCounterBar, alarm ? P.danger : (warn ? P.warn : P.good), 0);
   }
+}
+
+// =============================================================================
+//  DIAGNOSTYKA (dlugie przytrzymanie zegara w panelu) — w stylu panelu.
+// =============================================================================
+static lv_obj_t *uiDiagScr = nullptr;
+static lv_obj_t *uiDiagText = nullptr;
+static void (*uiOnDiagBack)() = nullptr;   // ustawiane przez firmware
+static void ui_diag_back_cb(lv_event_t *) { if (uiOnDiagBack) uiOnDiagBack(); }
+
+static void uiDiagCreate(bool night, const char *text) {
+  lv_obj_t *oldScr = uiDiagScr; uiDiagScr = nullptr;
+  uiApplyTheme(night);
+  uiDiagScr = lv_obj_create(nullptr);
+  lv_obj_t *s = uiDiagScr;
+  lv_obj_remove_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(s, P.bg, 0);
+  lv_obj_set_style_bg_opa(s, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(s, 0, 0);
+  lv_obj_set_style_border_width(s, 0, 0);
+  // przycisk powrotu (kolko z ikona strzalki) + tytul
+  lv_obj_t *back = ui_box(s, 14, 8, 40, 40, 20, P.acc);
+  ui_grad(back, P.acc2, P.acc);
+  lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(back, 12);
+  lv_obj_add_event_cb(back, ui_diag_back_cb, LV_EVENT_CLICKED, nullptr);
+  ui_icon2(back, &ic_back_s_fill, &ic_back_s_line, 8, 8, lv_color_white());
+  ui_label(s, "Diagnostyka", &ui_f18, P.ink, 62, 6);
+  ui_label(s, "stan urządzenia i danych", &ui_f13, P.muted, 62, 29);
+  // karta z tekstem (przewijana)
+  ui_box(s, 14, 60 + 4, 452, 406, 24, P.shade);
+  lv_obj_t *card = ui_box(s, 14, 60, 452, 406, 24, P.card);
+  lv_obj_set_style_border_width(card, 2, 0);
+  lv_obj_set_style_border_color(card, P.brd, 0);
+  lv_obj_add_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scroll_dir(card, LV_DIR_VER);
+  lv_obj_set_style_pad_all(card, 14, 0);
+  uiDiagText = ui_label(card, text, &ui_f13, P.ink2, 0, 0, 410);
+  ui_retire_screen(oldScr, uiDiagScr);
+}
+static void uiDiagUpdate(const char *text) { if (uiDiagText) ui_set(uiDiagText, text); }
+static void uiDiagDestroy() {
+  if (uiDiagScr) { lv_obj_t *o = uiDiagScr; uiDiagScr = nullptr; uiDiagText = nullptr; if (lv_screen_active() != o) lv_obj_delete(o); }
 }

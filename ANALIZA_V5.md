@@ -10,6 +10,22 @@ Dokument jest bazą do przepisania firmware od nowa. Gałąź: `v5`, utworzona z
 
 Powiązana notatka: `ulepszenia19-10-26.md` (przegląd błędów i ryzyk).
 
+**Stan (20.10.2026):**
+- Wersja 5.0.0 jest zaimplementowana w folderze `v5/` zgodnie z tym dokumentem i decyzjami D1–D6.
+- Kompiluje się pełnym toolchainem ESP32 (esp32 3.3.12, LVGL 9.3.0).
+- Obliczenia zgadzają się z v4.1 na danych testowych.
+- Ekrany sprawdzone w symulatorze.
+- **Nie testowano jeszcze na urządzeniu** — etap 5.0-e z sekcji 10.
+
+Mapa „sekcja → plik”:
+
+| Sekcje | Plik |
+|---|---|
+| 4.1 | `hw_display.cpp`, `hw_touch.cpp` |
+| 4.2–4.6 | `app.cpp`, `ui_modern.h` |
+| 4.7 | `stats.cpp`, `store.cpp` |
+| 4.8 | `net.cpp`, `host_sync.cpp`, `weather*.cpp`, `telegram.cpp` |
+
 ---
 
 ## 1. Diagnoza ze zdjęcia z 20.10.2026 (17:34)
