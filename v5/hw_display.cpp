@@ -126,12 +126,60 @@ static bool onVsync(esp_lcd_panel_handle_t p, const esp_lcd_rgb_panel_event_data
   return false;
 }
 
-static void flushCb(lv_display_t *d, const lv_area_t *, uint8_t *px) {
-  // DIRECT: LVGL renderuje cala klatke do niewidocznego FB; draw_bitmap na pelnym obszarze
-  // przelacza framebuffery bez kopiowania. Tylko na ostatnim fragmencie klatki.
-  if (lv_display_flush_is_last(d)) esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, px);
+// --- Wyswietlanie z korekta przesuniecia wierszy --------------------------------
+// Na urzadzeniu strumien DMA zaczyna sie stale od 2. porcji bounce (obraz przesuniety o 80 linii
+// w gore z zawinieciem — potwierdzone zdjeciem/filmem; resynchronizacja tego nie zmienia).
+// Dlatego LVGL renderuje CZESCIOWO (bufor w PSRAM), a flush wpisuje wiersze do framebufferow
+// z przesunieciem: wiersz ekranu y laduje w wierszu (y + rowShift) % 480.
+// Dwa FB: rysujemy do tylnego, przelaczamy (draw_bitmap z adresem FB — bez kopiowania),
+// potem te same prostokaty kopiujemy do nowego tylnego FB (utrzymanie zgodnosci).
+static volatile int rowShift = RGB_ROW_SHIFT;
+static uint8_t *lvBuf = nullptr;
+static uint8_t *fbPtr[2] = {nullptr, nullptr};
+static int frontIdx = 0;   // FB aktualnie wskazany sterownikowi
+struct DirtyRect { int16_t x1, y1, x2, y2; };
+constexpr int MAX_RECTS = 32;
+static DirtyRect rects[MAX_RECTS];
+static int rectCount = 0;
+static bool rectsFull = false;
+
+static inline int fbRow(int y) { return (y + rowShift + 4800) % SCREEN_H; }
+
+static void copyRect(uint8_t *dst, const uint8_t *src, const DirtyRect &r) {
+  const size_t bytes = static_cast<size_t>(r.x2 - r.x1 + 1) * 2;
+  for (int y = r.y1; y <= r.y2; ++y) {
+    const size_t off = (static_cast<size_t>(fbRow(y)) * SCREEN_W + r.x1) * 2;
+    memcpy(dst + off, src + off, bytes);
+  }
+}
+
+static void flushCb(lv_display_t *d, const lv_area_t *area, uint8_t *px) {
+  uint8_t *back = fbPtr[1 - frontIdx];
+  const int w = area->x2 - area->x1 + 1;
+  for (int y = area->y1; y <= area->y2; ++y) {
+    memcpy(back + (static_cast<size_t>(fbRow(y)) * SCREEN_W + area->x1) * 2,
+           px + static_cast<size_t>(y - area->y1) * w * 2, static_cast<size_t>(w) * 2);
+  }
+  if (rectCount < MAX_RECTS) rects[rectCount++] = {static_cast<int16_t>(area->x1), static_cast<int16_t>(area->y1),
+                                                   static_cast<int16_t>(area->x2), static_cast<int16_t>(area->y2)};
+  else rectsFull = true;
+  if (lv_display_flush_is_last(d)) {
+    frontIdx = 1 - frontIdx;
+    esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, fbPtr[frontIdx]);   // przelaczenie FB
+    uint8_t *newBack = fbPtr[1 - frontIdx];
+    if (rectsFull) memcpy(newBack, fbPtr[frontIdx], static_cast<size_t>(SCREEN_W) * SCREEN_H * 2);
+    else for (int i = 0; i < rectCount; ++i) copyRect(newBack, fbPtr[frontIdx], rects[i]);
+    rectCount = 0;
+    rectsFull = false;
+  }
   lv_display_flush_ready(d);
 }
+
+void displaySetRowShift(int lines) {
+  rowShift = ((lines % SCREEN_H) + SCREEN_H) % SCREEN_H;
+  if (lvDisp) lv_obj_invalidate(lv_screen_active());   // pelne przerysowanie z nowym przesunieciem
+}
+int displayRowShift() { return rowShift; }
 
 bool displayInit() {
   // Sekwencja zasilania panelu z oficjalnego demo Waveshare (piny 5 i 6 ekspandera).
@@ -204,7 +252,14 @@ bool displayInit() {
   lv_init();
   lvDisp = lv_display_create(SCREEN_W, SCREEN_H);
   lv_display_set_flush_cb(lvDisp, flushCb);
-  lv_display_set_buffers(lvDisp, fb0, fb1, fbBytes, LV_DISPLAY_RENDER_MODE_DIRECT);
+  fbPtr[0] = static_cast<uint8_t *>(fb0);
+  fbPtr[1] = static_cast<uint8_t *>(fb1);
+  memset(fb1, 0xFF, fbBytes);
+  frontIdx = 0;
+  constexpr size_t LV_BUF_BYTES = static_cast<size_t>(SCREEN_W) * 60 * 2;   // 60 linii na przebieg
+  lvBuf = static_cast<uint8_t *>(heap_caps_malloc(LV_BUF_BYTES, MALLOC_CAP_SPIRAM));
+  if (!lvBuf) { Serial.println("LCD: brak pamieci na bufor LVGL."); return false; }
+  lv_display_set_buffers(lvDisp, lvBuf, nullptr, LV_BUF_BYTES, LV_DISPLAY_RENDER_MODE_PARTIAL);
   Serial.printf("LCD: 2 FB w PSRAM, bounce %u linii, wolny RAM wewn. %u KB\n", (unsigned)BOUNCE_LINES,
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
   return true;

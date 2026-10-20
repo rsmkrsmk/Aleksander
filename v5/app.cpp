@@ -318,6 +318,10 @@ void appLoop() {
   while (Serial.available()) {
     const int ch = Serial.read();
     if (ch == 'r') Serial.printf("LCD: restart co VSYNC %s\n", displayToggleVsyncRestart() ? "WLACZONY" : "wylaczony");
+    else if (ch == 'a' || ch == 'd' || ch == 'z' || ch == 'x') {
+      displaySetRowShift(displayRowShift() + (ch == 'a' ? -10 : ch == 'd' ? 10 : ch == 'z' ? -1 : 1));
+      Serial.printf("LCD: przesuniecie wierszy = %d (domyslne w app_config.h: RGB_ROW_SHIFT)\n", displayRowShift());
+    }
     else if (ch == 'h') { displayRequestResync(RESYNC_BOOT); Serial.println("LCD: reczna resynchronizacja."); }
   }
 
