@@ -322,6 +322,7 @@ void appLoop() {
       displaySetRowShift(displayRowShift() + (ch == 'a' ? -10 : ch == 'd' ? 10 : ch == 'z' ? -1 : 1));
       Serial.printf("LCD: przesuniecie wierszy = %d (domyslne w app_config.h: RGB_ROW_SHIFT)\n", displayRowShift());
     }
+    else if (ch == 'i') { uiRequest(UI_REQ_TO_DIAG); Serial.println("UI: diagnostyka (polecenie i)."); }
     else if (ch == 'h') { displayRequestResync(RESYNC_BOOT); Serial.println("LCD: reczna resynchronizacja."); }
   }
 

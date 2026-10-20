@@ -1245,11 +1245,15 @@ static void uiDashCreate(bool night) {
   lv_obj_add_event_cb(logo, ui_back_cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lf = ui_img(logo, &sp_leaf, 4, 4); lv_obj_remove_flag(lf, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_ext_click_area(logo, 10);
-  ui_label(s, "Leśny Dziennik", &ui_f18, P.ink, 62, 6);
+  lv_obj_t *uiDashTitle = ui_label(s, "Leśny Dziennik", &ui_f18, P.ink, 62, 6);
+  lv_obj_add_flag(uiDashTitle, LV_OBJ_FLAG_CLICKABLE);                       // dlugie przytrzymanie tytulu tez otwiera diagnostyke
+  lv_obj_set_ext_click_area(uiDashTitle, 12);
+  lv_obj_add_event_cb(uiDashTitle, ui_diag_cb, LV_EVENT_LONG_PRESSED, nullptr);
   uiDashAge = ui_label(s, "", &ui_f13, P.muted, 62, 29, 252);
   lv_label_set_long_mode(uiDashAge, LV_LABEL_LONG_MODE_DOTS);
   uiDashClock = ui_label(s, "--:--", &ui_f24, P.ink, 400, 9, 66, LV_TEXT_ALIGN_RIGHT);
   lv_obj_add_flag(uiDashClock, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(uiDashClock, 24);                                 // wiekszy obszar dotyku
   lv_obj_add_event_cb(uiDashClock, ui_diag_cb, LV_EVENT_LONG_PRESSED, nullptr);
   UiIcon w = UI_ICON(s, wifi, s, 322, 14, P.good); uiDashLedW = w.line;
   UiIcon d = UI_ICON(s, disk, s, 349, 14, P.good); uiDashLedS = d.line;
