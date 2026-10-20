@@ -9,7 +9,7 @@ constexpr uint16_t SCREEN_W = 480;
 constexpr uint16_t SCREEN_H = 480;
 
 // Powody twardej resynchronizacji (bity, do logu/diagnostyki).
-enum : uint8_t { RESYNC_FLASH = 1, RESYNC_LATE_VSYNC = 2, RESYNC_PHASE = 4, RESYNC_DATA = 8, RESYNC_BOOT = 16 };
+enum : uint8_t { RESYNC_FLASH = 1, RESYNC_LATE_VSYNC = 2, RESYNC_PHASE = 4, RESYNC_DATA = 8, RESYNC_BOOT = 16, RESYNC_PERIODIC = 32, RESYNC_SCREEN = 64 };
 
 bool displayInit();                 // ekspander, ST7701, esp_lcd, lv_init + lv_display (DIRECT)
 void displayBacklightInit();

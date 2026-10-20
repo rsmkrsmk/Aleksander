@@ -61,6 +61,10 @@ constexpr uint8_t BACKLIGHT_FULL_DUTY = 0;
 constexpr uint8_t BACKLIGHT_NIGHT_DUTY = 90;
 constexpr uint8_t BACKLIGHT_DIM_DUTY = 119;
 
+// Okresowa twarda resynchronizacja obrazu (siatka bezpieczenstwa: przesuniecie, ktorego nie
+// wykryje detektor, znika najpozniej po tym czasie). 0 = wylaczone.
+constexpr uint32_t RGB_PERIODIC_RESYNC_MS = 60UL * 1000UL;
+
 // ------------------------------- Karmienie ----------------------------------
 constexpr int COUNTER_WARN_MIN = 180;   // zolty
 constexpr int COUNTER_ALARM_MIN = 240;  // czerwony + "nastepne karmienie" = ostatnie + tyle minut

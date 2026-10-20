@@ -138,7 +138,7 @@ static void buildDiagText() {
            (unsigned)h.cacheWrites, a3, h.cachePending ? " (czeka zmiana)" : "",
            d.phaseDetector ? "aktywny" : "niedostepny", (unsigned)d.resyncCount, (unsigned)d.lastReason,
            (long)d.phaseUs, (long)d.phaseRefUs, (unsigned)d.flashWrites,
-           wifiOk() ? "polaczono" : "ROZLACZONO", ip, wifiOk() ? (int)WiFi.RSSI() : 0,
+           wifiStatusText(), ip, wifiOk() ? (int)WiFi.RSSI() : 0,
            timeOk() ? "OK" : "brak", w.valid ? "OK" : "brak", wAge,
            FW_VERSION, __DATE__,
            (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024), (unsigned)(diagMinFreeInternal() / 1024),
@@ -159,6 +159,7 @@ static void showScreen(UiScreen s) {
   else { buildDiagText(); uiShowDiag(model, diagText); }
   lastLiveMs = lastChartsMs = millis();
   chartsDue = false;
+  displayRequestResync(RESYNC_SCREEN);   // po zbudowaniu nowego ekranu — czysty strumien obrazu
 }
 
 static bool swallowTouch() { return uiScreen() == UiScreen::Saver; }
@@ -201,6 +202,7 @@ void appSetup() {
   wifiStart();
   const uint32_t w0 = millis();
   while (!wifiOk() && millis() - w0 < WIFI_CONNECT_TIMEOUT_MS) bootPump(100);
+  wifiLogStatus("start");
   uiBootSetStep(0, wifiOk() ? 1 : 2);
   displayRequestResync(RESYNC_BOOT);   // inicjalizacja Wi-Fi moze dotknac flasha (kalibracja PHY)
   displayResyncAfterVsync();
@@ -313,6 +315,13 @@ void appLoop() {
   if (wantDim != dimmed) { dimmed = wantDim; applyBacklight(); }
   if (uiScreen() == UiScreen::Dash && idle > SAVER_TIMEOUT_MS) showScreen(UiScreen::Saver);
   if (uiScreen() == UiScreen::Diag && idle > DIAG_TIMEOUT_MS) showScreen(UiScreen::Dash);
+
+  // Siatka bezpieczenstwa obrazu: okresowa twarda resynchronizacja.
+  static uint32_t lastPeriodic = 0;
+  if (RGB_PERIODIC_RESYNC_MS && now - lastPeriodic >= RGB_PERIODIC_RESYNC_MS) {
+    lastPeriodic = now;
+    displayRequestResync(RESYNC_PERIODIC);
+  }
 
   // Model: czesc "na zywo" co 1 s, wykresy po zmianie danych i co 60 s.
   if (now - lastLiveMs >= 1000) {

@@ -78,7 +78,8 @@ Gałąź `v5` to firmware napisane od nowa na podstawie analizy `ANALIZA_V5.md`.
    | Flash Size | **16MB (128Mb)** |
    | Partition Scheme | **Custom** (zawsze używany jest `v5/partitions.csv`; przy innym wyborze też, ale limit rozmiaru bywa mniejszy) |
    | USB CDC On Boot | jak dotąd (Enabled, jeśli log Seriala czytasz przez natywny port USB) |
-6. **Wgraj.** Zmiana tablicy partycji czyści stare dane LittleFS z v4. To nic nie szkodzi: dane są na hostingu, a cache odtworzy się po pierwszym pobraniu.
+6. **Jednorazowo** ustaw **Erase All Flash Before Sketch Upload: Enabled** (czyści stare ustawienia Wi-Fi/NVS z v4), potem wróć do Disabled.
+7. **Wgraj.** Zmiana tablicy partycji czyści stare dane LittleFS z v4. To nic nie szkodzi: dane są na hostingu, a cache odtworzy się po pierwszym pobraniu.
 
 Rozmiar (kompilacja 20.10.2026): program ~2,25 MB z 8 MB, zmienne globalne 62 KB RAM.
 

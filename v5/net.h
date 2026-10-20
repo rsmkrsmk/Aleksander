@@ -21,6 +21,8 @@ struct PsBuf {
 void wifiStart();                    // tryb STA, bez zapisu do NVS
 bool wifiWaitConnected(uint32_t timeoutMs);
 bool wifiOk();
+const char *wifiStatusText();
+void wifiLogStatus(const char *when);
 void wifiTick();                     // ponawianie polaczenia co WIFI_RETRY_MS
 void ntpStart();                     // configTzTime (nieblokujace)
 bool timeOk();                       // rok >= 2025

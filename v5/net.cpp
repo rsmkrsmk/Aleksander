@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <NetworkClientSecure.h>
 #include <esp_heap_caps.h>
+#include <nvs_flash.h>
 #include <string.h>
 
 // ------------------------------------------------------------------ PsBuf
@@ -40,12 +41,45 @@ void PsBuf::swap(PsBuf &o) {
 }
 
 // ------------------------------------------------------------------ Wi-Fi / czas
+const char *wifiStatusText() {
+  switch (WiFi.status()) {
+    case WL_CONNECTED: return "polaczono";
+    case WL_NO_SSID_AVAIL: return "nie znaleziono sieci";
+    case WL_CONNECT_FAILED: return "blad hasla/uwierzytelnienia";
+    case WL_CONNECTION_LOST: return "utracono polaczenie";
+    case WL_DISCONNECTED: return "rozlaczono";
+    case WL_IDLE_STATUS: return "oczekiwanie";
+    case WL_NO_SHIELD: return "Wi-Fi nie wystartowalo";
+    default: return "nieznany";
+  }
+}
+
+// Wi-Fi wymaga dzialajacego NVS (kalibracja radia). Gdy po zmianie partycji NVS jest
+// niezgodny/uszkodzony, rdzen nie naprawia go sam dla kazdego bledu — robimy to tutaj.
+static void ensureNvs() {
+  esp_err_t e = nvs_flash_init();
+  Serial.printf("NVS: init 0x%x\n", (unsigned)e);
+  if (e != ESP_OK) {
+    Serial.println("NVS: niezgodny — czyszcze i inicjalizuje ponownie.");
+    nvs_flash_erase();
+    e = nvs_flash_init();
+    Serial.printf("NVS: po naprawie 0x%x\n", (unsigned)e);
+  }
+}
+
 void wifiStart() {
+  ensureNvs();
   WiFi.persistent(false);   // bez zapisow NVS (zapis flasha = ryzyko przesuniecia obrazu)
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void wifiLogStatus(const char *when) {
+  Serial.printf("Wi-Fi (%s): %s (kod %d)", when, wifiStatusText(), (int)WiFi.status());
+  if (WiFi.status() == WL_CONNECTED) Serial.printf(", IP %s, %d dBm", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  Serial.printf(", RAM wewn. %u B\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
 bool wifiWaitConnected(uint32_t timeoutMs) {
@@ -64,7 +98,7 @@ void wifiTick() {
   wasConnected = ok;
   if (ok || millis() - last < WIFI_RETRY_MS) return;
   last = millis();
-  Serial.println("Wi-Fi: ponawiam polaczenie.");
+  wifiLogStatus("ponawiam");
   if (!WiFi.reconnect()) {
     WiFi.disconnect();
     delay(100);
