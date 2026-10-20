@@ -73,6 +73,10 @@ void wifiStart() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);
+  WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {
+    Serial.printf("Wi-Fi: rozlaczono, powod %d, %d dBm przy ostatnim polaczeniu\n",
+                  (int)info.wifi_sta_disconnected.reason, (int)info.wifi_sta_disconnected.rssi);
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
@@ -99,11 +103,10 @@ void wifiTick() {
   if (ok || millis() - last < WIFI_RETRY_MS) return;
   last = millis();
   wifiLogStatus("ponawiam");
-  if (!WiFi.reconnect()) {
-    WiFi.disconnect();
-    delay(100);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  }
+  // Bez WiFi.reconnect() (kolidowalo z autoReconnect: "sta is connecting"): czysty restart polaczenia.
+  WiFi.disconnect();
+  delay(100);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 void tzInit() {
@@ -244,7 +247,23 @@ int hostGet(const char *path, PsBuf &body, HttpProgress pr, bool *complete) {
   c.setHandshakeTimeout(8);
   c.setTimeout(10000);   // ms (Stream); handshake w sekundach
   diagFeedWatchdog();
-  if (!c.connect(HOST_NAME, HOST_PORT)) {
+  bool okc = c.connect(HOST_NAME, HOST_PORT);
+  if (!okc) {   // jedna szybka ponowka (slaby sygnal, chwilowy blad TLS)
+    c.stop();
+    delay(400);
+    diagFeedWatchdog();
+    okc = c.connect(HOST_NAME, HOST_PORT);
+  }
+  if (!okc) {
+    static uint32_t lastLog = 0;
+    if (millis() - lastLog > 30000) {   // diagnostyka powodu, nie czesciej niz co 30 s
+      lastLog = millis();
+      char eb[100] = "";
+      const int e = c.lastError(eb, sizeof eb);
+      Serial.printf("Host: polaczenie TLS nieudane (blad %d: %s), %d dBm, RAM wewn. %u B, najw. blok %u B\n", e, eb,
+                    (int)WiFi.RSSI(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
     netMarkTls();
     return 0;
   }
