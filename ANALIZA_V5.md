@@ -408,6 +408,17 @@ struct Store { Entry *e; uint32_t n; long rev; uint32_t parsedAtMs; const uint8_
 | D5 | Karta „Sen” | (a) jak dziś (heurystyka z karmień); (b) z `SEN_*`, gdy są dane, inaczej heurystyka | (a) w v5.0 (1:1), (b) później |
 | D6 | Częstotliwość sprawdzania danych | (a) 10 s jak dziś; (b) 30 s + natychmiast po dotknięciu ekranu; (c) keep-alive TLS co 10 s | (b) |
 
+### Ustalenia (20.10.2026)
+
+| # | Decyzja |
+|---|---|
+| D1 | **Arduino IDE.** Obraz chroniony brakiem operacji na flashu w pracy + twarda resynchronizacja i detektor fazy jako zabezpieczenie. PlatformIO tylko, jeśli przesunięcia wrócą. |
+| D2 | **Cache ostatnich danych na flashu.** CSV zapisywany tylko gdy treść się zmieniła i **najwyżej raz na 30 min** (zapis zaległy wykonywany po upływie okna). Zapis jednym zrywem z PSRAM pod `FlashWriteGuard` i z twardą resynchronizacją. Przy starcie bez sieci pokazywane są dane z cache z oznaczeniem wieku danych. Mała partycja LittleFS. |
+| D3 | **`sleepTelegram` czytane z hostingu** (`/api/status`). Na urządzeniu bez przełącznika i bez zapisu; w DIAGNOSTYCE tylko stan. |
+| D4 | Bez powiadomień o nowych wpisach (jak dziś). |
+| D5 | Karta „Sen” 1:1 jak dziś. |
+| D6 | **Sprawdzanie rewizji co 10 s jak dziś.** Warto spróbować utrzymać połączenie TLS (keep-alive), żeby nie robić handshake co 10 s; przy braku wsparcia hostingu — nowe połączenie jak dziś. |
+
 ---
 
 ## 9. Zmiany po stronie hostingu (opcjonalne, niewymagane do v5.0)
