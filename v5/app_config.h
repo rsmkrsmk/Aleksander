@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define FW_VERSION "5.0.0"
+#define FW_VERSION "5.0.1"
 
 // ------------------------------- Dziecko ------------------------------------
 constexpr int BIRTH_DAY = 8;
