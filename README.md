@@ -108,9 +108,14 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 **Powiadomienia o oknie drzemki** włącza się na **stronie WWW** (przełącznik „Sen: powiadomienia Telegram”). Urządzenie tylko odczytuje to ustawienie.
 
 **Stabilność obrazu**
-- Poza rzadkim zapisem cache urządzenie nie dotyka flasha (dane w PSRAM, pogoda w RAM RTC, Wi-Fi bez NVS).
-- Zostają twarda resynchronizacja i detektor przesunięcia jako zabezpieczenie. Ich liczniki są w diagnostyce.
-- Gdyby przesunięcia mimo to wracały, rozwiązaniem u źródła jest kompilacja w PlatformIO z `CONFIG_SPIRAM_XIP_FROM_PSRAM` (patrz `ANALIZA_V5.md`, 7.4).
+- Przyczyną przesuwania obrazu o 80 linii i poziomych artefaktów był licznik przerwań w sterowniku ESP-IDF. W rdzeniu Arduino 3.3.x z `RESTART_IN_VSYNC` nigdy nie był zerowany. Od v5.1.0 urządzenie zeruje go w każdej klatce. Szczegóły: `ANALIZA_V5.md` 7.4, model `tools/sim5/rgb_bounce_model.py`.
+- Przy zapisie flasha i starcie Wi-Fi zegar pikseli spada na chwilę do 1 MHz.
+- Diagnostyka (sekcja OBRAZ) i polecenie `l` w monitorze portu pokazują, ile klatek było zakłóconych i naprawionych.
+
+**Polecenia w monitorze portu (115200):**
+- `i` — diagnostyka,
+- `l` — statystyki obrazu,
+- `h` — ręczna twarda resynchronizacja.
 
 ### Zmiany względem v4.1
 

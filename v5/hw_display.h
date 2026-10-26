@@ -1,6 +1,7 @@
 // =============================================================================
 //  hw_display.h — panel RGB ST7701 480x480 (esp_lcd, bounce + 2 FB w PSRAM),
 //  LVGL DIRECT, podswietlenie, ochrona obrazu przy (rzadkim) zapisie flasha.
+//  Przyczyna i poprawka przesuwania obrazu: opis w hw_display.cpp.
 // =============================================================================
 #pragma once
 #include <stdint.h>
@@ -8,31 +9,28 @@
 constexpr uint16_t SCREEN_W = 480;
 constexpr uint16_t SCREEN_H = 480;
 
-// Powody twardej resynchronizacji (bity, do logu/diagnostyki).
-enum : uint8_t { RESYNC_FLASH = 1, RESYNC_LATE_VSYNC = 2, RESYNC_PHASE = 4, RESYNC_DATA = 8, RESYNC_BOOT = 16, RESYNC_PERIODIC = 32, RESYNC_SCREEN = 64 };
-
 bool displayInit();                 // ekspander, ST7701, esp_lcd, lv_init + lv_display (DIRECT)
 void displayBacklightInit();
 void displaySetBacklight(uint8_t duty);   // 0 = 100% (AP3032 aktywne niskim)
 
 uint32_t displayVsyncCount();       // licznik klatek (VSYNC)
-void displaySetRowShift(int lines); // korekta przesuniecia obrazu (domyslnie RGB_ROW_SHIFT)
-int displayRowShift();
-bool displayToggleVsyncRestart();   // test: restart DMA co VSYNC wl./wyl. (zwraca nowy stan)
-void displayRequestResync(uint8_t reason);
+void displayRequestResync();        // reczna twarda resynchronizacja (polecenie 'h')
 void displayResyncIfPending();      // wolac TYLKO z petli UI, tuz po VSYNC
-void displayResyncAfterVsync();     // czeka na VSYNC (max 70 ms) i wykonuje zalegla resynchronizacje
+void displayLogEvents();            // log zakloconych klatek (z petli, najwyzej co 2 s)
 
 struct DisplayDiag {
-  bool phaseDetector;
-  uint32_t resyncCount;
-  uint8_t lastReason;
-  int32_t phaseUs, phaseRefUs;
+  bool eofFix;                      // poprawka licznika EOF aktywna
+  uint32_t frames;                  // klatki od startu
+  uint32_t badFrames;               // klatki z zaklocona liczba przerwan EOF
+  uint32_t parityFixes;             // ...w tym z odwrocona kolejnoscia buforow (naprawione)
+  uint32_t lastBadEof;              // liczba EOF w ostatniej zakloconej klatce
+  uint32_t lateVsyncs;              // spoznione VSYNC (przestoj przerwan)
+  uint32_t resyncCount;             // reczne twarde resynchronizacje
   uint32_t flashWrites;
 };
 DisplayDiag displayDiag();
 
-// RAII: obniza zegar pikseli na czas zapisu do flasha, po zapisie zleca resynchronizacje.
+// RAII: obniza zegar pikseli na czas zapisu do flasha (bufory bounce nie zaglodza sie).
 // Zagniezdzenia i uzycie z roznych rdzeni sa liczone atomowo.
 struct FlashWriteGuard {
   FlashWriteGuard();

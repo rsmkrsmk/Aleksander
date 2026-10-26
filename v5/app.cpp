@@ -116,10 +116,9 @@ static void buildDiagText() {
            "CACHE NA FLASHU\n"
            "  zapisow: %u, ostatni: %s%s\n"
            "OBRAZ\n"
-           "  detektor przesuniecia: %s\n"
-           "  twarde resynchronizacje: %u (ostatni powod %u)\n"
-           "  faza %ld us, wzorzec %ld us\n"
-           "  operacje zapisu flasha: %u\n"
+           "  poprawka kolejnosci buforow: %s\n"
+           "  klatki: %u, zaklocone: %u (naprawione: %u)\n"
+           "  spoznione VSYNC: %u, zapisy flasha: %u\n"
            "SIEC\n"
            "  Wi-Fi: %s, IP %s, %d dBm\n"
            "  czas NTP: %s\n"
@@ -136,8 +135,8 @@ static void buildDiagText() {
            h.revLocal, h.revRemote, a1, a2, (unsigned)h.downloadFails, hostErrorText(h.lastError),
            hostSleepTelegramEnabled() ? "wlaczone" : "wylaczone",
            (unsigned)h.cacheWrites, a3, h.cachePending ? " (czeka zmiana)" : "",
-           d.phaseDetector ? "aktywny" : "niedostepny", (unsigned)d.resyncCount, (unsigned)d.lastReason,
-           (long)d.phaseUs, (long)d.phaseRefUs, (unsigned)d.flashWrites,
+           d.eofFix ? "aktywna" : "NIEAKTYWNA", (unsigned)d.frames, (unsigned)d.badFrames, (unsigned)d.parityFixes,
+           (unsigned)d.lateVsyncs, (unsigned)d.flashWrites,
            wifiStatusText(), ip, wifiOk() ? (int)WiFi.RSSI() : 0,
            timeOk() ? "OK" : "brak", w.valid ? "OK" : "brak", wAge,
            FW_VERSION, __DATE__,
@@ -203,8 +202,6 @@ void appSetup() {
   while (!wifiOk() && millis() - w0 < WIFI_CONNECT_TIMEOUT_MS) bootPump(100);
   wifiLogStatus("start");
   uiBootSetStep(0, wifiOk() ? 1 : 2);
-  displayRequestResync(RESYNC_BOOT);   // inicjalizacja Wi-Fi moze dotknac flasha (kalibracja PHY)
-  displayResyncAfterVsync();
 
   // 2. Zegar
   uiBootSetStep(1, 0);
@@ -221,7 +218,6 @@ void appSetup() {
   bootPump(50);
   hostCacheMount();
   store = hostLoadCache();
-  displayResyncAfterVsync();
   uiBootSetStep(2, store ? 1 : 2);
 
   // 4. Pogoda (z RAM RTC; pobranie w tle)
@@ -243,8 +239,6 @@ void appSetup() {
   else if (!fresh) uiBootSetText("Brak danych WWW – start mimo to");
   else uiBootSetText("Brak czasu – start mimo to");
   bootPump(900);
-  displayRequestResync(RESYNC_BOOT);   // start zawsze konczymy czystym strumieniem obrazu
-  displayResyncAfterVsync();
 
   night = nightNow();
   applyBacklight();
@@ -314,24 +308,19 @@ void appLoop() {
   if (uiScreen() == UiScreen::Dash && idle > SAVER_TIMEOUT_MS) showScreen(UiScreen::Saver);
   if (uiScreen() == UiScreen::Diag && idle > DIAG_TIMEOUT_MS) showScreen(UiScreen::Dash);
 
-  // Polecenia testowe z monitora portu: r = restart DMA co VSYNC wl./wyl., h = wyprostuj obraz teraz.
+  // Polecenia z monitora portu: i = diagnostyka, l = statystyki obrazu, h = twarda resynchronizacja.
   while (Serial.available()) {
     const int ch = Serial.read();
-    if (ch == 'r') Serial.printf("LCD: restart co VSYNC %s\n", displayToggleVsyncRestart() ? "WLACZONY" : "wylaczony");
-    else if (ch == 'a' || ch == 'd' || ch == 'z' || ch == 'x') {
-      displaySetRowShift(displayRowShift() + (ch == 'a' ? -10 : ch == 'd' ? 10 : ch == 'z' ? -1 : 1));
-      Serial.printf("LCD: przesuniecie wierszy = %d (domyslne w app_config.h: RGB_ROW_SHIFT)\n", displayRowShift());
+    if (ch == 'i') { uiRequest(UI_REQ_TO_DIAG); Serial.println("UI: diagnostyka (polecenie i)."); }
+    else if (ch == 'h') displayRequestResync();
+    else if (ch == 'l') {
+      const DisplayDiag d = displayDiag();
+      Serial.printf("LCD: poprawka %s, klatki %u, zaklocone %u (naprawione %u, EOF %u), spoznione VSYNC %u, zapisy flasha %u\n",
+                    d.eofFix ? "aktywna" : "NIEAKTYWNA", (unsigned)d.frames, (unsigned)d.badFrames, (unsigned)d.parityFixes,
+                    (unsigned)d.lastBadEof, (unsigned)d.lateVsyncs, (unsigned)d.flashWrites);
     }
-    else if (ch == 'i') { uiRequest(UI_REQ_TO_DIAG); Serial.println("UI: diagnostyka (polecenie i)."); }
-    else if (ch == 'h') { displayRequestResync(RESYNC_BOOT); Serial.println("LCD: reczna resynchronizacja."); }
   }
-
-  // Siatka bezpieczenstwa obrazu: okresowa twarda resynchronizacja.
-  static uint32_t lastPeriodic = 0;
-  if (RGB_PERIODIC_RESYNC_MS && now - lastPeriodic >= RGB_PERIODIC_RESYNC_MS) {
-    lastPeriodic = now;
-    displayRequestResync(RESYNC_PERIODIC);
-  }
+  displayLogEvents();
 
   // Model: czesc "na zywo" co 1 s, wykresy po zmianie danych i co 60 s.
   if (now - lastLiveMs >= 1000) {

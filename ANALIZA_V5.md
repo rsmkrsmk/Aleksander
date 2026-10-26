@@ -379,24 +379,36 @@ struct Store { Entry *e; uint32_t n; long rev; uint32_t parsedAtMs; const uint8_
 - Wpisy sortowane po `t` przy parsowaniu (stabilnie), więc wszystkie reguły zakładające chronologię są poprawne, nawet przy edycjach w miejscu na WWW.
 - Bufor CSV zostaje w PSRAM do wysyłki kopii na Telegram (bez flasha).
 
-### 7.4 Obraz bez przesunięć — strategia
+### 7.4 Obraz bez przesunięć — przyczyna i poprawka (ustalone 26.10.2026)
 
-1. **Podstawowa (Arduino IDE, wymagana):** w normalnej pracy **żadnych** operacji na flashu (LittleFS, NVS, `esp_partition_*`).
+**Przyczyna (źródła ESP-IDF 5.5.5 + disassembly `libesp_lcd.a` z rdzenia Arduino 3.3.12):**
+- Rdzeń Arduino 3.3.x jest skompilowany z `CONFIG_LCD_RGB_RESTART_IN_VSYNC=1`. Sterownik w każdym VSYNC restartuje DMA, zawsze od bufora bounce nr 0.
+- Który bufor uzupełnić po przerwaniu EOF, sterownik wybiera z parzystości licznika `bb_eof_count`. W tym trybie licznik **nigdy nie jest zerowany** (zerowanie jest tylko w gałęzi bez `RESTART_IN_VSYNC`).
+- Gdy przerwanie EOF spóźni się o więcej niż jedną porcję (80 linii ≈ 7,4 ms), dwa zdarzenia zlewają się w jedno i parzystość odwraca się **na stałe**. Przyczyną może być zapis flasha, start Wi-Fi albo długa sekcja krytyczna.
+- Skutek: obraz zaczyna się od 2. porcji, czyli przesunięcie o 80 linii w górę z zawinięciem (zdjęcie z 20.10, 22:28). Bufor uzupełniany jest w chwili, gdy DMA go czyta, co daje poziome artefakty.
+- `esp_lcd_panel_init` (twarda resynchronizacja) licznika nie zeruje, więc nie pomagała. Detektor fazy tego nie widział, bo moment zawinięcia klatki się nie zmienia.
+- Wszystkie objawy odtwarza model `tools/sim5/rgb_bounce_model.py`.
 
-   Zostaje:
-   - kod i stałe (fonty, grafiki) czytane przez cache (XIP), co nie wyłącza cache,
-   - **zero zapisów**,
-   - Wi-Fi z `persistent(false)`.
+**Poprawka (v5.1.0, `hw_display.cpp`):**
+- Callback VSYNC, wywoływany w tym samym przerwaniu przed restartem DMA, zeruje `bb_eof_count`, tak jak robi to sterownik bez `RESTART_IN_VSYNC`.
+- Pole jest prywatne. Jego adres ustalany jest w czasie działania po kotwicach: nasze wskaźniki callbacków i `user_ctx`. Do tego kontrola `expect_eof_count == 6` i blokada `spinlock` sterownika.
+- Przesunięcia sprawdzone disassemblingiem: `bb_eof_count` +0x128, `spinlock` +0x14c.
+- Na modelu przy 2% zakłóconych klatek: zero trwałych przesunięć, najwyżej jedna zła klatka na zakłócenie.
 
-   Twarda resynchronizacja i detektor fazy zostają jako zabezpieczenie i diagnostyka (liczniki w DIAGNOSTYCE).
-2. **Mocniejsza (zalecana do rozważenia, decyzja D1):** budowanie przez **PlatformIO / pioarduino** z własnym `sdkconfig` (Arduino jako komponent ESP-IDF):
-   - `CONFIG_SPIRAM_XIP_FROM_PSRAM=y` (dawniej `SPIRAM_FETCH_INSTRUCTIONS` + `SPIRAM_RODATA`): kod i stałe w PSRAM, więc **operacje na flashu nie wyłączają już cache PSRAM**. To zalecenie Espressif dla paneli RGB.
-   - `CONFIG_LCD_RGB_ISR_IRAM_SAFE=y`: przerwania panelu działają także podczas operacji na flashu.
-   - `CONFIG_LCD_RGB_RESTART_IN_VSYNC=y`: restart DMA w VSYNC robi sterownik (zbędny nasz callback).
-   - `CONFIG_ESP_TASK_WDT_*`, `CONFIG_FREERTOS_HZ=1000`.
+**Usunięte jako zbędne lub szkodliwe:**
+- detektor fazy,
+- automatyczne twarde resynchronizacje (mrugały),
+- okresowa resynchronizacja,
+- korekta „+80 linii” z v5.0.4 (zakładała stałe odwrócenie).
 
-   Koszt: zmiana środowiska (VS Code + PlatformIO zamiast Arduino IDE) i dłuższa pierwsza kompilacja. Zysk: problem rozwiązany u źródła, a opcje są niedostępne w prekompilowanym rdzeniu Arduino IDE.
-3. Bez względu na wariant: **nie wracać do EDMA bez bounce** (test 19.10).
+**Zostaje:**
+- `FlashWriteGuard` (1 MHz na czas zapisu flasha), teraz także na start Wi-Fi (kalibracja PHY w NVS),
+- ręczna resynchronizacja (polecenie `h`),
+- statystyki w DIAGNOSTYCE oraz polecenie `l`.
+
+**Nadal aktualne:**
+- nie wracać do EDMA bez bounce (test 19.10),
+- PlatformIO z `CONFIG_SPIRAM_XIP_FROM_PSRAM` i `CONFIG_LCD_RGB_ISR_IRAM_SAFE` usunęłoby też pojedyncze zakłócone klatki przy zapisie flasha. Nie jest już konieczne.
 
 ### 7.5 Konfiguracja i sekrety
 

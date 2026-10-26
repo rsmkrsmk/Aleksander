@@ -89,7 +89,7 @@ static void cacheWriteIfDue(bool force) {
   if (!force && lastCacheWriteMs != 0 && millis() - lastCacheWriteMs < CACHE_MIN_INTERVAL_MS) return;
   bool ok = false;
   {
-    FlashWriteGuard g;   // zapis jednym zrywem z PSRAM, obnizony zegar pikseli, potem resynchronizacja
+    FlashWriteGuard g;   // zapis jednym zrywem z PSRAM przy obnizonym zegarze pikseli
     File f = LittleFS.open("/dane.tmp", FILE_WRITE);
     if (f) {
       ok = f.write(csv.p, csv.len) == csv.len;

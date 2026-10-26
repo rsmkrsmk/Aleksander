@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define FW_VERSION "5.0.5"
+#define FW_VERSION "5.1.0"
 
 // ------------------------------- Dziecko ------------------------------------
 constexpr int BIRTH_DAY = 8;
@@ -60,14 +60,6 @@ constexpr int NIGHT_END_HOUR = 7;
 constexpr uint8_t BACKLIGHT_FULL_DUTY = 0;
 constexpr uint8_t BACKLIGHT_NIGHT_DUTY = 90;
 constexpr uint8_t BACKLIGHT_DIM_DUTY = 119;
-
-// Strumien DMA panelu startuje stale od 2. porcji bounce => obraz przesuniety o 80 linii w gore.
-// Korekta: wiersze wpisywane do FB z tym przesunieciem (zmiana w locie: polecenia a/d/z/x w monitorze).
-constexpr int RGB_ROW_SHIFT = 80;
-
-// Okresowa twarda resynchronizacja obrazu (siatka bezpieczenstwa: przesuniecie, ktorego nie
-// wykryje detektor, znika najpozniej po tym czasie). 0 = wylaczone.
-constexpr uint32_t RGB_PERIODIC_RESYNC_MS = 0;   // wylaczone (okresowe mrugniecia nic nie dawaly)
 
 // ------------------------------- Karmienie ----------------------------------
 constexpr int COUNTER_WARN_MIN = 180;   // zolty

@@ -3,6 +3,7 @@
 #include "app_config.h"
 #include "secrets.h"
 #include "diag.h"
+#include "hw_display.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <NetworkClientSecure.h>
@@ -68,9 +69,13 @@ static void ensureNvs() {
 }
 
 void wifiStart() {
-  ensureNvs();
-  WiFi.persistent(false);   // bez zapisow NVS (zapis flasha = ryzyko przesuniecia obrazu)
-  WiFi.mode(WIFI_STA);
+  {
+    // Start Wi-Fi zapisuje kalibracje radia do NVS (flash) — na ten czas wolniejszy zegar pikseli.
+    FlashWriteGuard g;
+    ensureNvs();
+    WiFi.persistent(false);   // bez zapisow ustawien Wi-Fi do NVS
+    WiFi.mode(WIFI_STA);
+  }
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);
   WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {

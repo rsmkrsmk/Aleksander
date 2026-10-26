@@ -1,4 +1,4 @@
-// hw_display.cpp — sterownik obrazu (przeniesiony z v4.1 bez zmian zachowania).
+// hw_display.cpp — sterownik obrazu: ST7701 + esp_lcd RGB (bounce + 2 FB w PSRAM), LVGL DIRECT.
 #include "hw_display.h"
 // Pola sram_trans_align / on_bounce_frame_finish sa w nowszych rdzeniach oznaczone jako
 // przestarzale, ale potrzebne dla zgodnosci ze starszymi (3.2.x) — bez ostrzezen.
@@ -14,6 +14,7 @@
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <sdkconfig.h>
 
 // Ekspander TCA9554 (zasilanie/reset ST7701 i jego komendy inicjalizujace).
 static Arduino_XCA9554SWSPI *expander = nullptr;
@@ -31,31 +32,45 @@ constexpr uint32_t FRAME_US = static_cast<uint32_t>(552ULL * 518ULL * 1000000ULL
 // Tryb bounce (2 x 80 linii w RAM wewnetrznym) + 2 framebuffery w PSRAM. Tryb EDMA bez
 // bounce byl testowany 19.10.2026: linie, mruganie, przesuniecia. NIE wracac do niego.
 constexpr uint32_t BOUNCE_LINES = 80;
-// Na czas zapisu flasha: 1 MHz => pelny bufor bounce starcza na ~44 ms.
+constexpr uint32_t BOUNCE_CHUNKS = SCREEN_H / BOUNCE_LINES;   // 6 porcji (przerwan EOF) na klatke
+// Na czas zapisu flasha: 1 MHz => porcja bounce trwa ~44 ms, wiec krotki zapis jej nie zaglodzi.
 constexpr uint32_t PCLK_FLASH_SAFE_HZ = 1000000;
 
-// --- stan resynchronizacji i detektora przesuniecia ---------------------------
-static volatile bool resyncPending = false;
-static volatile uint8_t resyncReason = 0;
-static volatile uint8_t lastResyncReason = 0;
-static volatile uint32_t resyncCount = 0;
+// =============================================================================
+//  PRZYCZYNA PRZESUNIECIA OBRAZU (ustalona 26.10.2026 na zrodlach ESP-IDF 5.5.5)
+//  Rdzen Arduino 3.3.x jest skompilowany z CONFIG_LCD_RGB_RESTART_IN_VSYNC=1. W tym trybie
+//  sterownik restartuje DMA w kazdym VSYNC zawsze od bufora bounce nr 0, ale licznika
+//  przerwan EOF (bb_eof_count) NIGDY nie zeruje — a to z jego parzystosci wybiera, ktory
+//  bufor uzupelnic po przerwaniu. Gdy dwa przerwania EOF zleja sie w jedno (przerwanie
+//  spoznione > 1 porcji: zapis flasha, start Wi-Fi, dluga sekcja krytyczna), parzystosc
+//  odwraca sie NA STALE: obraz zaczyna sie od 2. porcji (przesuniecie o 80 linii w gore
+//  z zawinieciem), a uzupelnianie bufora, ktory DMA wlasnie czyta, daje poziome artefakty.
+//  Twarda resynchronizacja (esp_lcd_panel_init) licznika nie zeruje, wiec nie pomagala;
+//  detektor fazy go nie widzial, bo moment zawiniecia klatki sie nie zmienia.
+//  Model maszyny stanow sterownika: tools/sim5/rgb_bounce_model.py.
+//
+//  POPRAWKA: w callbacku VSYNC (wywolywanym w tym samym przerwaniu tuz PRZED restartem DMA)
+//  zerujemy licznik EOF — dokladnie to, co sterownik robi sam w trybie bez RESTART_IN_VSYNC.
+//  Parzystosc jest wtedy poprawna na poczatku kazdej klatki; ewentualne zaklocenie psuje
+//  najwyzej jedna klatke. Pole licznika jest prywatne, wiec jego adres ustalamy w czasie
+//  dzialania po kotwicach w strukturze sterownika (nasze wskazniki callbackow i user_ctx)
+//  z kontrola sensownosci; gdy sie nie uda — log i dzialanie jak dotad.
+// =============================================================================
+static volatile uint32_t *drvEofCount = nullptr;   // esp_rgb_panel_t::bb_eof_count
+static portMUX_TYPE *drvLock = nullptr;            // esp_rgb_panel_t::spinlock
+static bool fixActive = false;
+
+// --- statystyki (zmieniane w przerwaniu VSYNC) ---------------------------------
 static volatile uint32_t vsyncCount = 0;
 static volatile uint32_t lastVsyncUs = 0;
-static volatile uint32_t gapIgnoreUntilUs = 0;
+static volatile uint32_t lateVsyncs = 0;      // VSYNC spozniony > 1 ramka + 15 ms (przestoj przerwan)
+static volatile uint32_t frameEofBad = 0;     // klatki z liczba EOF != 6 (zgubione/spoznione przerwanie)
+static volatile uint32_t parityFixes = 0;     // klatki, w ktorych poprawka przywrocila parzystosc
+static volatile uint32_t lastBadEof = 0;
 static volatile int flashDepth = 0;
-// Restart DMA co VSYNC (jak CONFIG_LCD_RGB_RESTART_IN_VSYNC). WYLACZONY: sterownik sam restartuje,
-// gdy zabraknie przerwan bounce, a restart w KAZDEJ klatce z nieIRAM-owego przerwania potrafi
-// sie spoznic i trwale przesunac obraz (komentarz w esp_lcd_panel_rgb.c). Do testow: polecenie 'r'.
-static volatile bool restartEveryVsync = false;
 static volatile uint32_t flashWrites = 0;
-// Faza: czas od "klatka skopiowana do buforow bounce" do VSYNC. Staly przy poprawnym
-// obrazie; przesuniecie o N x 80 linii zmienia go o N x ~7,4 ms i tak zostaje.
-static volatile bool phaseAvailable = false;
-static volatile uint32_t frameDoneUs = 0;
-static volatile int32_t phaseUs = -1, phaseRefUs = -1;
-static volatile uint8_t learnLeft = 0, learnCnt = 0, badFrames = 0;
-static volatile int32_t learnSum = 0;
-constexpr int32_t PHASE_TOL_US = 3000;
+static volatile bool resyncPending = false;
+static volatile uint32_t resyncCount = 0;
 
 static inline uint32_t nowUs() { return static_cast<uint32_t>(esp_timer_get_time()); }
 
@@ -65,121 +80,67 @@ static bool onTransferDone(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event
   return woken == pdTRUE;
 }
 
-static bool onFrameDone(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t *, void *) {
-  frameDoneUs = nowUs();
-  return false;
-}
-
-// Nazwa pola callbacku zalezy od wersji ESP-IDF w rdzeniu (on_frame_buf_complete w nowszych,
-// on_bounce_frame_finish w starszych) — wybor w czasie kompilacji; brak pola = brak detektora.
-struct CbCompat {
-  template <typename T>
-  static auto set(T &cb, int) -> decltype(cb.on_frame_buf_complete = nullptr, bool()) {
-    cb.on_frame_buf_complete = onFrameDone; return true;
-  }
-  template <typename T>
-  static auto set(T &cb, long) -> decltype(cb.on_bounce_frame_finish = nullptr, bool()) {
-    cb.on_bounce_frame_finish = onFrameDone; return true;
-  }
-  template <typename T>
-  static bool set(T &, ...) { return false; }
-};
-
-// VSYNC: licznik klatek, wykrycie spoznionego VSYNC (przestoj przerwan = mozliwe
-// przesuniecie), pomiar fazy, restart DMA co klatke (odpowiednik CONFIG_LCD_RGB_RESTART_IN_VSYNC).
-static bool onVsync(esp_lcd_panel_handle_t p, const esp_lcd_rgb_panel_event_data_t *, void *) {
-  vsyncCount = vsyncCount + 1;
+static bool IRAM_ATTR onVsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t *, void *) {
+  const uint32_t n = vsyncCount + 1;
+  vsyncCount = n;
   const uint32_t t = nowUs();
   const uint32_t prev = lastVsyncUs;
   lastVsyncUs = t;
-  const bool judge = flashDepth == 0 && static_cast<int32_t>(t - gapIgnoreUntilUs) > 0;
-  if (judge && prev != 0 && t - prev > FRAME_US + 15000) {
-    resyncReason = resyncReason | RESYNC_LATE_VSYNC;
-    resyncPending = true;
-  }
-  const uint32_t done = frameDoneUs;
-  if (judge && phaseAvailable && done != 0) {
-    const int32_t ph = static_cast<int32_t>(t - done);
-    if (ph >= 0 && ph < static_cast<int32_t>(FRAME_US) + 5000) {
-      phaseUs = ph;
-      if (learnLeft > 0) {
-        learnSum = learnSum + ph;
-        learnCnt = learnCnt + 1;
-        learnLeft = learnLeft - 1;
-        if (learnLeft == 0 && phaseRefUs < 0) phaseRefUs = learnSum / learnCnt;
-      } else if (phaseRefUs >= 0) {
-        const int32_t d = ph - phaseRefUs;
-        if (d > PHASE_TOL_US || d < -PHASE_TOL_US) {
-          badFrames = badFrames + 1;
-          if (badFrames >= 3) {
-            badFrames = 0;
-            resyncReason = resyncReason | RESYNC_PHASE;
-            resyncPending = true;
-          }
-        } else {
-          badFrames = 0;
-        }
-      }
+  if (prev != 0 && flashDepth == 0 && t - prev > FRAME_US + 15000) lateVsyncs = lateVsyncs + 1;
+#if CONFIG_LCD_RGB_RESTART_IN_VSYNC
+  if (drvEofCount) {
+    if (drvLock) portENTER_CRITICAL_ISR(drvLock);
+    const uint32_t c = *drvEofCount;
+    *drvEofCount = 0;
+    if (drvLock) portEXIT_CRITICAL_ISR(drvLock);
+    if (n > 2 && c != BOUNCE_CHUNKS) {   // pierwsze klatki po starcie pomijamy
+      frameEofBad = frameEofBad + 1;
+      lastBadEof = c;
+      if (c & 1) parityFixes = parityFixes + 1;
     }
   }
-  if (p && restartEveryVsync) esp_lcd_rgb_panel_restart(p);
+#endif
   return false;
 }
 
-// --- Wyswietlanie z korekta przesuniecia wierszy --------------------------------
-// Na urzadzeniu strumien DMA zaczyna sie stale od 2. porcji bounce (obraz przesuniety o 80 linii
-// w gore z zawinieciem — potwierdzone zdjeciem/filmem; resynchronizacja tego nie zmienia).
-// Dlatego LVGL renderuje CZESCIOWO (bufor w PSRAM), a flush wpisuje wiersze do framebufferow
-// z przesunieciem: wiersz ekranu y laduje w wierszu (y + rowShift) % 480.
-// Dwa FB: rysujemy do tylnego, przelaczamy (draw_bitmap z adresem FB — bez kopiowania),
-// potem te same prostokaty kopiujemy do nowego tylnego FB (utrzymanie zgodnosci).
-static volatile int rowShift = RGB_ROW_SHIFT;
-static uint8_t *lvBuf = nullptr;
-static uint8_t *fbPtr[2] = {nullptr, nullptr};
-static int frontIdx = 0;   // FB aktualnie wskazany sterownikowi
-struct DirtyRect { int16_t x1, y1, x2, y2; };
-constexpr int MAX_RECTS = 32;
-static DirtyRect rects[MAX_RECTS];
-static int rectCount = 0;
-static bool rectsFull = false;
-
-static inline int fbRow(int y) { return (y + rowShift + 4800) % SCREEN_H; }
-
-static void copyRect(uint8_t *dst, const uint8_t *src, const DirtyRect &r) {
-  const size_t bytes = static_cast<size_t>(r.x2 - r.x1 + 1) * 2;
-  for (int y = r.y1; y <= r.y2; ++y) {
-    const size_t off = (static_cast<size_t>(fbRow(y)) * SCREEN_W + r.x1) * 2;
-    memcpy(dst + off, src + off, bytes);
+// Odnajduje w prywatnej strukturze esp_rgb_panel_t pola bb_eof_count i spinlock.
+// Uklad (IDF 5.x): ... bounce_pos_px, bb_eof_count, expect_eof_count, on_color_trans_done,
+// on_frame_buf_complete, on_vsync, on_bounce_empty, user_ctx, x_gap, y_gap, spinlock ...
+static void locateDriverState() {
+#if CONFIG_LCD_RGB_RESTART_IN_VSYNC
+  uint32_t *w = reinterpret_cast<uint32_t *>(panel);   // 'base' jest pierwszym polem struktury
+  const uint32_t aTx = reinterpret_cast<uint32_t>(&onTransferDone);
+  const uint32_t aVs = reinterpret_cast<uint32_t>(&onVsync);
+  const uint32_t aCtx = reinterpret_cast<uint32_t>(transferSem);
+  for (int i = 4; i < 112; ++i) {   // struktura ma ~0x160 B (pole on_color_trans_done: +0x130 w IDF 5.5.5)
+    if (w[i] != aTx || w[i + 2] != aVs || w[i + 4] != aCtx) continue;
+    const uint32_t expect = w[i - 1];
+    const uint32_t pos = w[i - 3];
+    const uint32_t chunkPx = SCREEN_W * BOUNCE_LINES;
+    if (expect != BOUNCE_CHUNKS || pos % chunkPx != 0 || pos > chunkPx * BOUNCE_CHUNKS) {
+      Serial.printf("LCD: struktura sterownika nie pasuje (expect %u, pos %u) — poprawka EOF wylaczona.\n",
+                    (unsigned)expect, (unsigned)pos);
+      return;
+    }
+    drvEofCount = &w[i - 2];
+    portMUX_TYPE *lk = reinterpret_cast<portMUX_TYPE *>(&w[i + 7]);
+    if (lk->owner == SPINLOCK_FREE) drvLock = lk;
+    fixActive = true;
+    Serial.printf("LCD: poprawka licznika EOF aktywna (pole +%d B, blokada %s).\n", (i - 2) * 4, drvLock ? "tak" : "nie");
+    return;
   }
+  Serial.println("LCD: nie znaleziono pol sterownika — poprawka EOF wylaczona.");
+#else
+  Serial.println("LCD: rdzen bez RESTART_IN_VSYNC — sterownik sam zeruje licznik EOF.");
+#endif
 }
 
-static void flushCb(lv_display_t *d, const lv_area_t *area, uint8_t *px) {
-  uint8_t *back = fbPtr[1 - frontIdx];
-  const int w = area->x2 - area->x1 + 1;
-  for (int y = area->y1; y <= area->y2; ++y) {
-    memcpy(back + (static_cast<size_t>(fbRow(y)) * SCREEN_W + area->x1) * 2,
-           px + static_cast<size_t>(y - area->y1) * w * 2, static_cast<size_t>(w) * 2);
-  }
-  if (rectCount < MAX_RECTS) rects[rectCount++] = {static_cast<int16_t>(area->x1), static_cast<int16_t>(area->y1),
-                                                   static_cast<int16_t>(area->x2), static_cast<int16_t>(area->y2)};
-  else rectsFull = true;
-  if (lv_display_flush_is_last(d)) {
-    frontIdx = 1 - frontIdx;
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, fbPtr[frontIdx]);   // przelaczenie FB
-    uint8_t *newBack = fbPtr[1 - frontIdx];
-    if (rectsFull) memcpy(newBack, fbPtr[frontIdx], static_cast<size_t>(SCREEN_W) * SCREEN_H * 2);
-    else for (int i = 0; i < rectCount; ++i) copyRect(newBack, fbPtr[frontIdx], rects[i]);
-    rectCount = 0;
-    rectsFull = false;
-  }
+static void flushCb(lv_display_t *d, const lv_area_t *, uint8_t *px) {
+  // DIRECT: LVGL renderuje do niewidocznego FB; draw_bitmap na pelnym obszarze przelacza
+  // framebuffery bez kopiowania. Tylko na ostatnim fragmencie klatki.
+  if (lv_display_flush_is_last(d)) esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, px);
   lv_display_flush_ready(d);
 }
-
-void displaySetRowShift(int lines) {
-  rowShift = ((lines % SCREEN_H) + SCREEN_H) % SCREEN_H;
-  if (lvDisp) lv_obj_invalidate(lv_screen_active());   // pelne przerysowanie z nowym przesunieciem
-}
-int displayRowShift() { return rowShift; }
 
 bool displayInit() {
   // Sekwencja zasilania panelu z oficjalnego demo Waveshare (piny 5 i 6 ekspandera).
@@ -235,31 +196,24 @@ bool displayInit() {
   esp_lcd_rgb_panel_event_callbacks_t cb = {};
   cb.on_color_trans_done = onTransferDone;
   cb.on_vsync = onVsync;
-  phaseAvailable = CbCompat::set(cb, 0);
-  Serial.printf("LCD: detektor przesuniecia obrazu %s.\n", phaseAvailable ? "aktywny" : "NIEDOSTEPNY w tej wersji rdzenia");
   err = esp_lcd_rgb_panel_register_event_callbacks(panel, &cb, transferSem);
+  if (err == ESP_OK) locateDriverState();   // przed startem strumienia (esp_lcd_panel_init)
   if (err == ESP_OK) err = esp_lcd_panel_reset(panel);
   if (err == ESP_OK) err = esp_lcd_panel_init(panel);
   if (err == ESP_OK) err = esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb0, &fb1);
   if (err != ESP_OK || !fb0 || !fb1) { Serial.printf("LCD: inicjalizacja blad 0x%x\n", (unsigned)err); return false; }
 
-  // Biala pierwsza klatka.
+    // Biala pierwsza klatka.
   const size_t fbBytes = SCREEN_W * SCREEN_H * 2;
   memset(fb0, 0xFF, fbBytes);
+  memset(fb1, 0xFF, fbBytes);
   esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, fb0);
   xSemaphoreTake(transferSem, pdMS_TO_TICKS(100));
 
   lv_init();
   lvDisp = lv_display_create(SCREEN_W, SCREEN_H);
   lv_display_set_flush_cb(lvDisp, flushCb);
-  fbPtr[0] = static_cast<uint8_t *>(fb0);
-  fbPtr[1] = static_cast<uint8_t *>(fb1);
-  memset(fb1, 0xFF, fbBytes);
-  frontIdx = 0;
-  constexpr size_t LV_BUF_BYTES = static_cast<size_t>(SCREEN_W) * 60 * 2;   // 60 linii na przebieg
-  lvBuf = static_cast<uint8_t *>(heap_caps_malloc(LV_BUF_BYTES, MALLOC_CAP_SPIRAM));
-  if (!lvBuf) { Serial.println("LCD: brak pamieci na bufor LVGL."); return false; }
-  lv_display_set_buffers(lvDisp, lvBuf, nullptr, LV_BUF_BYTES, LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_set_buffers(lvDisp, fb0, fb1, fbBytes, LV_DISPLAY_RENDER_MODE_DIRECT);
   Serial.printf("LCD: 2 FB w PSRAM, bounce %u linii, wolny RAM wewn. %u KB\n", (unsigned)BOUNCE_LINES,
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
   return true;
@@ -273,63 +227,43 @@ void displaySetBacklight(uint8_t duty) { ledcWrite(BACKLIGHT_PIN, duty); }
 
 uint32_t displayVsyncCount() { return vsyncCount; }
 
-bool displayToggleVsyncRestart() {
-  restartEveryVsync = !restartEveryVsync;
-  return restartEveryVsync;
-}
+void displayRequestResync() { resyncPending = true; }
 
-void displayRequestResync(uint8_t reason) {
-  resyncReason = resyncReason | reason;
-  resyncPending = true;
-}
-
-// Twarda resynchronizacja: esp_lcd_panel_init() na dzialajacym panelu restartuje strumien
-// (stop, reset FIFO/DMA, pozycja bounce = 0, ponowne napelnienie obu buforow, start).
-// Zwykly restart DMA nie zeruje pozycji bounce, wiec przesuniecie zostawalo na stale.
+// Twarda resynchronizacja (tylko na zadanie, polecenie 'h'): pelny restart strumienia od
+// poczatku klatki, z wyzerowaniem licznika EOF.
 void displayResyncIfPending() {
   if (!panel || !resyncPending || flashDepth > 0) return;
-  static uint32_t lastMs = 0;
-  if (lastMs != 0 && millis() - lastMs < 700) return;   // bez serii mrugniec
-  lastMs = millis();
   resyncPending = false;
-  const uint8_t reason = resyncReason;
-  resyncReason = 0;
-  const int32_t before = phaseUs;
-  esp_lcd_panel_init(panel);   // zatrzymuje i uruchamia strumien od poczatku klatki (pozycja bounce = 0)
-  gapIgnoreUntilUs = nowUs() + 300000;
-  badFrames = 0;
-  // Bezpiecznik: gdy resynchronizacja z powodu fazy nie przywraca wzorca, po 3 probach
-  // w 5 s uczymy wzorzec od nowa (zamiast mrugac w kolko).
-  static uint32_t lastPhaseMs = 0;
-  static uint8_t streak = 0;
-  if (reason == RESYNC_PHASE) {
-    streak = (millis() - lastPhaseMs < 5000) ? streak + 1 : 1;
-    lastPhaseMs = millis();
-    if (streak >= 3) { streak = 0; phaseRefUs = -1; Serial.println("LCD: faza nie wraca do wzorca — nowy wzorzec."); }
+  esp_lcd_panel_init(panel);
+  if (drvEofCount) {
+    if (drvLock) portENTER_CRITICAL(drvLock);
+    *drvEofCount = 0;
+    if (drvLock) portEXIT_CRITICAL(drvLock);
   }
-  if (phaseRefUs < 0) { learnSum = 0; learnCnt = 0; learnLeft = 4; }
   resyncCount = resyncCount + 1;
-  lastResyncReason = reason;
-  Serial.printf("LCD: twarda resynchronizacja (#%u, powod %u, faza %ld us, wzorzec %ld us)\n",
-                (unsigned)resyncCount, (unsigned)reason, (long)before, (long)phaseRefUs);
-}
-
-void displayResyncAfterVsync() {
-  if (!resyncPending) return;
-  const uint32_t v = vsyncCount, t = millis();
-  while (vsyncCount == v && millis() - t < 70) delay(1);
-  if (vsyncCount != v) displayResyncIfPending();
+  Serial.printf("LCD: twarda resynchronizacja (#%u)\n", (unsigned)resyncCount);
 }
 
 DisplayDiag displayDiag() {
   DisplayDiag d;
-  d.phaseDetector = phaseAvailable;
+  d.eofFix = fixActive;
+  d.frames = vsyncCount;
+  d.badFrames = frameEofBad;
+  d.parityFixes = parityFixes;
+  d.lastBadEof = lastBadEof;
+  d.lateVsyncs = lateVsyncs;
   d.resyncCount = resyncCount;
-  d.lastReason = lastResyncReason;
-  d.phaseUs = phaseUs;
-  d.phaseRefUs = phaseRefUs;
   d.flashWrites = flashWrites;
   return d;
+}
+
+void displayLogEvents() {
+  static uint32_t seenBad = 0, lastMs = 0;
+  if (frameEofBad == seenBad || millis() - lastMs < 2000) return;
+  lastMs = millis();
+  Serial.printf("LCD: zaklocone klatki: %u (EOF w ostatniej: %u, przywrocona kolejnosc buforow: %u razy)\n",
+                (unsigned)frameEofBad, (unsigned)lastBadEof, (unsigned)parityFixes);
+  seenBad = frameEofBad;
 }
 
 // esp_lcd_rgb_panel_set_pclk moze nie istniec w starszym rdzeniu — deklaracja "weak".
@@ -347,8 +281,6 @@ FlashWriteGuard::FlashWriteGuard() {
 FlashWriteGuard::~FlashWriteGuard() {
   if (!active_) return;
   flashWrites = flashWrites + 1;
-  if (__atomic_sub_fetch(const_cast<int *>(&flashDepth), 1, __ATOMIC_SEQ_CST) == 0) {
-    if (esp_lcd_rgb_panel_set_pclk) esp_lcd_rgb_panel_set_pclk(panel, PCLK_HZ);
-    displayRequestResync(RESYNC_FLASH);
-  }
+  if (__atomic_sub_fetch(const_cast<int *>(&flashDepth), 1, __ATOMIC_SEQ_CST) == 0 && esp_lcd_rgb_panel_set_pclk)
+    esp_lcd_rgb_panel_set_pclk(panel, PCLK_HZ);
 }
