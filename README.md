@@ -140,6 +140,48 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 
 ---
 
+## Diagnostyka i rozwiązywanie problemów
+
+### Po wgraniu nowego firmware (v5.1.0): co sprawdzić
+
+Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
+
+| Linia w logu | Znaczenie |
+|---|---|
+| `Lesny Dziennik v5.1.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
+| `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
+| `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
+| `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |
+| `Host: CSV pobrany (... wpisow ...)` | dane z hostingu pobrane |
+
+Warianty linii o ekranie:
+- `LCD: struktura sterownika nie pasuje ...` albo `LCD: nie znaleziono pol sterownika ...` — poprawka jest wyłączona (inna wersja rdzenia ESP32 niż 3.3.12). Wyślij tę linię razem z wersją rdzenia.
+- `LCD: rdzen bez RESTART_IN_VSYNC ...` — rdzeń sam zeruje licznik, poprawka niepotrzebna.
+
+Przez kilka minut obserwuj obraz: ma być prosty, bez poziomych artefaktów, także zaraz po restarcie i po zmianie wpisów na stronie.
+
+### Polecenia w monitorze portu (115200, wyślij jedną literę)
+
+| Znak | Co robi |
+|---|---|
+| `i` | otwiera ekran diagnostyki |
+| `l` | wypisuje statystyki obrazu: czy poprawka działa, liczba klatek, **zakłócone klatki** i ile z nich naprawiono, spóźnione VSYNC, zapisy flasha |
+| `h` | ręczna twarda resynchronizacja obrazu |
+
+Ekran diagnostyki na urządzeniu: dotknij panel (z tablicy), potem **przytrzymaj zegar** albo tytuł (długie dotknięcie). Są tam sekcje m.in. sieć/host (rewizja, błędy pobierania, cache), pamięć, obraz.
+
+### Typowe problemy
+
+| Objaw | Przyczyna | Co zrobić |
+|---|---|---|
+| Obraz przesunięty o ok. 1/6 ekranu, poziome pasy | licznik przerwań EOF sterownika ekranu (naprawione w 5.1.0) | wgraj 5.1.0; sprawdź w logu linię „poprawka licznika EOF aktywna”; jeśli jest, a obraz nadal skacze, wyślij wynik polecenia `l` |
+| `Host: rewizja — blad (HTTP 0)` | brak sieci albo nieudany handshake TLS (słaby sygnał) | zbliż urządzenie do routera; zobacz dBm w logu; 5.0.2+ ponawia połączenie i opisuje powód |
+| `Wi-Fi: rozlaczono, powod N` | kod powodu rozłączenia z routera (np. 201 = nie widać sieci, 15 = przerwane uzgadnianie hasła, 202 = błąd uwierzytelnienia) | sprawdź SSID i hasło w `secrets.h`, sygnał, router |
+| `Cache: plik uszkodzony — pomijam` | pierwszy start po zmianie partycji | normalne; cache odtworzy się po pobraniu danych |
+| Ekran startowy utknął na kroku „dane z WWW” | hosting niedostępny albo błąd 500 strony | otwórz stronę w przeglądarce; opis błędu 500: `web-php/README.md` rozdział 5; urządzenie pokaże dane z cache |
+| `BLAD: brak PSRAM` | zły wybór w Narzędziach | PSRAM = **OPI PSRAM** |
+| Dane na urządzeniu nie zmieniają się po wpisie na stronie | rewizja nie rośnie albo host nie odpowiada | `https://phpmapy1.webd.pro/api/revision` w przeglądarce; liczba `rev` powinna rosnąć po zapisie |
+
 ## Testy na PC
 
 ```bash
@@ -153,9 +195,13 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 
 ---
 
-## Panel WWW
+## Panel WWW i kamera
 
-Opis w `web-php/README.md`. Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
-- API nie ma uwierzytelniania (P0),
+- **Strona na hostingu** (`web-php/`): jedyne miejsce zapisu danych. Pełny opis — układ na hostingu, aktualizacja plik po pliku, API, wykres wagi, błąd 500: **`web-php/README.md`**.
+- **Jakość snu nocą z kamery:** serwer domowy t620 wysyła co rano dane nocy na stronę (`POST /api/sleep-night`); wykres jest w Sen → „Jakość snu nocą”. Opis strony: `web-php/README.md` rozdział 10; konfiguracja serwera domowego: repozytorium `wiewiornik` (prywatne), `INSTRUKCJA.md` rozdział 3c2.
+- Urządzenie (v5) nie pobiera danych z kamery; zmiany strony wymagają tylko jej aktualizacji na hostingu, bez wgrywania firmware.
+
+Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
+- API nie ma uwierzytelniania — hasła dla całego portalu zostaną dodane później jednym ruchem (P0),
 - auto-sen przy każdym karmieniu dopisuje zdarzenia w przyszłości (P1),
 - zapisy CSV mają wyścigi (P1).
