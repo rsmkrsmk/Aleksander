@@ -914,41 +914,112 @@ function renderSleep(){
 }
 
 /* ============================================================================
-   SEN Z KAMERY — jakość snu nocą wg ruchu w łóżeczku
-   Dane: serwer domowy (t620, zapisywacz) co rano wysyła plik zakończonej nocy na
-   POST /api/sleep-night; tu czytamy /api/sleep-nights (wskaźniki nocy) i
-   /api/sleep-night?night= (oś minut do paska nocy). Odświeżanie co 5 min (dane
-   przychodzą raz na dobę), wybór nocy strzałkami albo dotknięciem słupka.
+   Noc z kamery — analiza (docs/PROJEKT_ANALIZA_NOCY.md)
+   Góra podstrony Sen: ostatnia noc w liczbach + tydzień do tygodnia (/api/sleep-stats).
+   Sekcja "Jakość snu nocą": wybrana noc — zasypianie, pasek nocy (ruch, dźwięk, położenia,
+   karmienia), kafelki, mapa ruchu w czasie ze strefami, rytm. Niżej: kobierzec nocy i wpływ dnia.
    ============================================================================ */
 const CAM_RATING={spokojna:{t:'spokojna',c:'var(--acc)'},umiarkowana:{t:'umiarkowana',c:'var(--sun)'},niespokojna:{t:'niespokojna',c:'var(--feed)'},'brak-danych':{t:'mało danych z kamery',c:'var(--faint)'}};
-const camState={t:0,nights:[],sel:null,detail:{}};
+const camState={t:0,nights:[],sel:null,detail:{},heatMode:'noc',heatHour:'all',stats:null,statsT:0};
+const SETTLE_TXT={ok:'',aktywny:'sen aktywny — nie da się oszacować',niepewne:'nie da się ustalić (mało danych)',przerwane:'przerwane',brak:'brak położenia'};
 function camNightLabel(iso){const d=new Date(iso+'T12:00:00'),n=new Date(d.getTime()+86400000);const mo=['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];return d.getMonth()===n.getMonth()?`${d.getDate()}/${n.getDate()} ${mo[n.getMonth()]}`:`${d.getDate()} ${mo[d.getMonth()]} / ${n.getDate()} ${mo[n.getMonth()]}`}
-const camHM=m=>{const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${pad(mm)} min`:`${mm} min`};
+const camHM=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${pad(mm)} min`:`${mm} min`};
+const camClock=ts=>ts?hm(new Date(ts*1000)):'—';
+const camNum=(v,dec=0)=>v==null?'—':Number(v).toFixed(dec).replace('.',',');
+const camTile=(k,v,sub,cls)=>{const d=bcalElem('div','wg-stat'+(cls?' '+cls:''));d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub||''));return d};
+
+/* ---------- góra podstrony: ostatnia noc + tydzień do tygodnia ---------- */
+async function renderNightStats(force){
+  const host=$('nightStats');if(!host)return;
+  if(!force&&Date.now()-camState.statsT<300000&&host.childElementCount)return;
+  let st=null;try{st=await request('/api/sleep-stats?days=120')}catch(e){}
+  camState.statsT=Date.now();
+  const sig=JSON.stringify(st);if(!force&&sig===camState.statsSig&&host.childElementCount)return;camState.statsSig=sig;camState.stats=st;
+  if(!st||!st.last){host.replaceChildren(bcalElem('p','empty','Statystyki nocy pojawią się po pierwszej nocy z kamery (serwer domowy wysyła dane co rano).'));drawNightCarpet();drawInfluence();return}
+  const L=st.last,r=CAM_RATING[L.rating]||CAM_RATING['brak-danych'];
+  const wrap=bcalElem('div','ns');
+  const head=bcalElem('div','ns-head');head.style.setProperty('--rc',r.c);
+  head.append(bcalElem('div','ns-title','Noc '+camNightLabel(L.night)),bcalElem('span','cam-rate',r.t));
+  wrap.append(head,nightOnsetLine(L));
+  const g=bcalElem('div','wg-stats ns-tiles');
+  g.append(
+    camTile('Spokojny sen',camHM(L.quietMin),`z ${camHM(L.sleepMin)} w łóżeczku`),
+    camTile('Najdłuższy blok',camHM(L.longestBlock),`1. połowa ${camHM(L.blockHalf1)} · 2. ${camHM(L.blockHalf2)}`),
+    camTile('Przebudzenia',String(L.wakeCount),L.firstWake?`pierwsze ${camClock(L.firstWake)}`:'bez dłuższych'),
+    camTile('Płacz',L.cryMin==null?'—':camNum(L.cryMin,1)+' min',L.cryMin==null?'brak dźwięku z kamery':`${L.cryCount} ${L.cryCount===1?'epizod':'epizody'}`),
+    camTile('Zmiany pozycji',L.positions==null?'—':String(L.positions),'między spokojnymi blokami'),
+    camTile('Rytm',L.cycleMin?`co ${L.cycleMin} min`:'—',L.cycleMin?'typowy odstęp aktywności':'brak wyraźnego rytmu'));
+  wrap.append(g);
+  if(st.weeks&&st.weeks.length)wrap.append(bcalElem('div','eyebrow cam-sub','Tydzień do tygodnia'),nightWeeks(st));
+  wrap.append(bcalElem('p','chart-note wg-foot','Na podstawie ruchu i dźwięku w łóżeczku — orientacyjnie, to nie jest pomiar faz snu. Strzałka pojawia się, gdy w obu tygodniach są co najmniej 4 noce.'));
+  host.replaceChildren(wrap);
+  drawNightCarpet();drawInfluence();
+}
+function nightOnsetLine(L){
+  const box=bcalElem('div','ns-onset');
+  if(L.settleStatus==null){box.append(bcalElem('span','ns-on-txt','Nie wykryto położenia do łóżeczka.'));return box}
+  if(L.settleStatus!=='ok'){
+    box.append(bcalElem('span','ns-on-txt',`Położony ${camClock(L.placedAt)} — `),bcalElem('b','ns-on-warn',SETTLE_TXT[L.settleStatus]||L.settleStatus));return box}
+  const cls={szybko:'var(--acc)',normalnie:'var(--sleep)','długo':'var(--feed)'}[L.settleClass]||'var(--sleep)';
+  box.style.setProperty('--oc',cls);
+  const big=bcalElem('div','ns-on-big');big.append(document.createTextNode(String(L.settleMin)),bcalElem('small','',' min'));
+  const t=bcalElem('div','ns-on-col');
+  t.append(bcalElem('div','ns-on-k','zasypianie — '+(L.settleClass||'')),bcalElem('div','ns-on-t',`położony ${camClock(L.placedAt)} → zasnął ${camClock(L.settledAt)}`));
+  box.append(big,t);return box;
+}
+function nightWeeks(st){
+  const weeks=st.weeks,cur=weeks[weeks.length-1],M=st.weekMetrics;
+  const tbl=bcalElem('div','ns-weeks');
+  const fmt=(k,v)=>{const m=M[k];if(v==null)return '—';if(m.unit==='clock'){const t=(1110+Math.round(v))%1440;return pad(Math.floor(t/60))+':'+pad(t%60)}if(m.unit==='min'&&k!=='cryMin')return camHM(v);return camNum(v,m.dec)+(m.unit&&m.unit!=='min'?' '+m.unit:(m.unit==='min'?' min':''))};
+  Object.keys(M).forEach(k=>{
+    const vals=weeks.map(w=>w.mean[k]);if(vals.every(v=>v==null))return;
+    const row=bcalElem('div','nw-row');
+    row.append(bcalElem('div','nw-k',M[k].label),bcalElem('div','nw-v',fmt(k,cur.mean[k])));
+    // mini wykres średnich tygodniowych
+    const W=70,H=22,ok=vals.map((v,i)=>[i,v]).filter(x=>x[1]!=null),mn=Math.min(...ok.map(x=>x[1])),mx=Math.max(...ok.map(x=>x[1]));
+    const sv=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'nw-spark','aria-hidden':'true'});
+    if(ok.length>1){const X=i=>3+i/(vals.length-1)*(W-6),Y=v=>mx===mn?H/2:H-3-(v-mn)/(mx-mn)*(H-6);
+      sv.append(svgEl('polyline',{points:ok.map(([i,v])=>X(i)+','+Y(v)).join(' ')}));const l=ok[ok.length-1];sv.append(svgEl('circle',{cx:X(l[0]),cy:Y(l[1]),r:2.4}))}
+    row.append(sv);
+    const d=cur.delta&&cur.delta[k];let chip;
+    if(!d)chip=bcalElem('span','nw-chip','—');
+    else if(d.dir==='malo')chip=bcalElem('span','nw-chip','mało nocy');
+    else if(d.dir==='bez-zmian')chip=bcalElem('span','nw-chip','bez zmian');
+    else{chip=bcalElem('span','nw-chip '+(d.good===true?'good':d.good===false?'bad':''),(d.dir==='w-gore'?'▲ ':'▼ ')+(d.good===true?'lepiej':d.good===false?'gorzej':'zmiana'))}
+    chip.title=d&&d.d!=null?`różnica: ${camNum(d.d,M[k].dec)}`:'';
+    row.append(chip);tbl.append(row);
+  });
+  const cap=bcalElem('div','nw-cap');cap.textContent=`ten tydzień (od ${cur.from.slice(8,10)}.${cur.from.slice(5,7)}, ${cur.n} ${cur.n===1?'noc':'nocy'}) · wykres: ostatnie ${weeks.length} tyg.`;tbl.append(cap);
+  return tbl;
+}
+
+/* ---------- sekcja wybranej nocy ---------- */
 async function renderCamSleep(force){
+  renderNightStats(force);
   const host=$('camSleep');if(!host)return;
   if(!force&&Date.now()-camState.t<300000&&host.childElementCount)return;
   let nights=[];try{nights=(await request('/api/sleep-nights?days=14')).nights||[]}catch(e){}
   camState.t=Date.now();
   const sig=JSON.stringify(nights);
   if(!force&&sig===camState.sig&&host.childElementCount)return;
-  camState.sig=sig;camState.nights=nights;
+  camState.sig=sig;camState.nights=nights;camState.detail={};
   if(!nights.length){host.replaceChildren(bcalElem('p','empty','Brak nocy z kamery. Serwer domowy wysyła dane co rano, kilka minut po końcu nocy.'));return}
   if(!camState.sel||!nights.some(n=>n.night===camState.sel))camState.sel=nights[nights.length-1].night;
   await drawCamSleep();
 }
-async function camSelect(night){camState.sel=night;await drawCamSleep()}
+async function camSelect(night){camState.sel=night;camState.heatHour='all';await drawCamSleep()}
 async function drawCamSleep(){
   const host=$('camSleep');if(!host)return;
   const nights=camState.nights,i=nights.findIndex(n=>n.night===camState.sel),m=nights[i];
   let det=camState.detail[m.night];
   if(!det){try{det=await request('/api/sleep-night?night='+encodeURIComponent(m.night));camState.detail[m.night]=det}catch(e){det=null}}
   const rows=await loadCsvRows();
+  const A=det&&det.analysis;
   const wrap=bcalElem('div','cam');
-  // nagłówek: wybór nocy + ocena
   const head=bcalElem('div','cam-head');
   const prev=bcalElem('button','cam-nav','‹');prev.type='button';prev.setAttribute('aria-label','Poprzednia noc');prev.disabled=i<=0;prev.onclick=()=>camSelect(nights[i-1].night);
   const next=bcalElem('button','cam-nav','›');next.type='button';next.setAttribute('aria-label','Następna noc');next.disabled=i>=nights.length-1;next.onclick=()=>camSelect(nights[i+1].night);
-  const ttl=bcalElem('div','cam-ttl');ttl.append(bcalElem('div','cam-night','Noc '+camNightLabel(m.night)),bcalElem('div','cam-hours',`${m.start}–${m.end}`));
+  const ttl=bcalElem('div','cam-ttl');ttl.append(bcalElem('div','cam-night','Noc '+camNightLabel(m.night)),bcalElem('div','cam-hours',A&&A.v2?`obserwacja ${camClock(A.windowStart)}–${camClock(A.windowEnd)}`:`${m.start}–${m.end}`));
   head.append(prev,ttl,next);
   const r=CAM_RATING[m.rating]||CAM_RATING['brak-danych'];
   const score=bcalElem('div','cam-score');score.style.setProperty('--rc',r.c);
@@ -956,37 +1027,178 @@ async function drawCamSleep(){
   const cap=bcalElem('div','cam-cap');cap.append(bcalElem('span','','minut nocy bez ruchu'),bcalElem('span','cam-rate',r.t));
   score.append(big,cap);
   wrap.append(head,score);
-  // pasek nocy: ruch minuta po minucie + karmienia
-  if(det&&det.timeline&&det.timeline.length)wrap.append(camStrip(m,det.timeline,rows));
+  if(A&&m.brief)wrap.append(nightOnsetLine(Object.assign({},m.brief)));
+  // pasek nocy
+  if(A&&A.v2&&A.cMin)wrap.append(camStripV2(A,rows));
+  else if(det&&det.timeline&&det.timeline.length)wrap.append(camStrip(m,det.timeline,rows));
   // kafelki
-  const tile=(k,v,sub)=>{const d=bcalElem('div','wg-stat');d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub));return d};
   const grid=bcalElem('div','wg-stats cam-stats');
-  grid.append(
-    tile('Najdłuższy spokój',camHM(m.longestQuietMin),'bez ruchu, ciągiem'),
-    tile('Epizody ruchu',String(m.episodes),m.longEpisodes?`w tym ${m.longEpisodes} dłuższe (≥3 min)`:'tylko krótkie'),
-    tile('Minuty z ruchem',String(m.activeMin),`z ${m.minutes} minut nocy`),
-    tile('Pierwszy ruch',m.first||'—',m.last?`ostatni ${m.last}`:''),
-    tile('Najwięcej ruchu',m.busiestHour?`${m.busiestHour.slice(0,2)}–${pad((+m.busiestHour.slice(0,2)+1)%24)}`:'—','godzina nocy'),
-    tile('Kamera',`${Math.round(m.coveragePct)}%`,'nocy pod obserwacją'));
+  if(A){
+    const b=A.blocks||[];
+    grid.append(
+      camTile('Najdłuższy blok',camHM(A.longestBlock),b[0]?`od ${camClock(b[0].start)}`:'',''),
+      camTile('Bloki spokoju',`${A.blocks60}× ≥1 h`,`${A.blocks30}× ≥30 min`),
+      camTile('Przebudzenia',String(A.wakeCount),A.firstWake?`pierwsze ${camClock(A.firstWake)}`:'bez dłuższych'),
+      camTile('Pierwszy / ostatni ruch',`${camClock(A.rhythm.firstMove)}–${camClock(A.rhythm.lastMove)}`,'w okresie snu'),
+      camTile('Zmiany pozycji',A.v2?String(A.positions.count):'—',A.positions.empty&&A.positions.empty.length?`puste łóżeczko: ${A.positions.empty.length}×`:(A.v2?`${A.positions.blocks} spokojnych bloków`:'brak danych')),
+      camTile('Kamera',`${Math.round(m.coveragePct)}%`,A.weather&&A.weather.night_min!=null?`noc min. ${camNum(A.weather.night_min,1)}°C`:'nocy pod obserwacją'));
+  } else {
+    grid.append(camTile('Najdłuższy spokój',camHM(m.longestQuietMin),'bez ruchu, ciągiem'),camTile('Epizody ruchu',String(m.episodes),m.longEpisodes?`w tym ${m.longEpisodes} dłuższe`:'tylko krótkie'),camTile('Kamera',`${Math.round(m.coveragePct)}%`,'nocy pod obserwacją'));
+  }
   wrap.append(grid);
-  // ostatnie noce
+  if(A&&A.audio&&A.audio.present)wrap.append(camSound(A));
+  // mapa ruchu
+  if(det&&det.heat&&(det.heat.night80||det.heat.small)){wrap.append(bcalElem('div','eyebrow cam-sub','Mapa ruchu'),camHeat(det,A))}
+  // rytm
+  if(A&&A.rhythm&&A.rhythm.curve5&&A.rhythm.curve5.length)wrap.append(bcalElem('div','eyebrow cam-sub','Rytm nocy'),camRhythm(A));
   if(nights.length>1){wrap.append(bcalElem('div','eyebrow cam-sub','Ostatnie noce — najdłuższy spokój'),camNightsChart(nights,m.night))}
-  wrap.append(bcalElem('p','chart-note wg-foot','To nie jest pomiar faz snu: kamera widzi ruch w łóżeczku. Spokój to odsetek minut nocy bez ruchu. Epizod ruchu to ruch przerwany krótszą niż 5 min przerwą. Ocena „spokojna”: co najmniej 90% minut bez ruchu i 2,5 h spokoju ciągiem. Ocena „niespokojna”: mniej niż 75% albo ponad 10 dłuższych epizodów. Pomarańczowe znaczniki na pasku to karmienia z dziennika.'));
+  wrap.append(bcalElem('p','chart-note wg-foot','To nie jest pomiar faz snu: kamera widzi ruch w łóżeczku, mikrofon kamery — dźwięki. Położenie do łóżeczka wykrywa duży ruch dorosłego; zaśnięcie to pierwsze 10 minut prawie bez ruchu. Gdy przez godzinę po położeniu dziecko rusza się prawie cały czas, zasypianie nie jest liczone (sen aktywny). Czas poza łóżeczkiem (karmienie) nie liczy się do snu.'));
   host.replaceChildren(wrap);
 }
-function camStrip(m,tl,rows){
-  const n=tl.length,W=440,H=92,padL=8,padR=8,top=26,bh=40,pw=W-padL-padR,x=i=>padL+i/n*pw;
-  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg cam-strip',role:'img','aria-label':'Ruch w łóżeczku minuta po minucie'});
-  svg.append(svgEl('rect',{class:'cs-bg',x:padL,y:top,width:pw,height:bh,rx:9}));
-  const mx=Math.max(1,...tl);
-  tl.forEach((v,i)=>{if(!v)return;const h=Math.max(4,Math.sqrt(v/mx)*bh);const r=svgEl('rect',{class:'cs-mv',x:x(i),y:top+bh-h,width:Math.max(1.4,pw/n),height:h});const t=svgEl('title',{});const tm=new Date((m.startTs+i*60)*1000);t.textContent=`${hm(tm)} — ruch (${v} kl.)`;r.append(t);svg.append(r)});
+function camStripV2(A,rows){
+  const c=A.cMin,n=c.length,W=440,H=132,padL=8,padR=8,pw=W-padL-padR,x=i=>padL+i/n*pw;
+  const mvT=34,mvH=40,sT=82,sH=16,s0=A.windowStart*1000,xt=ts=>x((ts*1000-s0)/60000);
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg cam-strip',role:'img','aria-label':'Noc minuta po minucie: ruch, dźwięk, położenia i karmienia'});
+  svg.append(svgEl('rect',{class:'cs-bg',x:padL,y:mvT,width:pw,height:mvH,rx:8}));
+  // okres snu
+  if(A.sleepEnd>A.sleepStart)svg.append(svgEl('rect',{class:'cs-sleep',x:xt(A.sleepStart),y:mvT,width:Math.max(1,xt(A.sleepEnd)-xt(A.sleepStart)),height:mvH,rx:6}));
+  (A.outOfCrib||[]).forEach(o=>{const r=svgEl('rect',{class:'cs-out',x:xt(o.from),y:mvT,width:Math.max(1.5,xt(o.to)-xt(o.from)),height:mvH});const t=svgEl('title',{});t.textContent=`poza łóżeczkiem ${camClock(o.from)}–${camClock(o.to)}`;r.append(t);svg.append(r)});
+  (A.blocks||[]).slice(0,1).forEach(b=>{const r=svgEl('rect',{class:'cs-blk',x:xt(b.start),y:mvT+mvH+2,width:Math.max(2,b.min/n*pw),height:3,rx:1.5});const t=svgEl('title',{});t.textContent=`najdłuższy blok ${camClock(b.start)}, ${camHM(b.min)}`;r.append(t);svg.append(r)});
+  const mx=Math.max(1,...c);
+  c.forEach((v,i)=>{if(v<=0)return;const h=Math.max(3,Math.sqrt(v/mx)*mvH);const r=svgEl('rect',{class:'cs-mv',x:x(i),y:mvT+mvH-h,width:Math.max(1.2,pw/n),height:h});const t=svgEl('title',{});t.textContent=`${camClock(A.windowStart+i*60)} — ruch (${v} kl.)`;r.append(t);svg.append(r)});
+  // dźwięk
+  const au=A.audio||{};
+  if(au.present&&au.level){svg.append(svgEl('rect',{class:'cs-sbg',x:padL,y:sT,width:pw,height:sH,rx:4}));const lm=Math.max(10,...au.level);
+    au.level.forEach((v,i)=>{if(v<=0)return;const k=au.cls[i];const h=Math.max(2,v/lm*sH);svg.append(svgEl('rect',{class:'cs-snd k'+k,x:x(i),y:sT+sH-h,width:Math.max(1.2,pw/n),height:h}))});
+    (au.events||[]).filter(e=>e.kind==='placz').forEach(e=>{const g=svgEl('g',{class:'cs-cry'+(e.parent?' par':'')});const xx=xt(e.start);g.append(svgEl('path',{d:`M${xx-4},${sT-7} l4,5 l4,-5 z`}));const t=svgEl('title',{});t.textContent=`płacz ${camClock(e.start)}, ${Math.round(e.dur/6)/10} min${e.parent?' (rodzic przy łóżeczku)':''}`;g.append(t);svg.append(g)})}
+  // położenia i karmienia
+  (A.placements||[]).forEach(p=>{if(p.kind==='przerwane')return;const xx=xt(p.placedAt);const g=svgEl('g',{class:'cs-place'});g.append(svgEl('line',{x1:xx,x2:xx,y1:16,y2:mvT+mvH}),svgEl('path',{d:`M${xx-5},10 h10 l-5,7 z`}));
+    if(p.settledAt){const xs=xt(p.settledAt);g.append(svgEl('line',{class:'cs-settle',x1:xx,x2:xs,y1:mvT-4,y2:mvT-4}))}
+    const t=svgEl('title',{});t.textContent=`położony ${camClock(p.placedAt)}`+(p.status==='ok'?`, zasnął ${camClock(p.settledAt)} (${p.minutes} min)`:` — ${SETTLE_TXT[p.status]||p.status}`)+(p.kind==='po-karmieniu'?' · po karmieniu':'');g.append(t);svg.append(g)});
+  (A.positions&&A.positions.changes||[]).forEach(pc=>{const xx=xt(pc.at);const d=svgEl('circle',{class:'cs-pos',cx:xx,cy:mvT+mvH+9,r:2.6});const t=svgEl('title',{});t.textContent=`zmiana pozycji ok. ${camClock(pc.at)}`;d.append(t);svg.append(d)});
+  rows.forEach(rw=>{if(rw.type!=='KARMIENIE'&&!rw.type.startsWith('MLEKO'))return;const p=rw.time.split(':');const d=rw.date.split('-');const t=new Date(+d[0],+d[1]-1,+d[2],+p[0],+p[1]).getTime()/1000;if(t<A.windowStart||t>A.windowEnd)return;const xx=xt(t);
+    const g=svgEl('g',{class:'cs-feed'});g.append(svgEl('line',{x1:xx,x2:xx,y1:22,y2:mvT}),svgEl('circle',{cx:xx,cy:22,r:rw.type==='KARMIENIE'?4.5:3.4}));const ti=svgEl('title',{});ti.textContent=`${rw.time} ${rw.type==='KARMIENIE'?'karmienie':'butelka'}`;g.append(ti);svg.append(g)});
   // godziny
-  const s0=m.startTs*1000;let h0=new Date(s0);h0.setMinutes(0,0,0);if(h0.getTime()<s0)h0=new Date(h0.getTime()+3600000);
-  for(let t=h0.getTime();t<=m.endTs*1000;t+=3600000){const i=(t-s0)/60000,xx=x(i);svg.append(svgEl('line',{class:'cs-tick',x1:xx,x2:xx,y1:top+bh,y2:top+bh+4}));const d=new Date(t);if(d.getHours()%2===0){const lb=svgEl('text',{class:'axis-txt',x:xx,y:H-8,'text-anchor':'middle'});lb.textContent=pad(d.getHours());svg.append(lb)}}
-  // karmienia z dziennika w oknie nocy
-  rows.forEach(rw=>{if(rw.type!=='KARMIENIE'&&!rw.type.startsWith('MLEKO'))return;const p=rw.time.split(':');if(p.length<2)return;const d=rw.date.split('-');const t=new Date(+d[0],+d[1]-1,+d[2],+p[0],+p[1]).getTime();if(t<s0||t>m.endTs*1000)return;const xx=x((t-s0)/60000);
-    const g=svgEl('g',{class:'cs-feed'});g.append(svgEl('line',{x1:xx,x2:xx,y1:14,y2:top+bh}),svgEl('circle',{cx:xx,cy:11,r:rw.type==='KARMIENIE'?5:3.6}));const ti=svgEl('title',{});ti.textContent=`${rw.time} ${rw.type==='KARMIENIE'?'karmienie':'butelka'+(rw.ml?' '+rw.ml+' ml':'')}`;g.append(ti);svg.append(g)});
-  return svg;
+  let h0=new Date(s0);h0.setMinutes(0,0,0);if(h0.getTime()<s0)h0=new Date(h0.getTime()+3600000);
+  for(let t=h0.getTime();t<=A.windowEnd*1000;t+=3600000){const xx=x((t-s0)/60000);svg.append(svgEl('line',{class:'cs-tick',x1:xx,x2:xx,y1:sT+sH,y2:sT+sH+4}));const d=new Date(t);if(d.getHours()%2===0){const lb=svgEl('text',{class:'axis-txt',x:xx,y:H-10,'text-anchor':'middle'});lb.textContent=pad(d.getHours());svg.append(lb)}}
+  const box=bcalElem('div','cam-stripbox');box.append(svg);
+  const leg=bcalElem('div','cs-legend');
+  [['lg-place','położenie'],['lg-feed','karmienie'],['lg-mv','ruch'],['lg-sleep','okres snu'],['lg-out','poza łóżeczkiem'],['lg-pos','zmiana pozycji']].concat(au.present?[['lg-cry','płacz'],['lg-voice','głos']]:[]).forEach(([c,t])=>{const s=bcalElem('span','');s.append(bcalElem('i',c),document.createTextNode(t));leg.append(s)});
+  box.append(leg);return box;
+}
+function camSound(A){
+  const au=A.audio,box=bcalElem('div','cam-sound');
+  const cry=(au.events||[]).filter(e=>e.kind==='placz'&&!e.parent),voice=(au.events||[]).filter(e=>e.kind==='glos');
+  const t=bcalElem('div','cs-sline');
+  t.append(bcalElem('b','',cry.length?`Płacz: ${cry.length}× (${camNum(au.cryMin,1)} min)`:'Bez płaczu'),document.createTextNode(cry.length?' · '+cry.map(e=>camClock(e.start)).join(', '):''));
+  box.append(t);
+  if(voice.length)box.append(bcalElem('div','cs-sline muted',`Cichy głos (kwilenie): ${voice.length}×`));
+  if(au.samples)box.append(bcalElem('div','cs-sline muted',`Próbki do odsłuchu (${au.samples}) są na stronie kamer w domu: Noce → ta noc → Dźwięk.`));
+  return box;
+}
+/* mapa ruchu: cała noc / godziny, ta noc / zwykle / różnica, strefy łóżeczka */
+const HEAT_PAL=[[0,[0,0,0,0]],[.15,[123,88,212,.35]],[.45,[154,124,232,.7]],[.7,[224,165,46,.85]],[1,[224,72,60,.95]]];
+function heatColor(v){v=Math.max(0,Math.min(1,v));for(let k=1;k<HEAT_PAL.length;k++){const[a,ca]=HEAT_PAL[k-1],[b,cb]=HEAT_PAL[k];if(v<=b){const f=(v-a)/(b-a);return ca.map((x,j)=>x+(cb[j]-x)*f)}}return HEAT_PAL[HEAT_PAL.length-1][1]}
+function camHeat(det,A){
+  const box=bcalElem('div','hm');
+  const h=det.heat,z=det.zones,slices=h.slices&&h.slices.hours||{},hours=Object.keys(slices);
+  const avg=det.avgHeat;
+  // przełączniki
+  const seg=bcalElem('div','hm-seg');
+  [['noc','Ta noc'],['zwykle','Zwykle (7 nocy)'],['roznica','Różnica']].forEach(([k,t])=>{if(k!=='noc'&&!avg)return;const b=bcalElem('button',camState.heatMode===k?'on':'',t);b.type='button';b.onclick=()=>{camState.heatMode=k;if(k!=='noc')camState.heatHour='all';drawCamSleep()};seg.append(b)});
+  box.append(seg);
+  const cv=document.createElement('canvas');cv.width=480;cv.height=270;cv.className='hm-cv';cv.setAttribute('role','img');
+  const stage=bcalElem('div','hm-stage');stage.append(cv);
+  // strefy jako obrys
+  if(z&&z.defined&&z.cells){const ov=svgEl('svg',{viewBox:'0 0 16 9',class:'hm-zones',preserveAspectRatio:'none'});
+    z.cells.forEach((zz,i)=>{if(!zz)return;const cx=i%16,cy=Math.floor(i/16);ov.append(svgEl('rect',{x:cx,y:cy,width:1,height:1,class:'hz z'+zz}))});
+    const lab={};z.cells.forEach((zz,i)=>{if(!zz)return;(lab[zz]=lab[zz]||[]).push(i)});
+    Object.entries(lab).forEach(([zz,arr])=>{const cx=arr.reduce((s,i)=>s+i%16,0)/arr.length+.5,cy=arr.reduce((s,i)=>s+Math.floor(i/16),0)/arr.length+.5;const t=svgEl('text',{x:cx,y:cy,class:'hz-t','text-anchor':'middle','dominant-baseline':'middle'});t.textContent=(z.names||'ABCD')[zz-1]||'ABCD'[zz-1];ov.append(t)});
+    stage.append(ov)}
+  box.append(stage);
+  const draw=()=>{
+    const ctx=cv.getContext('2d');ctx.clearRect(0,0,480,270);
+    let data,w,hh,diff=false;
+    if(camState.heatMode==='zwykle'&&avg){data=avg.data;w=80;hh=45}
+    else if(camState.heatMode==='roznica'&&avg&&h.night80){data=h.night80.data.map((v,i)=>v-avg.data[i]);w=80;hh=45;diff=true}
+    else if(camState.heatHour!=='all'&&slices[camState.heatHour]){data=slices[camState.heatHour];w=h.slices.w;hh=h.slices.h}
+    else if(h.night80){data=h.night80.data;w=80;hh=45}
+    else {data=h.small.data;w=h.small.w;hh=h.small.h;const mxs=Math.max(1,...data);data=data.map(v=>Math.round(255*Math.log1p(v)/Math.log1p(mxs)))}
+    const cw=480/w,ch=270/hh;
+    for(let y=0;y<hh;y++)for(let x=0;x<w;x++){const v=data[y*w+x];if(!v)continue;
+      if(diff){const a=Math.min(1,Math.abs(v)/160);ctx.fillStyle=v>0?`rgba(224,72,60,${a*.9})`:`rgba(47,140,220,${a*.9})`}
+      else{const c=heatColor(v/255);ctx.fillStyle=`rgba(${c[0]},${c[1]},${c[2]},${c[3]})`}
+      ctx.fillRect(x*cw,y*ch,Math.ceil(cw),Math.ceil(ch))}
+    cv.setAttribute('aria-label',camState.heatMode==='roznica'?'Różnica: czerwone — więcej ruchu niż zwykle, niebieskie — mniej':'Mapa ruchu w łóżeczku');
+  };
+  draw();
+  // godziny: suwak + odtwarzanie
+  if(hours.length&&camState.heatMode==='noc'){
+    const ctl=bcalElem('div','hm-ctl');
+    const play=bcalElem('button','hm-play','▶');play.type='button';play.setAttribute('aria-label','Odtwórz noc godzina po godzinie');
+    const rng=document.createElement('input');rng.type='range';rng.min='0';rng.max=String(hours.length);rng.step='1';rng.className='hm-rng';
+    const lab=bcalElem('span','hm-lab');
+    const set=k=>{camState.heatHour=k===0?'all':hours[k-1];rng.value=String(k);lab.textContent=k===0?'cała noc':`${hours[k-1]}:00–${pad((+hours[k-1]+1)%24)}:00`;draw()};
+    rng.setAttribute('aria-label','Godzina nocy');
+    rng.oninput=()=>{stop();set(+rng.value)};
+    let timer=null;const stop=()=>{if(timer){clearInterval(timer);timer=null;play.textContent='▶'}};
+    play.onclick=()=>{if(timer){stop();return}play.textContent='❚❚';let k=+rng.value>=hours.length?1:(+rng.value)+1;set(k);timer=setInterval(()=>{k++;if(k>hours.length){stop();set(0);return}set(k)},800)};
+    ctl.append(play,rng,lab);box.append(ctl);
+    set(camState.heatHour==='all'?0:Math.max(0,hours.indexOf(camState.heatHour)+1));
+  }
+  // udział stref
+  if(A&&A.zones){const zb=bcalElem('div','hm-zbars');const names=A.zones.names||['A','B','C','D'];
+    A.zones.pct.forEach((p,k)=>{const row=bcalElem('div','hz-row');row.append(bcalElem('span','hz-n z'+(k+1),names[k]||'ABCD'[k]));const bar=bcalElem('div','hz-bar');const f=bcalElem('i','z'+(k+1));f.style.width=Math.max(0,Math.min(100,p))+'%';bar.append(f);row.append(bar,bcalElem('span','hz-p',camNum(p,0)+'%'));zb.append(row)});
+    box.append(zb)}
+  else box.append(bcalElem('p','chart-note','Strefy łóżeczka (np. góra, dół) narysujesz na stronie kamer w domu: Ruch → Strefy i czułość → pędzle A–D.'));
+  return box;
+}
+function camRhythm(A){
+  const c5=A.rhythm.curve5,n=c5.length,W=440,H=120,padL=8,padR=8,top=10,ph=78,pw=W-padL-padR,x=i=>padL+(i+.5)/n*pw,mx=Math.max(10,...c5),y=v=>top+ph-v/mx*ph;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg cam-rh',role:'img','aria-label':'Aktywność co 5 minut i szczyty rytmu'});
+  const s0=A.windowStart,xt=ts=>padL+(ts-s0)/(n*300)*pw;
+  svg.append(svgEl('rect',{class:'rh-sleep',x:xt(A.sleepStart),y:top,width:Math.max(0,xt(A.sleepEnd)-xt(A.sleepStart)),height:ph,rx:6}));
+  const pts=c5.map((v,i)=>`${x(i)},${y(v)}`).join(' ');
+  svg.append(svgEl('polygon',{class:'rh-area',points:`${x(0)},${y(0)} ${pts} ${x(n-1)},${y(0)}`}),svgEl('polyline',{class:'rh-line',points:pts}));
+  (A.rhythm.peaks||[]).forEach(pk=>{const d=svgEl('circle',{class:'rh-pk',cx:x(pk),cy:y(c5[pk]),r:3});const t=svgEl('title',{});t.textContent=`szczyt aktywności ${camClock(s0+pk*300)}`;d.append(t);svg.append(d)});
+  let h0=new Date(s0*1000);h0.setMinutes(0,0,0);if(h0.getTime()<s0*1000)h0=new Date(h0.getTime()+3600000);
+  for(let t=h0.getTime()/1000;t<=A.windowEnd;t+=3600){const d=new Date(t*1000);if(d.getHours()%2)continue;const lb=svgEl('text',{class:'axis-txt',x:xt(t),y:H-6,'text-anchor':'middle'});lb.textContent=pad(d.getHours());svg.append(lb)}
+  const box=bcalElem('div','rh');box.append(svg);
+  const txt=A.rhythm.cycleMin?`Aktywność wraca mniej więcej co ${A.rhythm.cycleMin} min (szczyty: ${(A.rhythm.peaks||[]).length})`+(A.rhythm.r>=.25?`, rytm wyraźny (r = ${camNum(A.rhythm.r,2)}).`:'.'):'Tej nocy brak wyraźnego rytmu aktywności.';
+  box.append(bcalElem('p','chart-note',txt+' U niemowląt cykl snu trwa zwykle 40–60 min.'));
+  return box;
+}
+
+/* ---------- wiele nocy: kobierzec i wpływ dnia ---------- */
+function drawNightCarpet(){
+  const host=$('nightCarpet');if(!host)return;const st=camState.stats;
+  const ser=st&&st.series?st.series.filter(s=>s.carpet&&s.carpet.some(v=>v>=0)).slice(-21):[];
+  if(ser.length<2){host.replaceChildren(bcalElem('p','empty','Kobierzec pojawi się po kilku nocach z kamery.'));return}
+  const cols=23,W=440,rowH=Math.min(16,Math.max(9,Math.floor(300/ser.length))),padL=46,top=6,H=top+ser.length*rowH+24,cw=(W-padL-6)/cols;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg carpet',role:'img','aria-label':'Aktywność w kolejnych nocach co 30 minut'});
+  ser.forEach((s,r)=>{const yy=top+r*rowH;const d=s.night.split('-');const lb=svgEl('text',{class:'axis-txt',x:padL-6,y:yy+rowH*.72,'text-anchor':'end'});lb.textContent=`${d[2]}.${d[1]}`;svg.append(lb);
+    s.carpet.forEach((v,k)=>{const rc=svgEl('rect',{x:padL+k*cw+.5,y:yy+.5,width:cw-1,height:rowH-1,rx:2,class:v<0?'cp-na':'cp'});if(v>=0)rc.style.fillOpacity=String(.08+Math.min(1,v/18)*.92);const t=svgEl('title',{});const m0=1110+k*30;t.textContent=`${d[2]}.${d[1]} ${pad(Math.floor(m0/60)%24)}:${pad(m0%60)} — `+(v<0?'brak danych':`${v} min z ruchem`);rc.append(t);svg.append(rc)})});
+  for(let k=0;k<=cols;k+=3){const m0=1110+k*30;const t=svgEl('text',{class:'axis-txt',x:padL+k*cw,y:H-8,'text-anchor':'middle'});t.textContent=`${pad(Math.floor(m0/60)%24)}:${pad(m0%60)}`;svg.append(t)}
+  host.replaceChildren(svg,bcalElem('p','chart-note','Każdy wiersz to noc (od 18:30 do 6:00), każda kratka — pół godziny. Ciemniej = więcej minut z ruchem. Szare: brak danych albo dziecko poza łóżeczkiem. Pionowe pasy pokazują stałe pory pobudek, przesuwające się — zmianę rytmu.'));
+}
+function drawInfluence(){
+  const host=$('nightInfluence');if(!host)return;const st=camState.stats;
+  if(!st||!st.influence){host.replaceChildren(bcalElem('p','empty','Brak danych.'));return}
+  const wrap=bcalElem('div','inf');
+  st.influence.forEach(f=>{
+    const card=bcalElem('div','inf-card');card.append(bcalElem('div','inf-h',f.label));
+    if(f.status==='za-malo'){card.append(bcalElem('div','inf-wait',`Za mało nocy: ${f.n} z ${f.need} potrzebnych${f.type==='bin'?' w mniejszej grupie':''}.`));wrap.append(card);return}
+    if(f.status==='brak-zmiennosci'){card.append(bcalElem('div','inf-wait','Prawie każdej nocy ta sama wartość — nie ma czego porównać.'));wrap.append(card);return}
+    if(f.status==='wstepne')card.append(bcalElem('span','inf-tag','wstępne'));
+    f.outcomes.forEach(o=>{
+      const row=bcalElem('div','inf-row');let txt,cls='';
+      if(f.type==='bin'){if(o.diff==null)return;const unit=o.unit==='h'?' h':o.unit==='min'?' min':'';const val=(o.diff>0?'+':'')+camNum(o.diff,o.unit==='h'?1:0)+unit;
+        txt=`${o.label}: ${val} z kąpielą`;const good=o.diff*o.better>0;cls=o.p<.1?(good?'good':'bad'):'flat';row.title=`${o.n1} nocy z kąpielą, ${o.n0} bez · p = ${camNum(o.p,2)}`}
+      else{if(o.rho==null)return;const a=Math.abs(o.rho);const sila=a<.2?'brak zależności':a<.4?'słaba zależność':a<.6?'umiarkowana zależność':'silna zależność';
+        txt=`${o.label}: ${sila}`+(a>=.2?(o.rho>0?' (więcej → więcej)':' (więcej → mniej)'):'');const good=o.rho*o.better>0;cls=o.p<.1&&a>=.2?(good?'good':'bad'):'flat';row.title=`ρ = ${camNum(o.rho,2)}, p = ${camNum(o.p,2)}, ${o.n} nocy`}
+      row.classList.add(cls);row.append(bcalElem('i',''),bcalElem('span','',txt));card.append(row)});
+    wrap.append(card)});
+  host.replaceChildren(wrap,bcalElem('p','chart-note','Porównanie nocy po odjęciu ogólnego trendu (dziecko z wiekiem śpi inaczej). Zielony/czerwony: różnica wyraźna (p < 0,1), szary: w granicach przypadku. To zależność, nie przyczyna. Pokazujemy od 10 nocy w mniejszej grupie, do 20 — jako wstępne.'));
 }
 function camNightsChart(nights,sel){
   const W=440,H=200,padL=30,padR=8,padT=22,padB=30,pw=W-padL-padR,ph=H-padT-padB;

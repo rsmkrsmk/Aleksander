@@ -180,6 +180,12 @@ final class SleepNights
         foreach ((array)($d['events'] ?? []) as $e) {
             $events[] = ['start' => substr((string)($e['start'] ?? ''), 0, 8), 'durS' => (int)($e['dur_s'] ?? 0), 'startTs' => (int)round((float)($e['start_ts'] ?? 0))];
         }
-        return ['metrics' => $m, 'timeline' => $tl, 'hours' => $hours, 'events' => $events];
+        $heat = (array)($d['heat'] ?? []);
+        return ['metrics' => $m, 'timeline' => $tl, 'hours' => $hours, 'events' => $events,
+                'window' => $d['window'] ?? null,
+                'heat' => ['night80' => $heat['night80'] ?? null, 'slices' => $heat['slices'] ?? null,
+                           'small' => isset($heat['data']) ? ['w' => $heat['w'] ?? 32, 'h' => $heat['h'] ?? 18, 'data' => $heat['data']] : null],
+                'zones' => isset($d['zones']) ? ['defined' => !empty($d['zones']['defined']), 'names' => $d['zones']['names'] ?? null,
+                                                'cells' => $d['zones']['cells'] ?? null] : null];
     }
 }

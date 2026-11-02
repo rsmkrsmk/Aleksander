@@ -44,7 +44,9 @@ Podział jest celowy: **silnik** wystawia API (JSON), z którego korzysta strona
 | `MysqlRepository.php` | magazyn MySQL **+ kopia CSV przy każdym zapisie** |
 | `bootstrap.php` | wybiera magazyn wg configu (przy awarii bazy wraca do CSV) |
 | `api.php` | publiczne API HTTP (`/api/*`, `/export.csv`) + CORS |
-| `SleepNights.php` | noce z kamery: odbiór pliku nocy, wskaźniki, magazyn `data/noce/` |
+| `SleepNights.php` | noce z kamery: odbiór pliku nocy, podstawowe wskaźniki, magazyn `data/noce/` |
+| `SleepAnalysis.php` | analiza jednej nocy: położenie i zasypianie, okres snu, spokojne bloki, przebudzenia, rytm, kobierzec, zmiany pozycji, strefy, dźwięk (rozdział 10.4); wszystkie progi w `SleepAnalysis::T` |
+| `SleepStats.php` | wiele nocy: pamięć podręczna analiz, ostatnia noc, trend tydzień do tygodnia, wpływ dnia na noc (rozdział 10.5) |
 | `development_tips.php` | wskazówki dnia 0–600 |
 | `schema.sql` | schemat tabel MySQL |
 | `.htaccess` | blokuje bezpośredni dostęp do `*.php` i `*.sql` poza `api.php` |
@@ -74,6 +76,7 @@ Wszystko w katalogu danych (`panel-data/` na hostingu, `data/` w repo). Katalog 
 | `ustawienia.cfg` | ustawienia z panelu (np. powiadomienia Telegram o drzemce) |
 | `RRRR-MM-DD-GG-MM-SS.bakap` | kopie sprzed wgrania całego CSV (rozdział 8) |
 | `noce/noc_RRRR-MM-DD.json`, `noce/index.json` | noce z kamery i ich wskaźniki (rozdział 10) |
+| `noce/analiza/RRRR-MM-DD.json` | pamięć podręczna analizy nocy; liczona od nowa sama, gdy zmieni się plik nocy, progi albo wpisy dziennika z tej doby (można bezpiecznie usunąć cały katalog) |
 
 Format CSV: nagłówek `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`, jeden wpis na wiersz. Typy: `KARMIENIE` (pierś, minuty w kolumnach `piers_*`), `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `WITAMINA_D`, `ODCIAGANIE`, `WAGA` (w polu `ml` są gramy), `SEN_START`, `SEN_STOP`, `KAPIEL`.
 
@@ -110,7 +113,7 @@ Bez gita, przez **Menedżer plików** cPanel albo FTP. Pliki bierzesz z repo: Gi
 | Z repo | Na hosting |
 |---|---|
 | `web-php/ui/index.php`, `index.html`, `indexesp.html`, `app.js` | `/home/phpmapy1/public_html/` |
-| `web-php/engine/*.php` (`api.php`, `Domain.php`, `config.php`, `SleepNights.php`, `bootstrap.php`, `CsvRepository.php`, `MysqlRepository.php`, `Repository.php`, `development_tips.php`) | `/home/phpmapy1/panel-engine/` |
+| `web-php/engine/*.php` (`api.php`, `Domain.php`, `config.php`, `SleepNights.php`, `SleepAnalysis.php`, `SleepStats.php`, `bootstrap.php`, `CsvRepository.php`, `MysqlRepository.php`, `Repository.php`, `development_tips.php`) | `/home/phpmapy1/panel-engine/` |
 
 **NIE nadpisuj:**
 
@@ -153,7 +156,7 @@ Adresy względem strony: `https://phpmapy1.webd.pro/api/<nazwa>` (albo wprost `�
 |---|---|
 | `GET /export.csv` i `GET /api/export.csv` | cały CSV; pobiera go urządzenie |
 | `GET /api/revision` | `{"rev":N,"count":liczba wpisów,"updatedAt":…}`; `rev` rośnie przy każdej zmianie danych |
-| `GET /api/status` | stan do panelu i urządzenia: wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`) |
+| `GET /api/status` | stan do panelu i urządzenia: wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`), `camNight` — skrót ostatniej zakończonej nocy z kamery (urządzenie pokazuje go na karcie Sen) |
 | `GET /api/entries?date=RRRR-MM-DD` | wpisy z jednego dnia |
 | `GET /api/weight-series` | `points` (ważenia), `weeks` (słupki przyrostu), `recent` (trend ~14 dni), `today` (dzień życia), `birthWeightG` |
 | `GET /api/bath-calendar` | kąpiele: kalendarz i podsumowanie |
@@ -166,8 +169,9 @@ Adresy względem strony: `https://phpmapy1.webd.pro/api/<nazwa>` (albo wprost `�
 | `POST /api/upload-data` | podmiana całego CSV z kopią zapasową (rozdział 8) |
 | `POST /api/send-backup` | w tej kopii: zawsze błąd (Telegram obsługuje urządzenie) |
 | `POST /api/sleep-night` | odbiór nocy z kamery (rozdział 10) |
-| `GET /api/sleep-nights?days=14` | lista nocy ze wskaźnikami, od najstarszej (max 400) |
-| `GET /api/sleep-night?night=RRRR-MM-DD` | szczegóły jednej nocy (oś minut, godziny, ruchy) lub `404` |
+| `GET /api/sleep-nights?days=14` | lista nocy ze wskaźnikami, od najstarszej (max 400); każda z `brief` (zasypianie, bloki, przebudzenia, płacz, pozycje) |
+| `GET /api/sleep-night?night=RRRR-MM-DD` | szczegóły jednej nocy: oś minut, godziny, ruchy, mapy (`heat.night80`, `heat.slices`), strefy, `analysis` (pełna analiza), `avgHeat` (średnia mapa 7 poprzednich nocy) lub `404` |
+| `GET /api/sleep-stats?days=120` | ostatnia noc, tygodnie (średnie i zmiany), seria nocy z kobiercem, wpływ dnia na noc |
 
 CORS jest domyślnie wyłączony (API działa same-origin). Gdy urządzenia będą łączyć się z innego originu, ustaw `Config::corsOrigin()` (albo zmienną `CORS_ORIGIN`) na konkretny origin lub `*`.
 
@@ -211,7 +215,7 @@ Serwer domowy (t620, kontener „kamery”, `zapisywacz.py` z repo **wiewiornik*
 ### 10.2 Odbiór: `POST /api/sleep-night`
 
 - **Żądanie:** multipart, pole `file` = JSON nocy (działa też surowy JSON w ciele). Bez klucza i haseł.
-- **Wersje:** 1 (oś minut, ruchy, podsumowanie) i 2 (od 11.2026: dodatkowo okno pracy 18:30–06:00, cechy ruchu co 5 s `feat`, mapy `heat.night80` i godzinowe `heat.slices`). Obie są przyjmowane; wskaźniki z pól wersji 2 dochodzą w kolejnych etapach (`docs/PROJEKT_ANALIZA_NOCY.md`). W `/api/sleep-nights` każda noc ma `version` i `featCoveragePct`.
+- **Wersje:** 1 (oś minut, ruchy, podsumowanie) i 2 (od 11.2026: dodatkowo okno pracy 18:30–06:00, cechy ruchu co 5 s `feat`, mapy `heat.night80` i godzinowe `heat.slices`). Obie są przyjmowane; z wersji 2 liczona jest pełna analiza (10.4). Wersja 2 zawiera też strefy (`zones`), spokojne bloki do zmian pozycji (`pose`), dźwięk (`audio`: poziom i klasa co minutę, zdarzenia, opis próbek — same próbki zostają w domu) i temperaturę (`weather`). W `/api/sleep-nights` każda noc ma `version` i `featCoveragePct`.
 - **Walidacja:** niepusty, ≤ 2 MB, poprawny JSON, pola `night` (data wieczoru `RRRR-MM-DD`), `timeline` i `summary`.
 - **Zapis:** bez zmian w `data/noce/noc_RRRR-MM-DD.json`, wskaźniki w `data/noce/index.json` (zapis atomowy z blokadą). Katalog `noce/` tworzy się sam. Ta sama noc wysłana ponownie nadpisuje poprzednią.
 - **Odpowiedź:** `200` `{"message":"Zapisano noc …","night":"…","metrics":{…}}`; `400` przy złych danych (także gdy plik przekroczy limit serwera `upload_max_filesize` — komunikat podaje limit), `500` gdy nie da się zapisać.
@@ -235,18 +239,48 @@ Kamera widzi tylko ruch, więc to **nie jest pomiar faz snu**, tylko orientacyjn
 
 Progi są stałymi w `SleepNights.php` (`EPISODE_GAP_MIN`, `LONG_EPISODE_MIN`, `LOW_COVERAGE_PCT`) i w `metrics()`.
 
-### 10.4 Widok
+### 10.4 Analiza nocy (`SleepAnalysis.php`)
 
-Nowoczesna strona → **Sen** → **„Jakość snu nocą”**:
+Liczona z wersji 2 pliku nocy (cechy ruchu co 5 s z okna 18:30–06:00) i wpisów dziennika z tej doby. Noce w wersji 1 dostają tylko to, co da się policzyć z osi minut. Progi: tablica `SleepAnalysis::T`; po zmianie progu podnosi się `TUNE_VERSION` i wszystkie noce przeliczają się przy następnym odczycie. Szczegóły i uzasadnienie: `docs/PROJEKT_ANALIZA_NOCY.md`.
 
-- wybór nocy strzałkami albo dotknięciem słupka,
-- duży wskaźnik spokoju z oceną,
-- pasek nocy z ruchem minuta po minucie i karmieniami z dziennika (pomarańczowe znaczniki),
-- 6 kafelków ze wskaźnikami,
-- wykres ostatnich 14 nocy (najdłuższy spokój; kolor wg oceny; nad słupkiem % minut bez ruchu),
-- u góry średnia „średnio X h spokoju ciągiem”.
+| Element | Jak liczony (progi startowe, do kalibracji) |
+|---|---|
+| **ruch dorosłego** | ≥ 6% maski łóżeczka albo ≥ 12% kadru przez ≥ 10 s (przerwy ≤ 20 s łączą); zmiany światła/IR pomijane |
+| **położenie** | koniec ruchu dorosłego, po którym 3 min nie ma kolejnego. Pierwsze w nocy = *wieczorne*; późniejsze: *po karmieniu* (karmienie w dzienniku do 30 min wcześniej) albo *nocne*. Brak wykrytego = `SEN_START` z dziennika przed 23:00 (źródło „dziennik”). Wpis `SEN_START` w ±15 min = *potwierdzone* |
+| **wyjęcie z łóżeczka** | ruch dorosłego, po którym w dzienniku jest karmienie przed kolejnym ruchem dorosłego (albo puste łóżeczko wg wzorca) — to nie położenie; czas do kolejnego położenia = *poza łóżeczkiem* i nie liczy się do snu. Ostatni ruch dorosłego w ostatnich 2,5 h = wyjęcie po pobudce = koniec snu |
+| **zaśnięcie** | pierwsze 10 kolejnych minut, w których najwyżej 2 minuty są aktywne (≥ 4 klatki z ruchem) i nie ma dużego ruchu (≥ 6%) |
+| **sen aktywny** | godzina od położenia bez zaśnięcia i ≥ 80% aktywnych minut → status `aktywny` („nie da się oszacować”); noc nie wchodzi do średnich zasypiania. Inne statusy: `ok`, `przerwane` (kolejny ruch dorosłego przed zaśnięciem), `niepewne` (mało danych) |
+| **spokojne bloki** | minuty z ≤ 1 klatką ruchu; pojedyncza aktywna minuta otoczona ≥ 3 spokojnymi nie przerywa bloku. Wynik: 3 najdłuższe, najdłuższy w 1. i 2. połowie snu, liczba ≥ 30 i ≥ 60 min, łączny spokojny sen |
+| **przebudzenia** | epizody ≥ 3 aktywnych minut (przerwy ≤ 5 min łączą) w okresie snu; pierwsze przebudzenie |
+| **rytm** | aktywność co 5 min, szczyty (≥ 25 min odstępu), autokorelacja aktywności 10-minutowej dla 40–120 min; cykl podawany przy r ≥ 0,25 albo z ≥ 3 odstępów między szczytami |
+| **kobierzec** | 23 komórki po 30 min od 18:30 do 06:00: liczba aktywnych minut (−1 = brak danych / poza łóżeczkiem) |
+| **zmiany pozycji** | z serwera domowego: spokojne bloki ≥ 5 min i różnica ich obrazu; zmiana ≥ 6 (skala 0–255) bez zmiany światła = zmiana pozycji; różnica od wzorca pustego łóżeczka < 8 = puste łóżeczko |
+| **strefy** | udział ruchu w strefach A–D narysowanych na stronie kamer (łącznie i co godzinę) |
+| **dźwięk** | zdarzenia płaczu i cichego głosu z serwera domowego; płacz w trakcie ruchu dorosłego (±30 s) oznaczony jako „rodzic przy łóżeczku” i nie liczony do minut płaczu |
 
-Dane odświeżają się co 5 min. Dopóki nie przyszła żadna noc, sekcja pokazuje stan pusty. Prosta strona nie ma tej sekcji.
+### 10.5 Wiele nocy (`SleepStats.php`)
+
+- **Ostatnia noc:** skrót najnowszej zakończonej nocy (`last`), ten sam co `camNight` w `/api/status`.
+- **Tydzień do tygodnia:** tygodnie ISO wg daty wieczoru; średnie (zasypianie — mediana z nocy `ok`) dla: spokojny sen, najdłuższy blok, zasypianie, przebudzenia, pierwsze przebudzenie, płacz, karmienia w nocy, zmiany pozycji. Zmiana (▲▼ lepiej/gorzej) tylko gdy w obu tygodniach są ≥ 4 noce i różnica przekracza próg (`WEEK_METRICS`).
+- **Wpływ dnia na noc:** czynniki z dziennika i pogody — kąpiel tego dnia, karmienia w dobie, karmienia 18:00–20:30, drzemki w dzień, temperatura w dzień i w nocy; wyniki — spokojny sen, najdłuższy blok, zasypianie, przebudzenia. Z każdego wyniku odejmowana jest mediana nocy z ±7 dni (trend wieku). Kąpiel: różnica średnich + test permutacyjny; liczby: korelacja rang Spearmana + test permutacyjny. Pokazywane od 10 nocy w mniejszej grupie, do 20 jako „wstępne”; czynnik prawie bez zmienności jest pomijany. To zależność, nie przyczyna.
+- **Pamięć podręczna:** `noce/analiza/<noc>.json`, liczona ponownie automatycznie.
+
+### 10.6 Widok (nowoczesna strona, podstrona Sen)
+
+Kolejność od góry:
+
+1. **Ostatnia noc** (na samej górze): ocena, zasypianie (położony → zasnął, minuty i klasa: szybko < 10, normalnie ≤ 30, długo > 30, albo „sen aktywny — nie da się oszacować”), 6 kafelków (spokojny sen, najdłuższy blok, przebudzenia, płacz, zmiany pozycji, rytm) i **tydzień do tygodnia** (wartość, mini wykres 6 tygodni, lepiej/gorzej).
+2. **Sen** — dotychczasowa karta (przycisk zaśnięcia, bilans dnia).
+3. **Jakość snu nocą** — wybrana noc (strzałki / słupki 14 nocy):
+   - pasek nocy 18:30–06:00: ruch minuta po minucie, okres snu, czas poza łóżeczkiem, położenia (fioletowe trójkąty, zielona kreska do zaśnięcia), karmienia z dziennika, zmiany pozycji, pasek dźwięku (czerwony płacz, żółty głos dziecka, niebieski głos dorosłego) i znaczniki płaczu,
+   - kafelki nocy, podsumowanie dźwięku (próbki do odsłuchu są tylko na stronie kamer w domu),
+   - **mapa ruchu**: cała noc albo godzina po godzinie (suwak i odtwarzanie), przełącznik *ta noc / zwykle (7 nocy) / różnica*, obrys stref A–D i udział ruchu w strefach,
+   - **rytm nocy**: aktywność co 5 min ze szczytami,
+   - wykres ostatnich 14 nocy.
+4. **Kobierzec nocy**: wiersze = noce, kolumny = pół godziny od 18:30 do 06:00.
+5. **Co wpływa na sen**: karty czynników; dopóki nocy jest za mało — ile jeszcze potrzeba.
+
+Dane odświeżają się co 5 min. Prosta strona nie ma tych sekcji (zmiany graficzne tylko na nowoczesnej).
 
 ## 11. Włączenie MySQL
 

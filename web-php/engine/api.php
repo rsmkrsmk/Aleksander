@@ -183,6 +183,14 @@ function handle_api(string $route, string $method, Repository $repo): void
             'lastBath' => $latest['lastBath'],
             'bathIntervalDays' => Config::BATH_INTERVAL_DAYS,
             'calendar' => $calendar, 'night' => $nightActive,
+            // ostatnia noc z kamery w skrócie (urządzenie: linia na karcie Sen)
+            'camNight' => (static function () use ($entries) {
+                try {
+                    $an = SleepStats::analyses($entries, 2);
+                    foreach (array_reverse($an) as $a) if (!empty($a['metrics']['complete'])) return SleepStats::brief($a);
+                } catch (Throwable $e) {}
+                return null;
+            })(),
             'mdns' => 'karmienie.local', 'undoWindowSec' => 60,
             'freeHeap' => 0, 'totalHeap' => 0, 'freePsram' => 0, 'totalPsram' => 0, 'maxAlloc' => 0,
             'uptimeSec' => 0, 'cpuLoad' => 0, 'minFreeHeap' => 0, 'rssi' => 0, 'httpRequests' => 0,
@@ -377,12 +385,23 @@ function handle_api(string $route, string $method, Repository $repo): void
         sendJson($code, $obj);
     }
     if ($route === 'sleep-nights' && $method === 'GET') {
-        sendJson(200, ['nights' => SleepNights::recent((int)param('days', '14'))]);
+        $nights = SleepNights::recent((int)param('days', '14'));
+        $an = SleepStats::analyses($repo->allEntries(), max(1, count($nights) + 1));
+        foreach ($nights as &$n) if (isset($an[$n['night']])) $n['brief'] = SleepStats::brief($an[$n['night']]);
+        unset($n);
+        sendJson(200, ['nights' => $nights]);
     }
     if ($route === 'sleep-night' && $method === 'GET') {
-        $d = SleepNights::detail((string)param('night', ''));
+        $night = (string)param('night', '');
+        $d = SleepNights::detail($night);
         if ($d === null) sendJson(404, ['message' => 'Brak danych tej nocy.']);
+        $an = SleepStats::analyses($repo->allEntries(), 1, $night);
+        $d['analysis'] = $an[$night] ?? null;
+        $d['avgHeat'] = SleepStats::avgHeat($night);
         sendJson(200, $d);
+    }
+    if ($route === 'sleep-stats' && $method === 'GET') {
+        sendJson(200, SleepStats::stats($repo->allEntries(), max(7, min(400, (int)param('days', '120')))));
     }
 
     if ($route === 'setting' && $method === 'POST') {
