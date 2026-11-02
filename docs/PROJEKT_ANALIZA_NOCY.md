@@ -1,6 +1,6 @@
 # Projekt: rozszerzona analiza nocy z kamery
 
-Status: **WDROŻONY W KODZIE — wszystkie etapy 0–7** (2.11.2026, na prośbę użytkownika naraz): repo `wiewiornik` 415b430, hosting (`web-php/`: `SleepAnalysis.php`, `SleepStats.php`, widoki na podstronie Sen), firmware 5.2.0. Sprawdzone na danych syntetycznych; progi do kalibracji na prawdziwych nocach (rozdział 10).
+Status: **WDROŻONY W KODZIE — wszystkie etapy 0–7** (2.11.2026, na prośbę użytkownika naraz): repo `wiewiornik` 415b430, hosting (`web-php/`: `SleepAnalysis.php`, `SleepStats.php`, widoki na podstronie Sen), firmware 5.2.0, potem 5.3.0 (widok „Noc z kamery” na urządzeniu). Sprawdzone na danych syntetycznych; progi do kalibracji na prawdziwych nocach (rozdział 10).
 
 **Różnice względem pierwotnego projektu (ustalone w trakcie):**
 - okno pracy **18:30–06:00**, poza nim kamera stoi (D7); cechy tylko w oknie,
@@ -176,9 +176,11 @@ Zdarzenie płaczu: łączone przy przerwie ≤ 10 s; zapisujemy początek, czas,
 
 Wygląd: spójny z obecnym (szkło, dzień/noc), kolory ocen jak dziś, ten sam sposób odświeżania co 5 min.
 
-## 8. Urządzenie (`v5/`, wersja 5.2.0) — opcjonalne
+## 8. Urządzenie (`v5/`, wersje 5.2.0 i 5.3.0)
 
-Zmiana minimalna: `fetchStatusSettings()` czyta już `/api/status`; dochodzi parsowanie obiektu `night` (`rating`, `settleMin`, `settleStatus`, `quietPct`, `longestQuietMin`, `cryMin`) i **jedna linia na karcie Sen**: „Noc: zasnął po 22 min · spokój 91% · blok 3 h 10 min” z kolorową kropką oceny. Bez nowych zapytań sieciowych i bez wpływu na wyświetlanie obrazu. **Wymaga zgody na zmianę graficzną urządzenia (D3).** Brak zmian po stronie firmware jest równoważnie akceptowalny.
+**5.2.0:** `fetchStatusSettings()` czyta `/api/status` i z obiektu `camNight` buduje **jedną linię na karcie Sen**: „Noc 1.11: zasnął po 9 min · spokój 87% · blok 1 h 03” z kropką oceny.
+
+**5.3.0 (na życzenie użytkownika):** drugi widok karty Sen „Noc z kamery”, przełączany dotknięciem (jak na Wadze). Dane z nowego obiektu `camDev` (`SleepStats::device`): zasypianie i ocena, pasek nocy 23 × 30 min (spokój / ruch / poza łóżeczkiem / płacz / okres snu), kafelki (spokój %, najdłuższy blok, przebudzenia), 7 nocy ze słupkami spokojnego snu i porównanie z 7 poprzednimi (gdy obie grupy mają ≥ 4 noce). Bez „Co wpływa na sen”. Bez nowych zapytań sieciowych. Przy okazji wykres przyrostu wagi na urządzeniu liczony jak na hostingu (każdy tydzień, szacunki, norma).
 
 ## 9. Wdrożenie na t620 (repo `wiewiornik`)
 

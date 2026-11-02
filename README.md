@@ -32,14 +32,14 @@ Gałąź `v5` to firmware napisane od nowa na podstawie analizy `ANALIZA_V5.md`.
 | `hw_display.cpp` | ST7701 przez ekspander TCA9554, `esp_lcd` RGB (bounce 80 linii + 2 FB w PSRAM), LVGL DIRECT, podświetlenie, twarda resynchronizacja obrazu, detektor przesunięcia, `FlashWriteGuard` |
 | `hw_touch.cpp` | GT911 (SensorLib) jako wskaźnik LVGL; dotyk tablicy tylko otwiera panel |
 | `net.cpp` | Wi-Fi (bez zapisów NVS), NTP, wspólny klient HTTP(S) z buforem w PSRAM (Content-Length / chunked) |
-| `host_sync.cpp` | **zadanie sieciowe (rdzeń 0)**: rewizja co 10 s → pobranie CSV → parsowanie → przekazanie do UI; pogoda; Telegram; kopia dzienna; cache na flashu |
+| `host_sync.cpp` | **zadanie sieciowe (rdzeń 0)**: rewizja co 10 s → pobranie CSV → parsowanie → przekazanie do UI; co 10 min `/api/status` (ustawienie Telegrama, noc z kamery: `camNight`, `camDev`); pogoda; Telegram; kopia dzienna; cache na flashu |
 | `store.cpp` | parser CSV → tablica wpisów w PSRAM, posortowana po czasie |
 | `stats.cpp` | **wszystkie obliczenia** do ekranu (karmienia, przerwy, rytm, mleko, sen, okno drzemki, waga, noce, kąpiele, wiek, wskazówka) — czysty C++, testowany na PC |
 | `weather.cpp`, `weather_parse.cpp` | Open-Meteo (HTTP), parser, pamięć RTC |
 | `telegram.cpp` | wiadomość startowa, okno drzemki, kopia CSV (`sendDocument`) |
 | `diag.cpp` | watchdog zadań, liczniki uruchomień (RTC), CPU, minimum RAM |
 | `ui.cpp` + `ui_modern.h` | ekrany: start (jeż), tablica, panel (Dziś, Mleko, Odstępy, Waga, Sen, Kąpiel), diagnostyka |
-| `ui_model.h` | dane do wyświetlenia (`UiModel`) |
+| `ui_model.h` | dane do wyświetlenia (`UiModel`, `UiCam` = noc z kamery) |
 | `ui_fonts.h`, `ui_assets.h`, `development_tips.h` | fonty z polskimi znakami, grafiki, wskazówki dnia 0–600 |
 | `app_config.h` | stałe (urodziny, progi, czasy, adresy hostingu) |
 | `secrets.h.example` | wzór pliku z Wi-Fi i Telegramem (`secrets.h` nie trafia do repozytorium) |
@@ -81,7 +81,7 @@ Gałąź `v5` to firmware napisane od nowa na podstawie analizy `ANALIZA_V5.md`.
 6. **Jednorazowo** ustaw **Erase All Flash Before Sketch Upload: Enabled** (czyści stare ustawienia Wi-Fi/NVS z v4), potem wróć do Disabled.
 7. **Wgraj.** Zmiana tablicy partycji czyści stare dane LittleFS z v4. To nic nie szkodzi: dane są na hostingu, a cache odtworzy się po pierwszym pobraniu.
 
-Rozmiar (kompilacja 20.10.2026): program ~2,25 MB z 8 MB, zmienne globalne 62 KB RAM.
+Rozmiar (kompilacja 2.11.2026, v5.3.0): program ~2,27 MB z 8 MB, zmienne globalne 63 KB RAM.
 
 ---
 
@@ -90,7 +90,7 @@ Rozmiar (kompilacja 20.10.2026): program ~2,25 MB z 8 MB, zmienne globalne 62 KB
 ```
 Panel WWW (PHP) ──GET /api/revision co 10 s──► zadanie sieciowe (rdzeń 0)
                ──GET /api/export.csv przy zmianie──► parser → tablica wpisów w PSRAM ──► pętla UI (rdzeń 1)
-               ──GET /api/status co 10 min (ustawienie powiadomień o drzemce)            │
+               ──GET /api/status co 10 min (powiadomienia o drzemce, noc z kamery)       │
 Open-Meteo ────HTTP co 20 min──► pogoda (RAM + RTC)                                     ├─ stats.cpp → UiModel
 Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie                                └─ LVGL: tablica / panel / diagnostyka
 ```
@@ -98,7 +98,7 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 **Ekrany i nawigacja**
 - **Start:** jeż, 5 kroków — Wi-Fi, zegar, pamięć (cache), pogoda, dane z WWW.
 - **Tablica:** zegar, pogoda, drzemka, pierścień od ostatniego karmienia, 3 kafelki dnia, prognoza godzinowa, ubiór, wskazówka dnia.
-- **Panel:** dotknięcie tablicy. 6 kart przełączanych paskiem lub gestem; na karcie Waga dotknięcie wykresu zmienia widok.
+- **Panel:** dotknięcie tablicy. 6 kart przełączanych paskiem lub gestem; na kartach **Waga** (waga / przyrost) i **Sen** (sen z dziennika / noc z kamery) dotknięcie wykresu zmienia widok.
 - **Karta Sen (od 5.2.0):** pod tytułem linia ostatniej nocy z kamery w łóżeczku, np. „Noc 1.11: zasnął po 9 min · spokój 87% · blok 1 h 03”, z kropką w kolorze oceny nocy. Dane z `/api/status` (obiekt `camNight`, odświeżane co 10 min); bez danych z kamery linii nie ma.
 - **Karta Sen, widok „Noc z kamery” (od 5.3.0):** gdy hosting ma noce z kamery, dotknięcie karty przełącza widoki (jak na Wadze; dwie kropki w prawym górnym rogu, wybór zostaje po odświeżeniu danych). Drugi widok pokazuje ostatnią zakończoną noc:
   - wynik zasypiania („Zasnął po 18 min”, „Sen aktywny” albo „brak danych”), godziny położenia, zaśnięcia i końca snu oraz ocenę nocy (kropka: zielona spokojna, żółta umiarkowana, pomarańczowa niespokojna, szara mało danych);
@@ -150,13 +150,13 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 
 ## Diagnostyka i rozwiązywanie problemów
 
-### Po wgraniu nowego firmware (v5.1.0): co sprawdzić
+### Po wgraniu nowego firmware (v5.3.0): co sprawdzić
 
 Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
 
 | Linia w logu | Znaczenie |
 |---|---|
-| `Lesny Dziennik v5.1.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
+| `Lesny Dziennik v5.3.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
 | `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
 | `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
 | `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |
@@ -207,7 +207,24 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 
 - **Strona na hostingu** (`web-php/`): jedyne miejsce zapisu danych. Pełny opis — układ na hostingu, aktualizacja plik po pliku, API, wykres wagi, błąd 500: **`web-php/README.md`**.
 - **Jakość snu nocą z kamery:** serwer domowy t620 wysyła co rano dane nocy na stronę (`POST /api/sleep-night`); wykres jest w Sen → „Jakość snu nocą”. Opis strony: `web-php/README.md` rozdział 10; konfiguracja serwera domowego: repozytorium `wiewiornik` (prywatne), `INSTRUKCJA.md` rozdział 3c2.
-- Urządzenie (v5) nie pobiera danych z kamery; zmiany strony wymagają tylko jej aktualizacji na hostingu, bez wgrywania firmware.
+- Urządzenie (od 5.3.0) nie rozmawia z kamerą ani z t620: bierze gotowy skrót ostatniej nocy ze strony (`/api/status`, obiekty `camNight` i `camDev`) i pokazuje go na karcie **Sen** (drugi widok „Noc z kamery”). Analiza i „Co wpływa na sen” są tylko na stronie.
+- Zmiany samej strony (wykresy, analiza) wymagają tylko aktualizacji plików na hostingu, bez wgrywania firmware. Firmware trzeba wgrać dopiero przy zmianach z folderu `v5/`.
+
+### Aktualizacja firmware do 5.3.0 (z 5.2.0 lub wcześniejszych)
+
+1. Hosting: wgraj do `/home/phpmapy1/panel-engine/` pliki `api.php` i `SleepStats.php` z `web-php/engine/` (bez nich karta Sen zostaje z jednym widokiem; nic się nie psuje).
+2. Pobierz gałąź `v5` (Code → Download ZIP) i z folderu `v5` podmień u siebie: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `stats.cpp`, `ui_model.h`, `ui_modern.h`. Swój `secrets.h` zostaw.
+3. Wgraj jak zwykle (ustawienia jak w rozdziale „Kompilacja”). Nie trzeba czyścić flasha.
+4. Sprawdź: w logu `v5.3.0`; na karcie Sen kropki w prawym górnym rogu i po dotknięciu widok „Noc z kamery” (pojawia się do 10 min po starcie, gdy hosting ma przynajmniej jedną zakończoną noc); na karcie Waga wykres przyrostu ze słupkami w każdym tygodniu.
+
+### Historia wersji firmware v5
+
+| Wersja | Zmiany |
+|---|---|
+| 5.0.x | urządzenie tylko wyświetla; dane z hostingu; cache na flashu |
+| 5.1.0 | poprawka licznika EOF sterownika ekranu (przesuwanie obrazu), detektor przesunięcia, polecenia `l`, `h` |
+| 5.2.0 | linia ostatniej nocy z kamery na karcie Sen (`camNight`) |
+| 5.3.0 | karta Sen: drugi widok „Noc z kamery” (`camDev`); wykres przyrostu wagi jak na hostingu (każdy tydzień, szacunki, norma) |
 
 Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
 - API nie ma uwierzytelniania — hasła dla całego portalu zostaną dodane później jednym ruchem (P0),
