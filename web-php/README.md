@@ -194,7 +194,7 @@ W prawym górnym rogu panelu jest tymczasowy link **„wgraj CSV”** (ten sam e
 
 ## 9. Wykres przyrostu wagi — słupki tygodniowe
 
-Serwer (`Domain::weightWeeks`) liczy jeden słupek na **każdy** tydzień życia, od 1. do tygodnia ostatniego ważenia; obie strony tylko je rysują. Wartość (g/dzień) to trend z ważeń (regresja liniowa), bo pojedyncze ważenia różnią się nawet o 100 g:
+Serwer (`Domain::weightWeeks`) liczy jeden słupek na **każdy** tydzień życia, od 1. do tygodnia ostatniego ważenia; strona tylko je rysuje. Urządzenie (od 5.3.0, `stats.cpp`) liczy to samo własnym kodem tą samą metodą (na tym samym pliku dały identyczne wartości i oznaczenia „szacunek”). Wartość (g/dzień) to trend z ważeń (regresja liniowa), bo pojedyncze ważenia różnią się nawet o 100 g:
 
 1. okno ±7 dni wokół środka tygodnia (co najmniej 2 ważenia odległe o ≥ 5 dni),
 2. przy mniejszej liczbie ważeń okno rośnie do ±10, ±14, ±21 dni,
@@ -281,6 +281,10 @@ Kolejność od góry:
 5. **Co wpływa na sen**: karty czynników; dopóki nocy jest za mało — ile jeszcze potrzeba.
 
 Dane odświeżają się co 5 min. Prosta strona nie ma tych sekcji (zmiany graficzne tylko na nowoczesnej).
+
+### 10.7 Widok na urządzeniu (firmware 5.3.0)
+
+Urządzenie ESP32 nie liczy nic z nocy: bierze gotowy skrót z `/api/status` (`SleepStats::device`, obiekt `camDev`, format w tabeli API, rozdział 7) i pokazuje go jako drugi widok karty Sen: zasypianie i ocena nocy, pasek nocy co 30 min (spokój / ruch / poza łóżeczkiem / płacz), kafelki (spokój %, najdłuższy blok, przebudzenia), 7 ostatnich nocy z porównaniem do 7 poprzednich. „Co wpływa na sen” nie ma na urządzeniu (decyzja użytkownika). Gdy hosting nie ma jeszcze zakończonej nocy, `camDev` jest `null`, a karta Sen ma jeden widok. Stary firmware (≤ 5.2.0) ignoruje nowe pole.
 
 ## 11. Włączenie MySQL
 
