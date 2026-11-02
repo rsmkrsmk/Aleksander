@@ -8,6 +8,8 @@
      GET  /api/status | /api/entries?date= | /api/weight-series | /api/bath-calendar | /export.csv
      POST /api/entry | /api/delete-entry | /api/event | /api/send-backup
           /api/import | /api/upload-data | /api/update-feeding | /api/setting
+     Noce z kamery (jakosc snu): POST /api/sleep-night (z kluczem) | GET /api/sleep-nights?days=14
+          | GET /api/sleep-night?night=RRRR-MM-DD
    ============================================================================ */
 declare(strict_types=1);
 
@@ -200,7 +202,15 @@ function handle_api(string $route, string $method, Repository $repo): void
     }
 
     if ($route === 'weight-series' && $method === 'GET') {
-        sendJson(200, ['birthWeightG' => Config::BIRTH_WEIGHT_G, 'points' => Domain::weightSeries($repo->allEntries())]);
+        $all = $repo->allEntries();
+        sendJson(200, [
+            'birthWeightG' => Config::BIRTH_WEIGHT_G,
+            'points' => Domain::weightSeries($all),
+            // slupki tygodniowe przyrostu liczone na serwerze (bez dziur, szacunek gdy malo wazen)
+            'weeks' => Domain::weightWeeks($all),
+            'recent' => Domain::weightRecentTrend($all),
+            'today' => Domain::calculateAgeDays(new DateTimeImmutable()),
+        ]);
     }
 
     if ($route === 'bath-calendar' && $method === 'GET') {
@@ -350,6 +360,31 @@ function handle_api(string $route, string $method, Repository $repo): void
         sendJson(200, ['message' => $result['message'], 'backup' => $result['backup'], 'lines' => $result['lines']]);
     }
 
+    /* ---- Noce z kamery (serwer domowy t620 -> hosting), patrz engine/SleepNights.php ---- */
+    if ($route === 'sleep-night' && $method === 'POST') {
+        $need = SleepNights::key();
+        if ($need === '') sendJson(503, ['message' => 'Odbior nocy wylaczony: brak klucza (data/noce_klucz.txt albo NOCE_KLUCZ).']);
+        if (!hash_equals($need, SleepNights::requestKey())) sendJson(403, ['message' => 'Brak lub bledny klucz.']);
+        $raw = '';
+        if (!empty($_FILES['file']['tmp_name']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
+            $raw = (string)file_get_contents($_FILES['file']['tmp_name']);
+        } elseif (isset($_POST['dane'])) {
+            $raw = (string)$_POST['dane'];
+        } else {
+            $raw = file_get_contents('php://input'); if ($raw === false) $raw = '';
+        }
+        [$code, $obj] = SleepNights::receive($raw);
+        sendJson($code, $obj);
+    }
+    if ($route === 'sleep-nights' && $method === 'GET') {
+        sendJson(200, ['nights' => SleepNights::recent((int)param('days', '14'))]);
+    }
+    if ($route === 'sleep-night' && $method === 'GET') {
+        $d = SleepNights::detail((string)param('night', ''));
+        if ($d === null) sendJson(404, ['message' => 'Brak danych tej nocy.']);
+        sendJson(200, $d);
+    }
+
     if ($route === 'setting' && $method === 'POST') {
         if (param('key') !== 'sleepTelegram') sendJson(400, ['message' => 'Nieznane ustawienie.']);
         $settings = $repo->loadSettings();
@@ -372,7 +407,7 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === realpath(__FILE__)) {
         if (Config::corsOrigin() !== '') {
             apiCorsHeader();
             header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type, X-Upload-Token');
+            header('Access-Control-Allow-Headers: Content-Type, X-Upload-Token, X-Klucz, Authorization');
         }
         http_response_code(204); exit;
     }

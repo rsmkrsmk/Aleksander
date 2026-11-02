@@ -400,4 +400,104 @@ final class Domain
         }
         return $points;
     }
+
+    /* ------------------------- Przyrost wagi: slupki tygodniowe -------------------------
+       Jeden slupek na KAZDY tydzien zycia od 1 do tygodnia ostatniego wazenia — bez dziur.
+       Wartosc (g/dzien) to trend z pomiarow (regresja liniowa), bo pojedyncze wazenia roznia
+       sie nawet o 100 g. Okno zaczyna sie od +-7 dni wokol srodka tygodnia; gdy brakuje
+       wazen, okno rosnie (+-10, 14, 21 dni), a w ostatecznosci wartosc wynika z dwoch
+       najblizszych wazen przed i po tygodniu. Takie tygodnie sa oznaczone jako szacunek.
+       Waga urodzeniowa (dzien 0) jest punktem startowym, gdy tego dnia nie bylo wazenia. */
+    private static function gainSlope(array $pts, float $from, float $to): ?array
+    {
+        $w = array_values(array_filter($pts, static fn($p) => $p['day'] >= $from && $p['day'] <= $to));
+        $n = count($w);
+        if ($n < 2 || $w[$n - 1]['day'] - $w[0]['day'] < 5) return null;
+        $mx = array_sum(array_column($w, 'day')) / $n;
+        $my = array_sum(array_column($w, 'g')) / $n;
+        $sxy = 0.0; $sxx = 0.0;
+        foreach ($w as $p) { $sxy += ($p['day'] - $mx) * ($p['g'] - $my); $sxx += ($p['day'] - $mx) ** 2; }
+        return $sxx > 0 ? ['v' => $sxy / $sxx, 'n' => $n] : null;
+    }
+
+    /** Referencyjny dzienny przyrost (g/dzien) wg wieku: 25-30 (0-3 mies.), 15-20 (3-6), potem 10-15. */
+    public static function gainBandPerDay(int $day): ?array
+    {
+        if ($day < Config::GAIN_DISCHARGE_DAY) return null;
+        if ($day < Config::GAIN_P1_END_DAY) return ['lo' => 25, 'hi' => 30];
+        if ($day < Config::GAIN_P2_END_DAY) return ['lo' => 15, 'hi' => 20];
+        return ['lo' => 10, 'hi' => 15];
+    }
+
+    /** Pomiary wagi usrednione per dzien zycia, posortowane; z waga urodzeniowa jako dniem 0. */
+    public static function weightPointsByDay(array $entries): array
+    {
+        $byDay = [];
+        foreach ($entries as $e) {
+            if ($e['type'] !== 'WAGA' || $e['ml'] <= 0) continue;
+            $dol = self::dayOfLifeForDate($e['date']); if ($dol < 0) continue;
+            $byDay[$dol][] = (int)$e['ml'];
+        }
+        ksort($byDay);
+        $pts = [];
+        if (!isset($byDay[0])) $pts[] = ['day' => 0, 'g' => Config::BIRTH_WEIGHT_G];
+        foreach ($byDay as $d => $gs) $pts[] = ['day' => (int)$d, 'g' => array_sum($gs) / count($gs)];
+        return $pts;
+    }
+
+    /** Trend przyrostu w oknie [from, to] z poszerzaniem okna; null gdy nie da sie policzyc. */
+    private static function gainTrend(array $pts, float $center, float $half): ?array
+    {
+        foreach ([$half, $half + 3, $half + 7, $half + 14] as $i => $h) {
+            $s = self::gainSlope($pts, $center - $h, $center + $h);
+            if ($s !== null) return ['v' => $s['v'], 'n' => $s['n'], 'est' => $i > 0];
+        }
+        // dwa najblizsze wazenia: ostatnie przed srodkiem i pierwsze po nim (albo dwa ostatnie)
+        $before = null; $after = null;
+        foreach ($pts as $p) {
+            if ($p['day'] <= $center) $before = $p;
+            elseif ($after === null) $after = $p;
+        }
+        if ($before !== null && $after === null) {
+            $n = count($pts);
+            for ($j = $n - 2; $j >= 0; $j--) if ($pts[$n - 1]['day'] - $pts[$j]['day'] >= 3) { $before = $pts[$j]; $after = $pts[$n - 1]; break; }
+        }
+        if ($before === null || $after === null || $after['day'] - $before['day'] < 3) return null;
+        return ['v' => ($after['g'] - $before['g']) / ($after['day'] - $before['day']), 'n' => 2, 'est' => true];
+    }
+
+    public static function weightWeeks(array $entries, int $maxWeeks = 26): array
+    {
+        $pts = self::weightPointsByDay($entries);
+        if (count($pts) < 2) return [];
+        $lastDay = (int)$pts[count($pts) - 1]['day'];
+        $birth = self::birthDate()->setTime(12, 0, 0);
+        $weeks = [];
+        for ($k = 1; $k * 7 <= $lastDay; $k++) {
+            $center = $k * 7 + 3.5;
+            $t = self::gainTrend($pts, $center, 7.0);
+            $weeks[] = [
+                'k' => $k,
+                'dayFrom' => $k * 7, 'dayTo' => $k * 7 + 6,
+                'dateFrom' => $birth->modify('+' . ($k * 7) . ' days')->format('Y-m-d'),
+                'dateTo' => $birth->modify('+' . ($k * 7 + 6) . ' days')->format('Y-m-d'),
+                'gPerDay' => $t === null ? null : (int)round($t['v']),
+                'estimated' => $t !== null && $t['est'],
+                'points' => $t['n'] ?? 0,
+                'partial' => ($k * 7 + 7 > $lastDay),
+                'band' => self::gainBandPerDay((int)round($center)),
+            ];
+        }
+        return array_slice($weeks, -$maxWeeks);
+    }
+
+    /** Trend z ostatnich ~14 dni (do kafelka), z tym samym poszerzaniem okna. */
+    public static function weightRecentTrend(array $entries): ?array
+    {
+        $pts = self::weightPointsByDay($entries);
+        if (count($pts) < 2) return null;
+        $last = (int)$pts[count($pts) - 1]['day'];
+        $t = self::gainTrend($pts, $last - 7, 7.0);
+        return $t === null ? null : ['gPerDay' => (int)round($t['v']), 'estimated' => $t['est'], 'band' => self::gainBandPerDay($last)];
+    }
 }

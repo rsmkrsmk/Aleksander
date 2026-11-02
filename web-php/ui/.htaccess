@@ -3,6 +3,10 @@
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    # Naglowek Authorization (klucz wysylki nocy z serwera domowego) — czesc hostingow (PHP-FPM/CGI)
+    # go obcina; przekazujemy go do PHP jako HTTP_AUTHORIZATION.
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
