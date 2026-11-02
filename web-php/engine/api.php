@@ -365,6 +365,9 @@ function handle_api(string $route, string $method, Repository $repo): void
         $raw = '';
         if (!empty($_FILES['file']['tmp_name']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
             $raw = (string)file_get_contents($_FILES['file']['tmp_name']);
+        } elseif (isset($_FILES['file']['error']) && $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+            // np. plik większy niż upload_max_filesize serwera
+            sendJson(400, ['message' => 'Plik nocy nie dotarł (błąd wysyłki PHP ' . (int)$_FILES['file']['error'] . ', limit serwera: ' . ini_get('upload_max_filesize') . ').']);
         } elseif (isset($_POST['dane'])) {
             $raw = (string)$_POST['dane'];
         } else {

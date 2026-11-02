@@ -7,6 +7,10 @@
    albo surowy JSON). Bez uwierzytelniania — jak reszta API (zabezpieczenie hasłami ma
    przyjść później dla całego portalu).
 
+   Wersja 2 (od 11.2026) dodaje: window (okno pracy detektora 18:30-06:00), bin_s, feat (cechy ruchu co
+   5 s: m, t, c, cx, cy), light, heat.night80 (mapa 80x45) i heat.slices (mapy godzinowe 40x23). Wskaźniki
+   z tych pól (zasypianie, rytm, mapy) dochodzą w kolejnych etapach (docs/PROJEKT_ANALIZA_NOCY.md).
+
    Plik nocy (wersja 1) zawiera m.in.: night (data wieczoru), start/end, start_ts/end_ts,
    minutes, timeline (klatki z ruchem w każdej minucie, 0..120 przy 2 kl./s), events
    (start_ts, end_ts, dur_s), hours, summary (events, motion_s, longest_quiet_s,
@@ -19,7 +23,7 @@ declare(strict_types=1);
 
 final class SleepNights
 {
-    const MAX_BYTES = 1048576;           // limit pliku nocy (1 MB)
+    const MAX_BYTES = 2097152;           // limit pliku nocy (2 MB; wersja 2 z cechami co 5 s ma ok. 200-400 kB)
     const EPISODE_GAP_MIN = 5;           // minuty ruchu dzielone krótszą przerwą = jeden epizod
     const LONG_EPISODE_MIN = 3;          // epizod "dłuższy" = co najmniej tyle minut z ruchem
     const LOW_COVERAGE_PCT = 60;         // poniżej: kamera/detektor nie działały większość nocy
@@ -34,7 +38,7 @@ final class SleepNights
     public static function receive(string $raw): array
     {
         if ($raw === '') return [400, ['message' => 'Pusty plik nocy.']];
-        if (strlen($raw) > self::MAX_BYTES) return [400, ['message' => 'Plik nocy jest za duży (limit 1 MB).']];
+        if (strlen($raw) > self::MAX_BYTES) return [400, ['message' => 'Plik nocy jest za duży (limit 2 MB).']];
         $d = json_decode($raw, true);
         if (!is_array($d)) return [400, ['message' => 'To nie jest poprawny JSON.']];
         $night = (string)($d['night'] ?? '');
@@ -109,6 +113,8 @@ final class SleepNights
             'busiestHour' => $s['busiest_hour'] ?? null,
             'coveragePct' => $coverage,
             'complete' => (bool)($d['complete'] ?? false),
+            'version' => (int)($d['version'] ?? 1),
+            'featCoveragePct' => isset($d['window']['coverage_pct']) ? (float)$d['window']['coverage_pct'] : null,
             'rating' => $rating,
             'receivedAt' => date('Y-m-d H:i:s'),
         ];
