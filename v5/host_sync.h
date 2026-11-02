@@ -16,6 +16,9 @@ void hostTaskStart();                        // zadanie sieciowe (rdzen 0)
 // --- petla UI ------------------------------------------------------------------
 Store *hostTakeNewStore();                   // nowe dane (wlasnosc przechodzi na wolajacego) lub nullptr
 bool hostSleepTelegramEnabled();             // ustawienie z panelu WWW (/api/status)
+// Ostatnia noc z kamery (obiekt "camNight" w /api/status): gotowa linia tekstu na karte Sen
+// i ocena (0 brak, 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 malo danych). false = brak danych.
+bool hostCamNight(char *line, size_t n, uint8_t *rating);
 
 struct HostDiag {
   long revLocal, revRemote;

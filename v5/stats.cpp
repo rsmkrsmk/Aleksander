@@ -640,6 +640,7 @@ uint32_t statsChartsHash(const UiModel &m) {
   H(bathMonth); H(bathFirstDow); H(bathDays); H(bathToday); H(bathMask); H(bathSinceDays); H(bathNextDay); H(bathLastTxt); H(bathNextTxt);
   H(todayFeed); H(todayMl); H(todayDiapers); H(todayBath); H(sleepTodayDay); H(sleepTodayNight);
   H(lastFeedEntry); H(lastBottleEntry);
+  H(camLine); H(camRating);
   return h;
 }
 #undef H

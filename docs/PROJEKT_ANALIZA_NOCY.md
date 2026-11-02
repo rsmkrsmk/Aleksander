@@ -1,6 +1,14 @@
 # Projekt: rozszerzona analiza nocy z kamery
 
-Status: **ZATWIERDZONY** (2.11.2026). Etap 0 wykonany, **etap 1 zakodowany** (repo `wiewiornik` 32287e1, hosting: odbiór v2). Kolejne etapy po kilku nocach danych.
+Status: **WDROŻONY W KODZIE — wszystkie etapy 0–7** (2.11.2026, na prośbę użytkownika naraz): repo `wiewiornik` 415b430, hosting (`web-php/`: `SleepAnalysis.php`, `SleepStats.php`, widoki na podstronie Sen), firmware 5.2.0. Sprawdzone na danych syntetycznych; progi do kalibracji na prawdziwych nocach (rozdział 10).
+
+**Różnice względem pierwotnego projektu (ustalone w trakcie):**
+- okno pracy **18:30–06:00**, poza nim kamera stoi (D7); cechy tylko w oknie,
+- strefy A–D liczone na t620 z zapisanej siatki 16×9 ruchu (działają wstecz do 60 dni po ponownym wysłaniu nocy),
+- wykrywanie **wyjęcia z łóżeczka** (karmienie w dzienniku po ruchu dorosłego albo puste łóżeczko wg wzorca) — czas poza łóżeczkiem nie liczy się do snu; ostatni ruch dorosłego nad ranem = koniec snu,
+- dźwięk: mikrofon kamery tnie ciszę do cyfrowego zera i jest cichy, więc tło liczone od −95 dB, płacz ≥ 22 dB nad tłem (strojenie przez `/data/dzwiek_config.json` i oceny próbek),
+- próbki dźwięku trzymane 7 dni (razem z klipami nocy), tylko na t620 (D2),
+- urządzenie: linia „Noc d.mm: zasnął po … · spokój …% · blok …” na karcie Sen (obiekt `camNight` w `/api/status`).
 Dotyczy trzech miejsc: serwer t620 (repo `wiewiornik`), hosting (`web-php/`), urządzenie ESP32 (`v5/`).
 
 ## 1. Cel i zasady

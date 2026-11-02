@@ -28,6 +28,9 @@ static int lastErr = 0;
 static bool fromCache = false;
 static bool syncedThisBoot = false;
 static TaskHandle_t netTask = nullptr;
+static portMUX_TYPE camMux = portMUX_INITIALIZER_UNLOCKED;
+static char camLine[96] = "";
+static uint8_t camRating = 0;
 static HostProgressFn progressFn = nullptr;
 
 const char *hostErrorText(int e) {
@@ -165,6 +168,70 @@ static Store *downloadCsv() {
   return s;
 }
 
+// --- proste odczyty z fragmentu JSON (obiekt camNight jest maly i plaski) ---
+static bool jsonNum(const char *b, const char *e, const char *key, float *out) {
+  char k[32]; snprintf(k, sizeof k, "\"%s\":", key);
+  const char *p = strstr(b, k);
+  if (!p || p >= e) return false;
+  p += strlen(k);
+  if (strncmp(p, "null", 4) == 0) return false;
+  *out = strtof(p, nullptr);
+  return true;
+}
+static bool jsonStr(const char *b, const char *e, const char *key, char *out, size_t n) {
+  char k[32]; snprintf(k, sizeof k, "\"%s\":\"", key);
+  const char *p = strstr(b, k);
+  if (!p || p >= e) return false;
+  p += strlen(k);
+  size_t i = 0;
+  while (p < e && *p != '"' && i + 1 < n) out[i++] = *p++;
+  out[i] = 0;
+  return true;
+}
+
+// "camNight":{...} -> "Noc 1.11: zasnął po 9 min · spokój 87% · blok 1 h 03" (data wieczoru)
+static void parseCamNight(const char *json) {
+  char line[96] = ""; uint8_t rating = 0;
+  const char *b = strstr(json, "\"camNight\":{");
+  if (b) {
+    b += 11;
+    const char *e = strchr(b, '}');
+    if (e) {
+      char night[12] = "", st[16] = "", rt[16] = "";
+      float settle = -1, quiet = -1, block = -1;
+      jsonStr(b, e, "night", night, sizeof night);
+      jsonStr(b, e, "settleStatus", st, sizeof st);
+      jsonStr(b, e, "rating", rt, sizeof rt);
+      jsonNum(b, e, "settleMin", &settle);
+      jsonNum(b, e, "quietPct", &quiet);
+      jsonNum(b, e, "longestBlock", &block);
+      rating = !strcmp(rt, "spokojna") ? 1 : !strcmp(rt, "umiarkowana") ? 2 : !strcmp(rt, "niespokojna") ? 3 : 4;
+      int d = 0, mo = 0, y = 0;
+      if (sscanf(night, "%d-%d-%d", &y, &mo, &d) == 3) {
+        char s1[40];
+        if (!strcmp(st, "ok") && settle >= 0) snprintf(s1, sizeof s1, "zasnął po %d min", (int)settle);
+        else if (!strcmp(st, "aktywny")) snprintf(s1, sizeof s1, "sen aktywny");
+        else snprintf(s1, sizeof s1, "zasypianie: brak");
+        const int bl = block > 0 ? (int)block : 0;
+        snprintf(line, sizeof line, "Noc %d.%02d: %s · spokój %d%% · blok %d h %02d",
+                 d, mo, s1, quiet >= 0 ? (int)(quiet + 0.5f) : 0, bl / 60, bl % 60);
+      }
+    }
+  }
+  portENTER_CRITICAL(&camMux);
+  strncpy(camLine, line, sizeof camLine - 1); camLine[sizeof camLine - 1] = 0;
+  camRating = line[0] ? rating : 0;
+  portEXIT_CRITICAL(&camMux);
+}
+
+bool hostCamNight(char *line, size_t n, uint8_t *rating) {
+  portENTER_CRITICAL(&camMux);
+  strncpy(line, camLine, n - 1); line[n - 1] = 0;
+  if (rating) *rating = camRating;
+  portEXIT_CRITICAL(&camMux);
+  return line[0] != 0;
+}
+
 static void fetchStatusSettings() {
   PsBuf b;
   b.limit = 64 * 1024;
@@ -178,6 +245,7 @@ static void fetchStatusSettings() {
         sleepTg = strncmp(k, "true", 4) == 0 || *k == '1';
       }
     }
+    parseCamNight(reinterpret_cast<const char *>(b.p));
   }
   b.release();
   lastStatus = millis();

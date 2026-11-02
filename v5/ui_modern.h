@@ -1086,6 +1086,11 @@ static void ui_build_sleep(const UiModel &m, bool anim) {
   lv_obj_t *p = uiDashPage[pg];
   ui_card(p, 14, 2, 452, 340, 26);
   ui_title(p, "Sen nocny", "między karmieniami, ostatnie 14 nocy");
+  if (m.camLine[0]) {   // ostatnia noc z kamery (strona WWW): kropka w kolorze oceny + jedna linia
+    const lv_color_t rc = m.camRating == 1 ? P.acc : m.camRating == 2 ? P.sun : m.camRating == 3 ? P.feed : P.faint;
+    ui_box(p, 24, 63, 9, 9, 5, rc);
+    ui_label(p, m.camLine, &ui_f13, P.ink2, 39, 57, 410);
+  }
   int cnt = 0, sum = 0, best = -1, bestI = -1, lastI = -1;
   for (int i = 0; i < UI_NIGHTS; ++i) if (m.nightMin[i] > 0) { ++cnt; sum += m.nightMin[i]; if (m.nightMin[i] > best) { best = m.nightMin[i]; bestI = i; } lastI = i; }
   if (!cnt) { ui_label(p, "Za mało danych: potrzebne karmienie wieczorem\n(17–20) i pierwsze karmienie po północy.", &ui_f15, P.muted, 30, 120, 400); return; }

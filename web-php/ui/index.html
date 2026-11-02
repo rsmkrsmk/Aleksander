@@ -607,6 +607,73 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 .cam-strip .cs-feed circle{fill:var(--feed);stroke:var(--card-solid);stroke-width:1.5}
 .cam-stats{margin-bottom:6px}
 .cam-sub{margin:18px 2px 6px}
+/* --- noc z kamery: góra podstrony Sen --- */
+.ns-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.ns-title{font-family:var(--fd);font-weight:800;font-size:1.02rem;color:var(--ink)}
+.ns-onset{display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:var(--r3);background:color-mix(in srgb,var(--oc,var(--sleep)) 9%,var(--card-2));border:1px solid color-mix(in srgb,var(--oc,var(--sleep)) 26%,transparent);margin-bottom:10px}
+.ns-on-big{font-family:var(--fd);font-size:2.3rem;font-weight:800;line-height:1;color:var(--oc,var(--sleep));letter-spacing:-.02em;white-space:nowrap}
+.ns-on-big small{font-size:.95rem;color:var(--muted);margin-left:2px}
+.ns-on-k{font-size:.7rem;font-weight:800;color:var(--muted)}
+.ns-on-t{font-size:.86rem;font-weight:700;color:var(--ink-2);margin-top:2px}
+.ns-on-txt{font-size:.86rem;font-weight:700;color:var(--ink-2)} .ns-on-warn{font-size:.86rem;color:var(--feed)}
+.ns-weeks{display:grid;gap:2px}
+.nw-row{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 70px 82px;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--brd)}
+.nw-k{font-size:.76rem;font-weight:700;color:var(--ink-2)} .nw-v{font-family:var(--fd);font-weight:800;font-size:.86rem;color:var(--ink);white-space:nowrap}
+.nw-spark{width:70px;height:22px} .nw-spark polyline{fill:none;stroke:var(--sleep);stroke-width:1.6;stroke-linejoin:round} .nw-spark circle{fill:var(--sleep)}
+.nw-chip{justify-self:end;font-size:.68rem;font-weight:800;padding:3px 8px;border-radius:999px;color:var(--muted);background:var(--card-2);border:1px solid var(--brd);white-space:nowrap}
+.nw-chip.good{color:var(--acc-ink);border-color:color-mix(in srgb,var(--acc) 40%,transparent)} .nw-chip.bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+.nw-cap{font-size:.66rem;color:var(--faint);margin-top:6px}
+/* pasek nocy v2 */
+.cam-strip .cs-sleep{fill:color-mix(in srgb,var(--sleep) 16%,transparent)}
+.cam-strip .cs-out{fill:var(--faint);opacity:.28}
+.cam-strip .cs-blk{fill:var(--acc)}
+.cam-strip .cs-sbg{fill:color-mix(in srgb,var(--ink) 5%,transparent)}
+.cam-strip .cs-snd{fill:var(--faint)} .cam-strip .cs-snd.k2{fill:var(--sun)} .cam-strip .cs-snd.k3{fill:var(--danger)} .cam-strip .cs-snd.k4{fill:var(--milk,#78a6f0)}
+.cam-strip .cs-cry path{fill:var(--danger)} .cam-strip .cs-cry.par path{fill:var(--faint)}
+.cam-strip .cs-place line{stroke:var(--sleep);stroke-width:1.3} .cam-strip .cs-place path{fill:var(--sleep)}
+.cam-strip .cs-place .cs-settle{stroke:var(--acc);stroke-width:3;stroke-linecap:round}
+.cam-strip .cs-pos{fill:var(--ink-2)}
+.cs-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:.66rem;font-weight:700;color:var(--muted);margin:-4px 2px 8px}
+.cs-legend span{display:inline-flex;align-items:center;gap:5px} .cs-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.lg-place{background:var(--sleep)} .lg-feed{background:var(--feed);border-radius:50%!important} .lg-mv{background:var(--sleep);opacity:.7}
+.lg-sleep{background:color-mix(in srgb,var(--sleep) 22%,transparent)} .lg-out{background:var(--faint);opacity:.45} .lg-pos{background:var(--ink-2);border-radius:50%!important}
+.lg-cry{background:var(--danger)} .lg-voice{background:var(--sun)}
+.cam-sound{margin:10px 2px 2px;display:grid;gap:3px} .cs-sline{font-size:.78rem;color:var(--ink-2)} .cs-sline.muted{color:var(--muted);font-size:.72rem}
+/* mapa ruchu */
+.hm-seg{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.hm-seg button{font:700 .72rem var(--fu);padding:6px 11px;border-radius:999px;border:1px solid var(--brd);background:var(--card-2);color:var(--ink-2);cursor:pointer}
+.hm-seg button.on{background:color-mix(in srgb,var(--sleep) 16%,var(--card-solid));border-color:color-mix(in srgb,var(--sleep) 50%,transparent);color:var(--ink)}
+.hm-stage{position:relative;aspect-ratio:16/9;border-radius:var(--r3);overflow:hidden;background:repeating-linear-gradient(0deg,color-mix(in srgb,var(--ink) 4%,transparent) 0 1px,transparent 1px 11.11%),repeating-linear-gradient(90deg,color-mix(in srgb,var(--ink) 4%,transparent) 0 1px,transparent 1px 6.25%),var(--card-2);border:1px solid var(--brd)}
+.hm-cv{position:absolute;inset:0;width:100%;height:100%;image-rendering:auto;filter:blur(1.5px)}
+.hm-zones{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hm-zones .hz{fill:none;stroke-width:.04;stroke-opacity:.7} .hz.z1{stroke:var(--milk,#78a6f0)} .hz.z2{stroke:var(--acc)} .hz.z3{stroke:var(--sun)} .hz.z4{stroke:var(--bath)}
+.hm-zones .hz-t{font:800 .55px var(--fu);fill:var(--ink);opacity:.75}
+.hm-ctl{display:flex;align-items:center;gap:10px;margin-top:8px}
+.hm-play{width:36px;height:36px;border-radius:12px;border:1px solid var(--brd);background:var(--card-2);color:var(--ink-2);font-size:.8rem;cursor:pointer;flex-shrink:0}
+.hm-rng{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:8px;border-radius:999px;background:color-mix(in srgb,var(--sleep) 18%,var(--card-2));border:1px solid var(--brd);margin:0}
+.hm-rng::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--sleep);border:3px solid var(--card-solid);box-shadow:0 1px 4px rgba(0,0,0,.25);cursor:pointer}
+.hm-rng::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--sleep);border:3px solid var(--card-solid);cursor:pointer}
+.hm-rng:focus-visible{outline:2px solid var(--sleep);outline-offset:3px} .hm-lab{font-size:.74rem;font-weight:800;color:var(--ink-2);min-width:84px;text-align:right}
+.hm-play:focus-visible,.hm-seg button:focus-visible{outline:2px solid var(--sleep);outline-offset:2px}
+.hm-zbars{display:grid;gap:6px;margin-top:12px}
+.hz-row{display:grid;grid-template-columns:76px minmax(0,1fr) 40px;gap:8px;align-items:center}
+.hz-n{font-size:.74rem;font-weight:800;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hz-bar{height:9px;border-radius:999px;background:var(--card-2);border:1px solid var(--brd);overflow:hidden}
+.hz-bar i{display:block;height:100%;border-radius:999px} .hz-bar i.z1{background:var(--milk,#78a6f0)} .hz-bar i.z2{background:var(--acc)} .hz-bar i.z3{background:var(--sun)} .hz-bar i.z4{background:var(--bath)}
+.hz-p{font-size:.72rem;font-weight:800;color:var(--muted);text-align:right}
+/* rytm, kobierzec, wpływ */
+.cam-rh .rh-sleep{fill:color-mix(in srgb,var(--sleep) 9%,transparent)} .cam-rh .rh-area{fill:color-mix(in srgb,var(--sleep) 26%,transparent)}
+.cam-rh .rh-line{fill:none;stroke:var(--sleep);stroke-width:1.6;stroke-linejoin:round} .cam-rh .rh-pk{fill:var(--feed);stroke:var(--card-solid);stroke-width:1.2}
+.carpet .cp{fill:var(--sleep)} .carpet .cp-na{fill:var(--faint);opacity:.18}
+.inf{display:grid;gap:10px}
+.inf-card{padding:12px;border-radius:var(--r3);background:var(--card-2);border:1px solid var(--brd);position:relative}
+.inf-h{font-weight:800;font-size:.84rem;color:var(--ink);margin-bottom:6px;padding-right:64px}
+.inf-tag{position:absolute;top:11px;right:12px;font-size:.62rem;font-weight:800;color:var(--sun);border:1px solid color-mix(in srgb,var(--sun) 45%,transparent);border-radius:999px;padding:2px 7px}
+.inf-wait{font-size:.74rem;color:var(--muted)}
+.inf-row{display:flex;align-items:center;gap:8px;font-size:.76rem;color:var(--ink-2);padding:2px 0}
+.inf-row i{width:8px;height:8px;border-radius:50%;background:var(--faint);flex-shrink:0}
+.inf-row.good i{background:var(--acc)} .inf-row.bad i{background:var(--danger)} .inf-row.flat{color:var(--muted)}
+@media (max-width:420px){.nw-row{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 54px 74px}.nw-spark{width:54px}}
 .cam-nights .cn-bar{cursor:pointer}
 .cam-nights .cn-bar .cn-fill{opacity:.78;transition:opacity .15s}
 .cam-nights .cn-bar:hover .cn-fill,.cam-nights .cn-bar.sel .cn-fill{opacity:1}
@@ -973,7 +1040,9 @@ svg .f{fill:currentColor;fill-opacity:.2}
 
   <!-- ========================= PODSTRONA: SEN ========================= -->
   <main class="page" id="page-sleep" data-page="sleep" hidden>
-    <div class="sec"><h2>Sen</h2></div>
+    <div class="sec"><h2>Ostatnia noc</h2><span class="muted-note">kamera w łóżeczku i dziennik</span></div>
+    <section class="card"><div id="nightStats"><p class="empty">Wczytywanie…</p></div></section>
+    <div class="sec" style="margin-top:22px"><h2>Sen</h2></div>
     <section class="card">
       <div class="sleep-hero"><div class="sleep-big" id="sleepBig">—</div><div class="sleep-bar" id="sleepBar"><span id="sleepBarText">—</span></div><div class="sleep-window" id="sleepWindow"></div></div>
       <button class="btn sleep" id="sleepToggleBtn" data-action="sleep" style="margin-top:16px">Zasnął</button>
@@ -982,6 +1051,10 @@ svg .f{fill:currentColor;fill-opacity:.2}
     </section>
     <div class="sec" style="margin-top:22px"><h2>Jakość snu nocą</h2><span class="muted-note">z kamery: ruch w łóżeczku</span></div>
     <section class="card"><div id="camSleep"><p class="empty">Wczytywanie…</p></div></section>
+    <div class="sec" style="margin-top:22px"><h2>Kobierzec nocy</h2><span class="muted-note">aktywność co 30 min, noc po nocy</span></div>
+    <section class="card"><div id="nightCarpet"><p class="empty">Wczytywanie…</p></div></section>
+    <div class="sec" style="margin-top:22px"><h2>Co wpływa na sen</h2><span class="muted-note">kąpiel, karmienia, drzemki, pogoda</span></div>
+    <section class="card"><div id="nightInfluence"><p class="empty">Wczytywanie…</p></div></section>
   </main>
 </div>
 

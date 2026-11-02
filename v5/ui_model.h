@@ -65,6 +65,8 @@ struct UiModel {
   int bathInterval = 3, bathSinceDays = -1, bathNextDay = 0; char bathLastTxt[32] = "", bathNextTxt[40] = "";
   // kafelki "dzis"
   int todayFeed = 0, todayMl = 0, todayDiapers = 0; bool todayBath = false;
+  // ostatnia noc z kamery (z /api/status); camRating: 0 brak, 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 malo danych
+  char camLine[96] = ""; uint8_t camRating = 0;
 };
 
 // Ekran DIAGNOSTYKA: gotowy tekst (budowany przez diag.cpp).
