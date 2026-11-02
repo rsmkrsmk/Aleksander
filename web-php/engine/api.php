@@ -8,7 +8,7 @@
      GET  /api/status | /api/entries?date= | /api/weight-series | /api/bath-calendar | /export.csv
      POST /api/entry | /api/delete-entry | /api/event | /api/send-backup
           /api/import | /api/upload-data | /api/update-feeding | /api/setting
-     Noce z kamery (jakosc snu): POST /api/sleep-night (z kluczem) | GET /api/sleep-nights?days=14
+     Noce z kamery (jakosc snu): POST /api/sleep-night | GET /api/sleep-nights?days=14
           | GET /api/sleep-night?night=RRRR-MM-DD
    ============================================================================ */
 declare(strict_types=1);
@@ -362,9 +362,6 @@ function handle_api(string $route, string $method, Repository $repo): void
 
     /* ---- Noce z kamery (serwer domowy t620 -> hosting), patrz engine/SleepNights.php ---- */
     if ($route === 'sleep-night' && $method === 'POST') {
-        $need = SleepNights::key();
-        if ($need === '') sendJson(503, ['message' => 'Odbior nocy wylaczony: brak klucza (data/noce_klucz.txt albo NOCE_KLUCZ).']);
-        if (!hash_equals($need, SleepNights::requestKey())) sendJson(403, ['message' => 'Brak lub bledny klucz.']);
         $raw = '';
         if (!empty($_FILES['file']['tmp_name']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
             $raw = (string)file_get_contents($_FILES['file']['tmp_name']);
@@ -407,7 +404,7 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === realpath(__FILE__)) {
         if (Config::corsOrigin() !== '') {
             apiCorsHeader();
             header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type, X-Upload-Token, X-Klucz, Authorization');
+            header('Access-Control-Allow-Headers: Content-Type, X-Upload-Token');
         }
         http_response_code(204); exit;
     }

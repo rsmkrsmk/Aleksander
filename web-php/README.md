@@ -40,7 +40,7 @@ CSV jest źródłem prawdy.
 `POST /api/event` · `POST /api/setting` · `POST /api/import` ·
 `POST /api/upload-data` · `POST /api/send-backup` · `GET /export.csv`
 
-Dodane 02.11.2026: `POST /api/sleep-night` (z kluczem) · `GET /api/sleep-nights?days=14` ·
+Dodane 02.11.2026: `POST /api/sleep-night` · `GET /api/sleep-nights?days=14` ·
 `GET /api/sleep-night?night=RRRR-MM-DD`. `GET /api/weight-series` zwraca dodatkowo `weeks`
 (słupki przyrostu dla każdego tygodnia życia) i `recent` (trend z ostatnich ~14 dni).
 
@@ -127,16 +127,11 @@ Serwer domowy (t620, kontener „kamery”, `zapisywacz.py` z repozytorium **wie
 ok. 3 min po końcu nocy (06:00), wysyła plik danych zakończonej nocy. Strona zapisuje go bez zmian
 w `data/noce/noc_RRRR-MM-DD.json`, liczy wskaźniki i trzyma je w `data/noce/index.json`.
 
-**Włączenie odbioru (jednorazowo):** w katalogu danych (`panel-data/`, obok `karmienia.csv`)
-utwórz plik `noce_klucz.txt` z długim losowym kluczem w pierwszej linii, np. z
-`openssl rand -hex 24`. Alternatywnie ustaw zmienną środowiskową `NOCE_KLUCZ`. Bez klucza
-endpoint odpowiada `503`, a ze złym kluczem `403`. Plik klucza nie trafia do repozytorium.
+Odbiór działa od razu po wgraniu plików, **bez klucza i haseł** (jak reszta API; zabezpieczenie
+całego portalu przyjdzie później). Katalog `noce/` w danych tworzy się sam przy pierwszej nocy.
 
 - **Żądanie:** `POST https://TWOJA-DOMENA/api/sleep-night`, multipart (pole `file` = JSON nocy).
   Multipart jest zalecany ze względu na WAF hostingu. Działa też surowy JSON w ciele.
-- **Klucz:** `Authorization: Bearer KLUCZ`, `X-Klucz: KLUCZ` albo pole formularza `klucz`.
-  Część hostingów obcina nagłówek `Authorization`; `ui/.htaccess` go przekazuje, a pozostałe
-  dwie drogi działają zawsze.
 - **Odpowiedź:** `200` `{"message":"Zapisano noc …","night":"…","metrics":{…}}`. Błędy:
   `400` (zły/pusty JSON, brak `night`/`timeline`/`summary`, > 1 MB).
 - Ta sama noc wysłana ponownie nadpisuje poprzednią wersję.
@@ -144,8 +139,7 @@ endpoint odpowiada `503`, a ze złym kluczem `403`. Plik klucza nie trafia do re
 Test z serwera domowego:
 
 ```bash
-curl -s -X POST "https://TWOJA-DOMENA/api/sleep-night" -H "X-Klucz: KLUCZ" \
-     -F "file=@/data/dane/noc_2026-11-01.json"
+curl -s -X POST "https://TWOJA-DOMENA/api/sleep-night" -F "file=@/data/dane/noc_2026-11-01.json"
 ```
 
 **Wskaźniki** (`SleepNights::metrics`). Kamera widzi tylko ruch w łóżeczku, więc to nie jest
@@ -198,7 +192,7 @@ Zalecany układ (dane i silnik **poza** katalogiem publicznym):
 ```
 ~/public_html/     ← zawartość web-php/ui/     (index.php, index.html, app.js, paths.php, .htaccess)
 ~/panel-engine/    ← zawartość web-php/engine/
-~/panel-data/      ← zawartość web-php/data/   (zapisywalny; tu też noce_klucz.txt i katalog noce/)
+~/panel-data/      ← zawartość web-php/data/   (zapisywalny; tu też katalog noce/)
 ```
 
 1. W `ui/paths.php` włącz wariant cPanel (zakomentuj domyślne `define`, odkomentuj

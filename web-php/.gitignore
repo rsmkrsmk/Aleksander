@@ -3,6 +3,5 @@ data/karmienia_backup.csv
 data/ustawienia.cfg
 # Kopie zapasowe tworzone przy przyjeciu pliku z zewnatrz (POST /api/upload-data).
 data/*.bakap
-# Noce z kamery (wysylane co rano z serwera domowego) i klucz odbioru — nie do repozytorium.
+# Noce z kamery (wysylane co rano z serwera domowego) — nie do repozytorium.
 data/noce/
-data/noce_klucz.txt

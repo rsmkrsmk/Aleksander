@@ -4,8 +4,8 @@
 
    Źródło: serwer domowy t620 (kontener "kamery", usługa zapisywacz.py) co rano wysyła
    plik danych zakończonej nocy: POST /api/sleep-night (multipart, pole "file" = JSON
-   albo surowy JSON), klucz w nagłówku "Authorization: Bearer KLUCZ", "X-Klucz: KLUCZ"
-   albo w polu formularza "klucz".
+   albo surowy JSON). Bez uwierzytelniania — jak reszta API (zabezpieczenie hasłami ma
+   przyjść później dla całego portalu).
 
    Plik nocy (wersja 1) zawiera m.in.: night (data wieczoru), start/end, start_ts/end_ts,
    minutes, timeline (klatki z ruchem w każdej minucie, 0..120 przy 2 kl./s), events
@@ -28,32 +28,6 @@ final class SleepNights
     {
         $d = getenv('NOCE_DIR') ?: (dirname(Config::dataFile()) . '/noce');
         return rtrim($d, '/');
-    }
-
-    /** Klucz odbioru: zmienna środowiskowa NOCE_KLUCZ albo pierwsza linia pliku data/noce_klucz.txt. */
-    public static function key(): string
-    {
-        $v = getenv('NOCE_KLUCZ');
-        if ($v !== false && trim($v) !== '') return trim($v);
-        $f = dirname(Config::dataFile()) . '/noce_klucz.txt';
-        if (is_file($f)) {
-            $line = strtok((string)file_get_contents($f), "\r\n");
-            return $line === false ? '' : trim($line);
-        }
-        return '';
-    }
-
-    /** Klucz podany w żądaniu (kilka dróg, bo część hostingów obcina nagłówek Authorization). */
-    public static function requestKey(): string
-    {
-        $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-        if ($auth === '' && function_exists('getallheaders')) {
-            foreach ((array)getallheaders() as $k => $v) if (strcasecmp((string)$k, 'Authorization') === 0) $auth = (string)$v;
-        }
-        if (preg_match('/^Bearer\s+(\S+)/i', $auth, $m)) return $m[1];
-        if (!empty($_SERVER['HTTP_X_KLUCZ'])) return trim((string)$_SERVER['HTTP_X_KLUCZ']);
-        if (isset($_POST['klucz'])) return trim((string)$_POST['klucz']);
-        return '';
     }
 
     /** Przyjmuje surowy JSON nocy. Zwraca [kod HTTP, odpowiedź]. */
