@@ -1,6 +1,6 @@
 # Projekt: rozszerzona analiza nocy z kamery
 
-Status: **ZATWIERDZONY w częściach** (2.11.2026): D1–D5 ustalone (rozdział 13), kolejność etapów (D6) czeka na potwierdzenie. Nic z tego dokumentu nie jest jeszcze zakodowane.
+Status: **ZATWIERDZONY** (2.11.2026). Etap 0 wykonany, **etap 1 zakodowany** (repo `wiewiornik` 32287e1, hosting: odbiór v2). Kolejne etapy po kilku nocach danych.
 Dotyczy trzech miejsc: serwer t620 (repo `wiewiornik`), hosting (`web-php/`), urządzenie ESP32 (`v5/`).
 
 ## 1. Cel i zasady
@@ -33,7 +33,7 @@ kamera ─ strumień dodatkowy ─► ruch1.py (v2) ─► /data/cechy/RRRR-MM-D
         │                                    └► /data/noce/<noc>/heat.json (mapy w czasie)
         └ strumień główny ─► kamera1 (segmenty 60 s, z dźwiękiem jeśli kamera go ma)
                                   └► dzwiek1.py (nowy) ─► /data/dzwiek/RRRR-MM-DD.jsonl.gz + próbki .ogg
-rano, ~3 min po 6:00:  zapisywacz.py składa paczkę nocy v2  (okno 18:30–08:00)
+rano, ~3 min po 6:00:  zapisywacz.py składa paczkę nocy v2  (okno 18:30–06:00)
         └► POST /api/sleep-night (multipart) ─► hosting: zapis surowy + przeliczenie wskaźników
 hosting: /api/sleep-nights, /api/sleep-stats, /api/sleep-night?night=… ─► strona (wykresy) i /api/status ─► urządzenie
 ```
@@ -44,11 +44,11 @@ hosting: /api/sleep-nights, /api/sleep-stats, /api/sleep-night?night=… ─► 
 
 | Pole | Treść |
 |---|---|
-| `window` | `{start_ts, end_ts}` okno cech: **18:30–08:00** (żeby złapać położenie przed 20:30) |
+| `window` | `{start, end, start_ts, end_ts, coverage_pct}` okno pracy: **18:30–06:00** (żeby złapać położenie przed 20:30; poza oknem kamera stoi, D7) |
 | `bin_s` | 5 |
-| `feat` | tablice równoległe po `bin_s`: `m` (% obrazu zmienionego w masce łóżeczka ×10), `t` (% całego obrazu ×10), `c` (liczba klatek z ruchem 0–10), `cx`, `cy` (środek zmiany 0–255), `a` (obszar zmiany, % maski ×10), `z` (4 liczby na komórkę: udział stref A–D) |
+| `feat` | tablice równoległe po `bin_s`: `m` (największy % obrazu zmienionego w masce łóżeczka ×10), `t` (to samo dla całego kadru), `c` (klatki z ruchem 0–10; −1 = brak danych), `cx`, `cy` (środek zmiany 0–255; −1 = brak ruchu). Udział stref A–D liczy t620 z zapisanej lokalnie siatki 16×9 (`/data/cechy`), więc strefy narysowane później działają też wstecz (60 dni) |
 | `light` | zdarzenia zmiany światła/IR (ignorowane jako ruch) |
-| `heat` | `night`: mapa 80×45 (0–255, skala log), `slices`: mapy 40×23 co 60 min, `grid`: opis stref |
+| `heat` | jak w v1 (32×18) + `night80`: mapa 80×45 (0–255, skala log), `slices`: mapy 40×23 dla każdej godziny zegarowej |
 | `pose` | wyniki porównań spokojnych bloków: `[{t, score}]` (zmiany pozycji) |
 | `audio` | `present` (czy kamera ma dźwięk), `level_1min` (dB nad tłem, co minutę), `events` (`start_ts`, `dur_s`, `class`, `level_db`, `score`, `sample`), `samples` (nazwy próbek) |
 | `weather` | `night_min`, `night_mean`, `day_mean` (12–20), `source` |
@@ -177,7 +177,7 @@ Zmiana minimalna: `fetchStatusSettings()` czyta już `/api/status`; dochodzi par
 |---|---|
 | `kamery/ruch1.py` | cechy 5 s całą dobę, mapy czasowe, strefy, wzorce spokojnych bloków i `score` pozycji, zdarzenia światła; dotychczasowe klipy i `heat.json` bez zmian |
 | `kamery/dzwiek1.py` + `.service` | nowa usługa dźwięku (rozdział 5.7) |
-| `kamery/zapisywacz.py` | paczka v2 (okno 18:30–08:00, `audio`, `weather`, `pose`), pobranie temperatury z Open-Meteo, endpointy `/noce/dzwiek/…` (próbki w sieci domowej), `/noce/wyslij` bez zmian |
+| `kamery/zapisywacz.py` | paczka v2 (okno 18:30–06:00, `audio`, `weather`, `pose`), pobranie temperatury z Open-Meteo, endpointy `/noce/dzwiek/…` (próbki w sieci domowej), `/noce/wyslij` bez zmian |
 | `kamery/index.html` | pędzel stref, zapis wzorca „puste łóżeczko”, przeglądarka próbek dźwięku |
 | `kamery/wdroz-ruch.sh` | instalator: nowe pliki i usługa, katalogi `/data/cechy`, `/data/dzwiek` |
 | `INSTRUKCJA.md`, `README.md` | kroki wdrożenia, kontrola, rozwiązywanie problemów |
@@ -197,7 +197,7 @@ Zużycie miejsca: cechy ok. 100 kB dziennie (gz, 60 dni ≈ 6 MB), próbki dźwi
 | Etap | Zakres | Gdzie | Kryterium odbioru |
 |---|---|---|---|
 | **0** | sprawdzenie, czy kamera ma dźwięk (2 polecenia) | t620 | wiemy: jest / nie ma |
-| **1** | zbieranie cech v2 (ruch co 5 s, okno 18:30–08:00, mapy czasowe), paczka v2, odbiór v2 | t620, hosting | po nocy na stronie jest noc v2, stary wykres działa jak dotąd |
+| **1** | zbieranie cech v2 (ruch co 5 s, okno 18:30–06:00, mapy czasowe), paczka v2, odbiór v2 | t620, hosting | po nocy na stronie jest noc v2, stary wykres działa jak dotąd |
 | **2** | bloki, rytm, kobierzec, trend tygodniowy (na dotychczasowych i nowych nocach) | hosting | widoki rysują się dla wszystkich nocy; ▲▼ tylko przy ≥ 4 nocach/tydzień |
 | **3** | położenie i zasypianie (+ status „sen aktywny”) | hosting | karta „Zasypianie”; zgodność z `SEN_START` zmierzona na realnych nocach |
 | **4** | mapy czasowe, strefy, rodzaje ruchu, zmiany pozycji | t620, hosting | suwak godziny, strefy, lista zmian pozycji |
@@ -221,9 +221,10 @@ Każdy etap kończy się aktualizacją repo i opisem krok po kroku (bez zip, bez
 
 | # | Decyzja | Ustalenie użytkownika (2.11.2026) |
 |---|---|---|
-| **D1** | Czy kamera ma dźwięk | użytkownik: kamera nagrywa dźwięk; **do potwierdzenia poleceniami z etapu 0** |
+| **D1** | Czy kamera ma dźwięk | etap 0: ścieżka audio jest (AAC, **8 kHz**, mono), ale **cisza** (średnio −91 dB, szczyt −84 dB) — mikrofon wyłączony w ustawieniach kamery; do włączenia w aplikacji Tenda i ponownego pomiaru. 8 kHz wystarcza do płaczu (F0 i harmoniczne do 4 kHz) |
 | **D2** | Próbki dźwięku | **tylko na t620**; na hostingu znaczniki płaczu bez odtwarzania, odtwarzanie dopiero po wdrożeniu haseł dla portalu |
 | **D3** | Wygląd na stronie | **statystyki na górze podstrony Sen**, czytelnie (rozdział 7); linia na urządzeniu (firmware 5.2.0) na końcu |
-| **D4** | Okno logowania cech | **od 18:30** (dziecko nigdy nie śpi wcześniej); do 08:00 |
+| **D4** | Okno logowania cech | **od 18:30** (dziecko nigdy nie śpi wcześniej); do 06:00 |
 | **D5** | Strefy łóżeczka A–D | tak, rysuje je użytkownik na stronie kamer (algorytm sam ich nie wyznaczy) |
-| **D6** | Kolejność etapów 0 → 7 (rozdział 11) | czeka na potwierdzenie |
+| **D6** | Kolejność etapów 0 → 7 (rozdział 11) | zatwierdzona |
+| **D7** | Praca kamery poza nocą | **6:00–18:30 kamera czeka bezczynnie** (dziecka nie ma w łóżeczku): nagrywanie zatrzymane przez strażnika `kamery-straznik.sh` (zatrzymanie 5 min po końcu okna), detektor bez zdarzeń i cech; podgląd na żywo działa zawsze. Okno edytowane na stronie kamer (`active_start`, `active_end`) |

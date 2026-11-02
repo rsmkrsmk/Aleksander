@@ -211,9 +211,10 @@ Serwer domowy (t620, kontener „kamery”, `zapisywacz.py` z repo **wiewiornik*
 ### 10.2 Odbiór: `POST /api/sleep-night`
 
 - **Żądanie:** multipart, pole `file` = JSON nocy (działa też surowy JSON w ciele). Bez klucza i haseł.
-- **Walidacja:** niepusty, ≤ 1 MB, poprawny JSON, pola `night` (data wieczoru `RRRR-MM-DD`), `timeline` i `summary`.
+- **Wersje:** 1 (oś minut, ruchy, podsumowanie) i 2 (od 11.2026: dodatkowo okno pracy 18:30–06:00, cechy ruchu co 5 s `feat`, mapy `heat.night80` i godzinowe `heat.slices`). Obie są przyjmowane; wskaźniki z pól wersji 2 dochodzą w kolejnych etapach (`docs/PROJEKT_ANALIZA_NOCY.md`). W `/api/sleep-nights` każda noc ma `version` i `featCoveragePct`.
+- **Walidacja:** niepusty, ≤ 2 MB, poprawny JSON, pola `night` (data wieczoru `RRRR-MM-DD`), `timeline` i `summary`.
 - **Zapis:** bez zmian w `data/noce/noc_RRRR-MM-DD.json`, wskaźniki w `data/noce/index.json` (zapis atomowy z blokadą). Katalog `noce/` tworzy się sam. Ta sama noc wysłana ponownie nadpisuje poprzednią.
-- **Odpowiedź:** `200` `{"message":"Zapisano noc …","night":"…","metrics":{…}}`; `400` przy złych danych, `500` gdy nie da się zapisać.
+- **Odpowiedź:** `200` `{"message":"Zapisano noc …","night":"…","metrics":{…}}`; `400` przy złych danych (także gdy plik przekroczy limit serwera `upload_max_filesize` — komunikat podaje limit), `500` gdy nie da się zapisać.
 
 ```bash
 curl -s -X POST "https://phpmapy1.webd.pro/api/sleep-night" -F "file=@/data/dane/noc_2026-11-01.json"
