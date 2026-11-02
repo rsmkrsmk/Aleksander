@@ -30,6 +30,10 @@ final class Config
     const WEIGHT_MAX_G = 15000;
     const DEFAULT_WEIGHT_G = 3700;
     const BIRTH_WEIGHT_G = 3080;
+    // Referencyjny przyrost wagi (slupki tygodniowe): od wypisu ze szpitala, granice okresow.
+    const GAIN_DISCHARGE_DAY = 2;
+    const GAIN_P1_END_DAY = 91;    // ~3 miesiace (3 x 30,44 dnia): 25-30 g/dzien
+    const GAIN_P2_END_DAY = 183;   // ~6 miesiecy: 15-20 g/dzien, potem 10-15
 
     // Planowany odstep miedzy kapielami (dni) — uzywany przez mini kalendarz kapieli.
     const BATH_INTERVAL_DAYS = 3;

@@ -25,6 +25,7 @@ robi przez API silnika. Dzięki temu MySQL włącza się wyłącznie w silniku, 
 | `MysqlRepository.php` | magazyn MySQL **+ backup CSV przy każdym zapisie** |
 | `bootstrap.php` | wybiera magazyn wg configu (fallback na CSV) |
 | `api.php` | publiczne API HTTP (endpointy `/api/*`, `/export.csv`) + CORS |
+| `SleepNights.php` | noce z kamery (jakość snu nocą): odbiór pliku nocy z serwera domowego, wskaźniki, magazyn `data/noce/` |
 | `schema.sql` | schemat tabel MySQL |
 
 **CSV zawsze jest backupem.** W trybie `mysql` bazą danych jest MySQL, ale każdy
@@ -38,6 +39,10 @@ CSV jest źródłem prawdy.
 `GET /api/weight-series` · `POST /api/entry` · `POST /api/delete-entry` ·
 `POST /api/event` · `POST /api/setting` · `POST /api/import` ·
 `POST /api/upload-data` · `POST /api/send-backup` · `GET /export.csv`
+
+Dodane 02.11.2026: `POST /api/sleep-night` · `GET /api/sleep-nights?days=14` ·
+`GET /api/sleep-night?night=RRRR-MM-DD`. `GET /api/weight-series` zwraca dodatkowo `weeks`
+(słupki przyrostu dla każdego tygodnia życia) i `recent` (trend z ostatnich ~14 dni).
 
 Urządzenia mogą uderzać wprost w silnik: `…/engine/api.php?route=status` (GET) itd.
 
@@ -98,6 +103,64 @@ curl -X POST "https://TWOJA-DOMENA/api/upload-data" \
 > link **„wgraj CSV"** — wskazuje plik i wysyła go tym samym endpointem. To wersja
 > testowa; docelowo przeniesiemy ten przycisk w inne miejsce.
 
+### Przyrost wagi — słupki tygodniowe (`GET /api/weight-series` → `weeks`)
+
+Serwer liczy jeden słupek na **każdy** tydzień życia, od 1. do tygodnia ostatniego ważenia.
+Obie strony (nowoczesna i prosta) tylko go rysują. Wartość (g/dzień) to trend z ważeń
+(regresja liniowa), bo pojedyncze ważenia różnią się nawet o 100 g:
+
+1. okno ±7 dni wokół środka tygodnia (co najmniej 2 ważenia odległe o ≥ 5 dni),
+2. przy mniejszej liczbie ważeń okno rośnie do ±10, ±14, ±21 dni,
+3. w ostateczności wartość wynika z dwóch najbliższych ważeń przed i po tygodniu.
+
+Kroki 2–3 oznaczają słupek jako `estimated` (jaśniejszy, z przerywaną ramką, w legendzie
+„szacunek (mało ważeń)”). Waga urodzeniowa (`BIRTH_WEIGHT_G`) to punkt dnia 0. Wcześniej
+tydzień bez 2 ważeń w oknie ±7 dni dostawał „–” (dziury).
+
+Odświeżanie: strona wagi (nowoczesna) i okno wagi (prosta) w pętli co 10 s sprawdzają
+`/api/weight-series` i rysują oba wykresy od nowa, gdy zmienią się pomiary albo dzień życia.
+Po zapisie pomiaru odświeżają się oba wykresy (wcześniej tylko linia).
+
+### Noce z kamery — jakość snu nocą (`POST /api/sleep-night`)
+
+Serwer domowy (t620, kontener „kamery”, `zapisywacz.py` z repozytorium **wiewiornik**) co rano,
+ok. 3 min po końcu nocy (06:00), wysyła plik danych zakończonej nocy. Strona zapisuje go bez zmian
+w `data/noce/noc_RRRR-MM-DD.json`, liczy wskaźniki i trzyma je w `data/noce/index.json`.
+
+Odbiór działa od razu po wgraniu plików, **bez klucza i haseł** (jak reszta API; zabezpieczenie
+całego portalu przyjdzie później). Katalog `noce/` w danych tworzy się sam przy pierwszej nocy.
+
+- **Żądanie:** `POST https://TWOJA-DOMENA/api/sleep-night`, multipart (pole `file` = JSON nocy).
+  Multipart jest zalecany ze względu na WAF hostingu. Działa też surowy JSON w ciele.
+- **Odpowiedź:** `200` `{"message":"Zapisano noc …","night":"…","metrics":{…}}`. Błędy:
+  `400` (zły/pusty JSON, brak `night`/`timeline`/`summary`, > 1 MB).
+- Ta sama noc wysłana ponownie nadpisuje poprzednią wersję.
+
+Test z serwera domowego:
+
+```bash
+curl -s -X POST "https://TWOJA-DOMENA/api/sleep-night" -F "file=@/data/dane/noc_2026-11-01.json"
+```
+
+**Wskaźniki** (`SleepNights::metrics`). Kamera widzi tylko ruch w łóżeczku, więc to nie jest
+pomiar faz snu.
+
+| Wskaźnik | Definicja |
+|---|---|
+| spokój (`quietPct`) | % minut nocy bez ruchu (`timeline[i] == 0`) |
+| najdłuższy spokój | najdłuższy odcinek bez ruchu, z detektora (`longest_quiet_s`) |
+| epizody ruchu | minuty z ruchem połączone, gdy przerwa < 5 min; „dłuższe” = co najmniej 3 minuty z ruchem |
+| ocena | `spokojna`: ≥ 90% i ≥ 2,5 h spokoju ciągiem · `niespokojna`: < 75% albo > 10 dłuższych epizodów · `umiarkowana`: pozostałe · `brak-danych`: kamera obserwowała < 60% nocy |
+
+**Widok:** nowoczesna strona → Sen → „Jakość snu nocą”:
+- wybór nocy strzałkami albo dotknięciem słupka,
+- duży wskaźnik spokoju z oceną,
+- pasek nocy z ruchem minuta po minucie i karmieniami z dziennika (pomarańczowe znaczniki),
+- 6 kafelków,
+- wykres ostatnich 14 nocy (najdłuższy spokój, kolor wg oceny, nad słupkiem % minut bez ruchu).
+
+Dane są odświeżane co 5 min. Prosta strona bez zmian graficznych.
+
 ## Warstwa wizualna (`ui/`)
 
 | Plik | Rola |
@@ -129,7 +192,7 @@ Zalecany układ (dane i silnik **poza** katalogiem publicznym):
 ```
 ~/public_html/     ← zawartość web-php/ui/     (index.php, index.html, app.js, paths.php, .htaccess)
 ~/panel-engine/    ← zawartość web-php/engine/
-~/panel-data/      ← zawartość web-php/data/   (zapisywalny)
+~/panel-data/      ← zawartość web-php/data/   (zapisywalny; tu też katalog noce/)
 ```
 
 1. W `ui/paths.php` włącz wariant cPanel (zakomentuj domyślne `define`, odkomentuj

@@ -12,6 +12,7 @@ require_once __DIR__ . '/Domain.php';
 require_once __DIR__ . '/Repository.php';
 require_once __DIR__ . '/CsvRepository.php';
 require_once __DIR__ . '/MysqlRepository.php';
+require_once __DIR__ . '/SleepNights.php';
 
 function make_repository(): Repository
 {

@@ -82,8 +82,8 @@ function navTo(page){
 function renderPage(page){
   if(page==='diary'){state.activeDay=null;const dd=$('diaryDetail');if(dd)dd.classList.add('hidden');if(state.data)renderCalendarPreview(state.data.calendar)}
   else if(page==='stats'){renderStatView(state.statView)}
-  else if(page==='weight'){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');renderWeightChart();renderGainChart()}
-  else if(page==='sleep'){renderSleep()}
+  else if(page==='weight'){const d=state.data||{};$('weightG').value=(d.lastWeightG&&d.lastWeightG>0)?d.lastWeightG:3700;setText('weightNotice','');refreshWeightCharts(true)}
+  else if(page==='sleep'){renderSleep();renderCamSleep(true)}
 }
 /* Przełącznik widoków w Statystykach: summary | charts | rhythm | history */
 const STAT_VIEWS=['summary','charts','rhythm','history'];
@@ -193,7 +193,8 @@ function render(data){
   renderDiag(data);
   // odśwież żywe fragmenty aktywnej podstrony (polling co 10 s)
   if(state.page==='diary'&&!state.activeDay)renderCalendarPreview(data.calendar);
-  else if(state.page==='sleep')renderSleep();
+  else if(state.page==='sleep'){renderSleep();renderCamSleep(false)}
+  else if(state.page==='weight')refreshWeightCharts(false);
 }
 /* Rozdziela wpis "…  HH:MM \n szczegóły" na czas + opis dla mini-kart. */
 function fillMini(timeId,descId,value,ago,bottle){
@@ -913,6 +914,104 @@ function renderSleep(){
 }
 
 /* ============================================================================
+   SEN Z KAMERY — jakość snu nocą wg ruchu w łóżeczku
+   Dane: serwer domowy (t620, zapisywacz) co rano wysyła plik zakończonej nocy na
+   POST /api/sleep-night; tu czytamy /api/sleep-nights (wskaźniki nocy) i
+   /api/sleep-night?night= (oś minut do paska nocy). Odświeżanie co 5 min (dane
+   przychodzą raz na dobę), wybór nocy strzałkami albo dotknięciem słupka.
+   ============================================================================ */
+const CAM_RATING={spokojna:{t:'spokojna',c:'var(--acc)'},umiarkowana:{t:'umiarkowana',c:'var(--sun)'},niespokojna:{t:'niespokojna',c:'var(--feed)'},'brak-danych':{t:'mało danych z kamery',c:'var(--faint)'}};
+const camState={t:0,nights:[],sel:null,detail:{}};
+function camNightLabel(iso){const d=new Date(iso+'T12:00:00'),n=new Date(d.getTime()+86400000);const mo=['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];return d.getMonth()===n.getMonth()?`${d.getDate()}/${n.getDate()} ${mo[n.getMonth()]}`:`${d.getDate()} ${mo[d.getMonth()]} / ${n.getDate()} ${mo[n.getMonth()]}`}
+const camHM=m=>{const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${pad(mm)} min`:`${mm} min`};
+async function renderCamSleep(force){
+  const host=$('camSleep');if(!host)return;
+  if(!force&&Date.now()-camState.t<300000&&host.childElementCount)return;
+  let nights=[];try{nights=(await request('/api/sleep-nights?days=14')).nights||[]}catch(e){}
+  camState.t=Date.now();
+  const sig=JSON.stringify(nights);
+  if(!force&&sig===camState.sig&&host.childElementCount)return;
+  camState.sig=sig;camState.nights=nights;
+  if(!nights.length){host.replaceChildren(bcalElem('p','empty','Brak nocy z kamery. Serwer domowy wysyła dane co rano, kilka minut po końcu nocy.'));return}
+  if(!camState.sel||!nights.some(n=>n.night===camState.sel))camState.sel=nights[nights.length-1].night;
+  await drawCamSleep();
+}
+async function camSelect(night){camState.sel=night;await drawCamSleep()}
+async function drawCamSleep(){
+  const host=$('camSleep');if(!host)return;
+  const nights=camState.nights,i=nights.findIndex(n=>n.night===camState.sel),m=nights[i];
+  let det=camState.detail[m.night];
+  if(!det){try{det=await request('/api/sleep-night?night='+encodeURIComponent(m.night));camState.detail[m.night]=det}catch(e){det=null}}
+  const rows=await loadCsvRows();
+  const wrap=bcalElem('div','cam');
+  // nagłówek: wybór nocy + ocena
+  const head=bcalElem('div','cam-head');
+  const prev=bcalElem('button','cam-nav','‹');prev.type='button';prev.setAttribute('aria-label','Poprzednia noc');prev.disabled=i<=0;prev.onclick=()=>camSelect(nights[i-1].night);
+  const next=bcalElem('button','cam-nav','›');next.type='button';next.setAttribute('aria-label','Następna noc');next.disabled=i>=nights.length-1;next.onclick=()=>camSelect(nights[i+1].night);
+  const ttl=bcalElem('div','cam-ttl');ttl.append(bcalElem('div','cam-night','Noc '+camNightLabel(m.night)),bcalElem('div','cam-hours',`${m.start}–${m.end}`));
+  head.append(prev,ttl,next);
+  const r=CAM_RATING[m.rating]||CAM_RATING['brak-danych'];
+  const score=bcalElem('div','cam-score');score.style.setProperty('--rc',r.c);
+  const big=bcalElem('div','cam-big');big.append(document.createTextNode(String(Math.round(m.quietPct))),bcalElem('small','','%'));
+  const cap=bcalElem('div','cam-cap');cap.append(bcalElem('span','','minut nocy bez ruchu'),bcalElem('span','cam-rate',r.t));
+  score.append(big,cap);
+  wrap.append(head,score);
+  // pasek nocy: ruch minuta po minucie + karmienia
+  if(det&&det.timeline&&det.timeline.length)wrap.append(camStrip(m,det.timeline,rows));
+  // kafelki
+  const tile=(k,v,sub)=>{const d=bcalElem('div','wg-stat');d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub));return d};
+  const grid=bcalElem('div','wg-stats cam-stats');
+  grid.append(
+    tile('Najdłuższy spokój',camHM(m.longestQuietMin),'bez ruchu, ciągiem'),
+    tile('Epizody ruchu',String(m.episodes),m.longEpisodes?`w tym ${m.longEpisodes} dłuższe (≥3 min)`:'tylko krótkie'),
+    tile('Minuty z ruchem',String(m.activeMin),`z ${m.minutes} minut nocy`),
+    tile('Pierwszy ruch',m.first||'—',m.last?`ostatni ${m.last}`:''),
+    tile('Najwięcej ruchu',m.busiestHour?`${m.busiestHour.slice(0,2)}–${pad((+m.busiestHour.slice(0,2)+1)%24)}`:'—','godzina nocy'),
+    tile('Kamera',`${Math.round(m.coveragePct)}%`,'nocy pod obserwacją'));
+  wrap.append(grid);
+  // ostatnie noce
+  if(nights.length>1){wrap.append(bcalElem('div','eyebrow cam-sub','Ostatnie noce — najdłuższy spokój'),camNightsChart(nights,m.night))}
+  wrap.append(bcalElem('p','chart-note wg-foot','To nie jest pomiar faz snu: kamera widzi ruch w łóżeczku. Spokój to odsetek minut nocy bez ruchu. Epizod ruchu to ruch przerwany krótszą niż 5 min przerwą. Ocena „spokojna”: co najmniej 90% minut bez ruchu i 2,5 h spokoju ciągiem. Ocena „niespokojna”: mniej niż 75% albo ponad 10 dłuższych epizodów. Pomarańczowe znaczniki na pasku to karmienia z dziennika.'));
+  host.replaceChildren(wrap);
+}
+function camStrip(m,tl,rows){
+  const n=tl.length,W=440,H=92,padL=8,padR=8,top=26,bh=40,pw=W-padL-padR,x=i=>padL+i/n*pw;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg cam-strip',role:'img','aria-label':'Ruch w łóżeczku minuta po minucie'});
+  svg.append(svgEl('rect',{class:'cs-bg',x:padL,y:top,width:pw,height:bh,rx:9}));
+  const mx=Math.max(1,...tl);
+  tl.forEach((v,i)=>{if(!v)return;const h=Math.max(4,Math.sqrt(v/mx)*bh);const r=svgEl('rect',{class:'cs-mv',x:x(i),y:top+bh-h,width:Math.max(1.4,pw/n),height:h});const t=svgEl('title',{});const tm=new Date((m.startTs+i*60)*1000);t.textContent=`${hm(tm)} — ruch (${v} kl.)`;r.append(t);svg.append(r)});
+  // godziny
+  const s0=m.startTs*1000;let h0=new Date(s0);h0.setMinutes(0,0,0);if(h0.getTime()<s0)h0=new Date(h0.getTime()+3600000);
+  for(let t=h0.getTime();t<=m.endTs*1000;t+=3600000){const i=(t-s0)/60000,xx=x(i);svg.append(svgEl('line',{class:'cs-tick',x1:xx,x2:xx,y1:top+bh,y2:top+bh+4}));const d=new Date(t);if(d.getHours()%2===0){const lb=svgEl('text',{class:'axis-txt',x:xx,y:H-8,'text-anchor':'middle'});lb.textContent=pad(d.getHours());svg.append(lb)}}
+  // karmienia z dziennika w oknie nocy
+  rows.forEach(rw=>{if(rw.type!=='KARMIENIE'&&!rw.type.startsWith('MLEKO'))return;const p=rw.time.split(':');if(p.length<2)return;const d=rw.date.split('-');const t=new Date(+d[0],+d[1]-1,+d[2],+p[0],+p[1]).getTime();if(t<s0||t>m.endTs*1000)return;const xx=x((t-s0)/60000);
+    const g=svgEl('g',{class:'cs-feed'});g.append(svgEl('line',{x1:xx,x2:xx,y1:14,y2:top+bh}),svgEl('circle',{cx:xx,cy:11,r:rw.type==='KARMIENIE'?5:3.6}));const ti=svgEl('title',{});ti.textContent=`${rw.time} ${rw.type==='KARMIENIE'?'karmienie':'butelka'+(rw.ml?' '+rw.ml+' ml':'')}`;g.append(ti);svg.append(g)});
+  return svg;
+}
+function camNightsChart(nights,sel){
+  const W=440,H=200,padL=30,padR=8,padT=22,padB=30,pw=W-padL-padR,ph=H-padT-padB;
+  const maxH=Math.max(4,Math.ceil(Math.max(...nights.map(n=>n.longestQuietMin))/60));
+  const n=nights.length,slot=pw/n,bw=Math.min(24,slot*.62),y=h=>padT+ph-h/maxH*ph;
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg wg-svg cam-nights',role:'img','aria-label':'Najdłuższy spokojny odcinek w kolejnych nocach'});
+  for(let g=0;g<=maxH;g+=maxH>8?2:1){const yy=y(g);svg.append(svgEl('line',{class:g===0?'wg-zero':'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:padL-5,y:yy+3,'text-anchor':'end'});t.textContent=g+'h';svg.append(t)}
+  const ok=nights.filter(x=>x.rating!=='brak-danych');
+  nights.forEach((x,i)=>{
+    const cx=padL+slot*(i+.5),hh=x.longestQuietMin/60,top=y(hh),r=CAM_RATING[x.rating]||CAM_RATING['brak-danych'];
+    const g=svgEl('g',{class:'cn-bar'+(x.night===sel?' sel':''),tabindex:'0',role:'button','aria-label':`Noc ${camNightLabel(x.night)}`});
+    g.append(svgEl('rect',{x:cx-slot/2,y:padT,width:slot,height:ph,fill:'transparent'}));
+    const b=svgEl('rect',{class:'cn-fill'+(x.rating==='brak-danych'?' cn-nodata':''),x:cx-bw/2,y:top,width:bw,height:Math.max(2,y(0)-top),rx:Math.min(7,bw/2.4)});b.style.fill=r.c;g.append(b);
+    const lt=svgEl('text',{class:'wg-val',x:cx,y:top-5,'text-anchor':'middle'});lt.textContent=Math.round(x.quietPct)+'%';g.append(lt);
+    const ti=svgEl('title',{});ti.textContent=`noc ${camNightLabel(x.night)}: najdłuższy spokój ${camHM(x.longestQuietMin)}, bez ruchu ${x.quietPct}% minut, ${x.episodes} epizodów ruchu — ${r.t}`;g.append(ti);
+    const d=x.night.split('-');const xl=svgEl('text',{class:'axis-txt',x:cx,y:H-14,'text-anchor':'middle'});xl.textContent=`${d[2]}.${d[1]}`;g.append(xl);
+    g.addEventListener('click',()=>camSelect(x.night));g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();camSelect(x.night)}});
+    svg.append(g);
+  });
+  if(ok.length>1){const avg=ok.reduce((a,x)=>a+x.longestQuietMin,0)/ok.length/60;svg.append(svgEl('line',{class:'cn-avg',x1:padL,x2:W-padR,y1:y(avg),y2:y(avg)}));const t=svgEl('text',{class:'axis-txt cn-avg-t',x:padL+4,y:padT-8,'text-anchor':'start'});t.textContent='- - średnio '+avg.toFixed(1).replace('.',',')+' h spokoju ciągiem';svg.append(t)}
+  const cap=svgEl('text',{class:'axis-txt',x:padL,y:H-2});cap.textContent='noc rozpoczęta w dniu · liczba nad słupkiem: % minut bez ruchu';svg.append(cap);
+  return svg;
+}
+
+/* ============================================================================
    Waga — wykres SVG (pasma WHO + przyrost + pomiary)
    ============================================================================ */
 function openWeight(){navTo('weight')}
@@ -920,7 +1019,7 @@ async function saveWeight(){
   const grams=Number($('weightG').value)||0;const n=$('weightNotice');n.className='notice';
   if(grams<2000||grams>15000){n.className='notice error';n.textContent='Podaj wagę 2000–15000 g.';return}
   n.textContent='Zapisywanie…';
-  try{const r=await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type:'WAGA',ml:String(grams)})});n.className='notice ok';n.textContent=r.message||'Zapisano.';toast('Zapisano wagę');await refresh();renderWeightChart()}
+  try{const r=await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type:'WAGA',ml:String(grams)})});n.className='notice ok';n.textContent=r.message||'Zapisano.';toast('Zapisano wagę');await refresh();refreshWeightCharts(true)}
   catch(e){n.className='notice error';n.textContent=e.message}
 }
 /* ---------- Kąpiele: mini kalendarz (ostatnia + planowana co N dni) ---------- */
@@ -1011,10 +1110,10 @@ async function saveBath(){
   try{const r=await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type:'KAPIEL',when:val+'T12:00'})});if(n){n.className='notice ok';n.textContent=r.message||'Zapisano kąpiel.'}toast('Zapisano kąpiel');await refresh();setTimeout(()=>clearPanels(),600)}
   catch(e){if(n){n.className='notice error';n.textContent=e.message}}
 }
-async function renderWeightChart(){
+async function renderWeightChart(data){if(data===undefined)data=await loadWeightSeries();
   const host=$('weightChart');host.replaceChildren();
   const birthG=(state.data&&state.data.birthWeightG)||3080;
-  let pts=[];try{const data=await request('/api/weight-series');pts=(data.points||[]).filter(p=>p&&p.g>0).sort((a,b)=>a.day-b.day)}catch(e){}
+  let pts=((data&&data.points)||[]).filter(p=>p&&p.g>0).sort((a,b)=>a.day-b.day);
   const today=(state.data&&state.data.developmentDay>=0)?state.data.developmentDay:(pts.length?pts[pts.length-1].day:60);
   const maxDay=Math.max(today,pts.length?pts[pts.length-1].day:0,30);
   const W=440,H=250,padL=44,padR=14,padT=14,padB=28,plotW=W-padL-padR,plotH=H-padT-padB,step=Math.max(1,Math.round(maxDay/60));
@@ -1066,22 +1165,31 @@ function wgClass(val,band){
   if(!band)return 'ok';
   return val<band.lo?'low':(val>band.hi?'high':'ok');
 }
-async function renderGainChart(){
+async function loadWeightSeries(){try{return await request('/api/weight-series')}catch(e){return null}}
+/* Odswiezanie strony wagi: przy wejsciu, po zapisie i w petli co 10 s — wykresy rysowane od nowa
+   tylko gdy zmienily sie pomiary albo dzien (nowy tydzien zycia). */
+async function refreshWeightCharts(force){
+  const d=await loadWeightSeries();if(!d)return;
+  const sig=JSON.stringify([d.points,d.today]);
+  if(!force&&sig===state.weightSig)return;
+  state.weightSig=sig;renderWeightChart(d);renderGainChart(d);
+}
+/* Przyrost wagi: SLUPEK NA KAZDY TYDZIEN zycia (bez dziur), liczony na serwerze
+   (/api/weight-series -> weeks): trend z wazen w oknie +-7 dni, przy malej liczbie wazen okno
+   jest poszerzane albo wartosc wynika z dwoch najblizszych wazen — taki tydzien to "szacunek". */
+async function renderGainChart(data){
+  if(data===undefined)data=await loadWeightSeries();
   const host=$('weightGainChart');if(!host)return;host.replaceChildren();
   const note=$('weightGainNote');if(note)note.replaceChildren();
-  const birthG=(state.data&&state.data.birthWeightG)||3080;
-  let ws=[];try{const d=await request('/api/weight-series');ws=(d.points||[]).filter(p=>p&&p.g>0).sort((a,b)=>a.day-b.day)}catch(e){}
-  if(ws.length<2){const p=bcalElem('p','empty','Dodaj co najmniej dwa pomiary wagi, aby zobaczyć trend przyrostu.');host.append(p);return}
+  const birthG=(data&&data.birthWeightG)||(state.data&&state.data.birthWeightG)||3080;
+  const ws=((data&&data.points)||[]).filter(p=>p&&p.g>0).sort((a,b)=>a.day-b.day);
+  if(ws.length<1){host.append(bcalElem('p','empty','Dodaj pomiar wagi, aby zobaczyć tygodniowy przyrost.'));return}
   const pts=ws.slice();if(pts[0].day>0)pts.unshift({day:0,g:birthG,date:''});
   const lastDay=pts[pts.length-1].day;
-  // tygodnie życia 1..N (tydzień 0 pomijamy: adaptacja po porodzie, naturalny ubytek wagi)
-  let weeks=[];
-  for(let k=1;k*7<=lastDay;k++){
-    const c=k*7+3.5;const v=wgSlope(pts,c-7,c+7);
-    weeks.push({k,c,val:v==null?null:Math.round(v),band:gainBandPerDay(Math.round(c)),partial:(k*7+7>lastDay)});
-  }
+  let weeks=((data&&data.weeks)||[]).map(w=>({k:w.k,val:w.gPerDay,band:w.band,partial:w.partial,est:w.estimated,from:w.dateFrom,to:w.dateTo,n:w.points}));
   weeks=weeks.slice(-14);
-  if(!weeks.some(w=>w.val!=null)){host.append(bcalElem('p','empty','Za mało pomiarów w odstępie kilku dni, aby policzyć trend. Zważ dziecko ponownie za kilka dni.'));return}
+  if(!weeks.length){host.append(bcalElem('p','empty','Pierwszy słupek pojawi się po pierwszym pełnym tygodniu życia z ważeniem.'));return}
+  if(!weeks.some(w=>w.val!=null)){host.append(bcalElem('p','empty','Za mało pomiarów w odstępie kilku dni, aby policzyć przyrost. Zważ dziecko ponownie za kilka dni.'));return}
   const vals=weeks.filter(w=>w.val!=null).map(w=>w.val);
   const bandHi=Math.max(...weeks.map(w=>w.band?w.band.hi:0));
   let yMax=Math.max(bandHi,...vals)+6;yMax=Math.ceil(yMax/10)*10;
@@ -1092,14 +1200,15 @@ async function renderGainChart(){
   const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'weight-svg wg-svg',role:'img','aria-label':'Tygodniowy przyrost wagi w gramach na dzień'});
   const stepG=(yMax-yMin)>60?20:10;
   for(let g=yMin;g<=yMax;g+=stepG){const yy=y(g);svg.append(svgEl('line',{class:g===0?'wg-zero':'grid',x1:padL,y1:yy,x2:W-padR,y2:yy}));const t=svgEl('text',{class:'axis-txt',x:padL-6,y:yy+3,'text-anchor':'end'});t.textContent=g;svg.append(t)}
+  const dm=s=>s?s.slice(8,10)+'.'+s.slice(5,7):'';
   weeks.forEach((w,i)=>{
     const cx=padL+slot*(i+0.5);
     if(w.band){const r=svgEl('rect',{class:'wg-band',x:cx-slot/2+1,y:y(w.band.hi),width:slot-2,height:Math.max(2,y(w.band.lo)-y(w.band.hi)),rx:4});svg.append(r)}
     if(w.val==null){const t=svgEl('text',{class:'wg-none',x:cx,y:y(0)-5,'text-anchor':'middle'});t.textContent='–';svg.append(t)}
     else{
       const cls=wgClass(w.val,w.band),top=Math.min(y(w.val),y(0)),h=Math.max(2,Math.abs(y(w.val)-y(0)));
-      const bar=svgEl('rect',{class:'wg-bar wg-'+cls+(w.partial?' wg-part':''),x:cx-bw/2,y:top,width:bw,height:h,rx:Math.min(7,bw/2.4)});
-      const ti=svgEl('title',{});ti.textContent=`tydzień ${w.k}: ${w.val} g/dzień`+(w.band?` (norma ${w.band.lo}–${w.band.hi})`:'')+(w.partial?' — tydzień w toku':'');bar.append(ti);svg.append(bar);
+      const bar=svgEl('rect',{class:'wg-bar wg-'+cls+(w.partial?' wg-part':'')+(w.est?' wg-est':''),x:cx-bw/2,y:top,width:bw,height:h,rx:Math.min(7,bw/2.4)});
+      const ti=svgEl('title',{});ti.textContent=`tydzień ${w.k} (${dm(w.from)}–${dm(w.to)}): ${w.val} g/dzień`+(w.band?` (norma ${w.band.lo}–${w.band.hi})`:'')+(w.est?' — szacunek, mało ważeń w tym tygodniu':'')+(w.partial?' — tydzień w toku':'');bar.append(ti);svg.append(bar);
       const lt=svgEl('text',{class:'wg-val',x:cx,y:w.val>=0?top-5:top+h+11,'text-anchor':'middle'});lt.textContent=w.val;svg.append(lt);
     }
     const xl=svgEl('text',{class:'axis-txt',x:cx,y:H-16,'text-anchor':'middle'});xl.textContent='t'+w.k;svg.append(xl);
@@ -1109,20 +1218,21 @@ async function renderGainChart(){
   const lg=bcalElem('div','wg-legend');
   const it=(cls,t)=>{const s=bcalElem('span','');s.append(bcalElem('i',cls),document.createTextNode(t));return s};
   lg.append(it('l-ok','w normie'),it('l-low','poniżej normy'),it('l-high','powyżej normy'),it('l-band','zakres normy'));
+  if(weeks.some(w=>w.est))lg.append(it('l-est','szacunek (mało ważeń)'));
   host.append(lg);
 
   // kafelki podsumowania
   const last=pts[pts.length-1],prev=pts.length>1?pts[pts.length-2]:null;
   const sinceBirth=lastDay>0?Math.round((last.g-birthG)/lastDay):null;
-  const s14=wgSlope(pts,lastDay-14,lastDay);const r14=s14==null?null:Math.round(s14);
-  const bandNow=gainBandPerDay(lastDay);
+  const rc=data&&data.recent;const r14=rc?rc.gPerDay:null;
+  const bandNow=rc&&rc.band?rc.band:gainBandPerDay(lastDay);
   const tile=(k,v,sub,cls)=>{const d=bcalElem('div','wg-stat'+(cls?' wg-'+cls:''));d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub));return d};
   const grid=bcalElem('div','wg-stats');
   grid.append(
-    tile('Od urodzenia',sinceBirth==null?'—':`${sinceBirth} g/dzień`,`+${last.g-birthG} g w ${lastDay} dni`,''),
-    tile('Ostatnie 2 tygodnie',r14==null?'—':`${r14} g/dzień`,bandNow?`norma ${bandNow.lo}–${bandNow.hi} g`:'trend z ważeń',r14==null?'':wgClass(r14,bandNow)),
-    tile('Ostatnie ważenie',`${last.g} g`,prev&&prev.day<last.day?`${last.g-prev.g>=0?'+':''}${last.g-prev.g} g po ${last.day-prev.day} ${last.day-prev.day===1?'dniu':'dniach'}`:'',''));
-  if(note){note.append(grid,bcalElem('p','chart-note wg-foot','Pojedyncze ważenia różnią się nawet o 100 g (pora dnia, ubranie), dlatego przyrost pokazujemy jako trend z kilku pomiarów, a nie różnicę dwóch kolejnych.'))}
+    tile('Od urodzenia',sinceBirth==null?'—':`${sinceBirth} g/dzień`,`${last.g-birthG>=0?'+':''}${Math.round(last.g-birthG)} g w ${lastDay} dni`,''),
+    tile('Ostatnie 2 tygodnie',r14==null?'—':`${r14} g/dzień`,(bandNow?`norma ${bandNow.lo}–${bandNow.hi} g`:'trend z ważeń')+(rc&&rc.estimated?' · szacunek':''),r14==null?'':wgClass(r14,bandNow)),
+    tile('Ostatnie ważenie',`${Math.round(last.g)} g`,prev&&prev.day<last.day?`${last.g-prev.g>=0?'+':''}${Math.round(last.g-prev.g)} g po ${last.day-prev.day} ${last.day-prev.day===1?'dniu':'dniach'}`:'',''));
+  if(note){note.append(grid,bcalElem('p','chart-note wg-foot','Słupek jest liczony dla każdego tygodnia życia jako trend z ważeń (pojedyncze ważenia różnią się nawet o 100 g). Gdy w tygodniu było mało ważeń, wartość jest szacowana z sąsiednich pomiarów — słupek jest wtedy jaśniejszy.'))}
 }
 
 /* ============================================================================
