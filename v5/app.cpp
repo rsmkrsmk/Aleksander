@@ -81,6 +81,7 @@ static void computeModel(bool charts) {
   in.weather = &w;
   statsCompute(in, model, charts, &sleepState);
   hostCamNight(model.camLine, sizeof model.camLine, &model.camRating);
+  hostCamDev(model.cam);
 }
 
 static void ago(char *dst, size_t n, uint32_t ms) {

@@ -5,6 +5,7 @@
 #pragma once
 #include <stdint.h>
 #include "store.h"
+#include "ui_model.h"
 
 // --- start (wolane z setup(), przed hostTaskStart) ---------------------------
 bool hostCacheMount();                       // LittleFS (mala partycja na cache)
@@ -19,6 +20,8 @@ bool hostSleepTelegramEnabled();             // ustawienie z panelu WWW (/api/st
 // Ostatnia noc z kamery (obiekt "camNight" w /api/status): gotowa linia tekstu na karte Sen
 // i ocena (0 brak, 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 malo danych). false = brak danych.
 bool hostCamNight(char *line, size_t n, uint8_t *rating);
+// Pelny skrot nocy do widoku "Noc z kamery" (obiekt "camDev"); out.ok = false gdy brak.
+void hostCamDev(UiCam &out);
 
 struct HostDiag {
   long revLocal, revRemote;

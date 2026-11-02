@@ -191,6 +191,9 @@ function handle_api(string $route, string $method, Repository $repo): void
                 } catch (Throwable $e) {}
                 return null;
             })(),
+            'camDev' => (static function () use ($entries) {   // widok "Noc z kamery" na urządzeniu (firmware 5.3+)
+                try { return SleepStats::device($entries); } catch (Throwable $e) { return null; }
+            })(),
             'mdns' => 'karmienie.local', 'undoWindowSec' => 60,
             'freeHeap' => 0, 'totalHeap' => 0, 'freePsram' => 0, 'totalPsram' => 0, 'maxAlloc' => 0,
             'uptimeSec' => 0, 'cpuLoad' => 0, 'minFreeHeap' => 0, 'rssi' => 0, 'httpRequests' => 0,

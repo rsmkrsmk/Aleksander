@@ -20,6 +20,26 @@ constexpr int UI_RHYTHM_MAX = 16;
 constexpr int UI_WEEKS = 10;
 constexpr int UI_WPTS = 48;   // maks. punktow pomiarow wagi na wykresie
 constexpr int UI_NIGHTS = 14;
+constexpr int UI_CAM_CELLS = 23;   // pasek nocy: polgodziny od 18:30 do 06:00
+constexpr int UI_CAM_WK = 7;       // ostatnie noce na wykresie tygodnia
+// Noc z kamery (obiekt "camDev" w /api/status, liczony na hostingu). Kopiowany memcpy (stale bajty paddingu).
+struct UiCam {
+  bool ok;
+  char night[8];                  // "31.10" (data wieczoru)
+  uint8_t rating;                 // 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 malo danych
+  uint8_t status;                 // 0 zasnal (settleMin), 1 sen aktywny, 2 nie da sie ustalic
+  int settleMin;
+  char placed[6], settled[6], sleepFrom[6], sleepTo[6];   // "19:42" lub ""
+  int quietPct, longestBlock, wakeCount, cryCount;        // cryCount -1 = brak dzwieku
+  char strip[UI_CAM_CELLS + 1];   // '-' brak danych, 'o' poza lozeczkiem, '0'..'9' ruch
+  char cry[UI_CAM_CELLS + 1];     // '1' = placz w tym polgodzinie
+  int wkN;
+  char wkLabel[UI_CAM_WK][8];
+  int wkSettle[UI_CAM_WK];        // min; -1 brak, -2 sen aktywny
+  int wkQuiet10[UI_CAM_WK];       // spokojny sen w h * 10
+  uint8_t wkRating[UI_CAM_WK];
+  char cmp[120];                  // gotowa linia porownania tygodni
+};
 struct UiModel {
   bool night = false;
   bool wifiOk = false, storageOk = false, timeOk = false;
@@ -52,6 +72,9 @@ struct UiModel {
   // waga
   int weightN = 0; int weekVal[UI_WEEKS] = {}; bool weekHas[UI_WEEKS] = {}; bool weekPartial[UI_WEEKS] = {};
   int weekNo[UI_WEEKS] = {}; int lastWeightG = 0; char lastWeightDate[12] = "";
+  // tygodnie jak na hostingu: kazdy tydzien zycia ma slupek (weekEst = szacunek z sasiednich wazen), norma lo-hi
+  int weekN = 0; bool weekEst[UI_WEEKS] = {}; int weekBandLo[UI_WEEKS] = {}; int weekBandHi[UI_WEEKS] = {};
+  bool w14Est = false;
   // wykres wagi (dzien zycia + gramy) i statystyki przyrostu (kafelki na stronie "Waga")
   int wpN = 0; int wpDay[UI_WPTS] = {}; int wpG[UI_WPTS] = {};
   int wBirthG = 3080, wTodayDay = 0, wLastDay = 0;
@@ -67,6 +90,7 @@ struct UiModel {
   int todayFeed = 0, todayMl = 0, todayDiapers = 0; bool todayBath = false;
   // ostatnia noc z kamery (z /api/status); camRating: 0 brak, 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 malo danych
   char camLine[96] = ""; uint8_t camRating = 0;
+  UiCam cam = {};                 // widok "Noc z kamery" na karcie Sen (firmware 5.3+)
 };
 
 // Ekran DIAGNOSTYKA: gotowy tekst (budowany przez diag.cpp).

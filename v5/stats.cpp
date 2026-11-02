@@ -375,7 +375,8 @@ static void computeCharts(const StatsInput &in, UiModel &m, int todayDay, const 
   const int bday = birthDay();
   m.gapN = 0; m.gapOpen = false;
   for (int d = 0; d < UI_RHYTHM_DAYS; ++d) { m.rhN[d] = 0; m.rhLabel[d][0] = 0; }
-  for (int i = 0; i < UI_WEEKS; ++i) { m.weekHas[i] = false; m.weekPartial[i] = false; m.weekVal[i] = 0; m.weekNo[i] = 0; }
+  for (int i = 0; i < UI_WEEKS; ++i) { m.weekHas[i] = false; m.weekPartial[i] = false; m.weekVal[i] = 0; m.weekNo[i] = 0; m.weekEst[i] = false; m.weekBandLo[i] = m.weekBandHi[i] = 0; }
+  m.weekN = 0; m.w14Est = false;
   for (int i = 0; i < UI_NIGHTS; ++i) { m.nightMin[i] = -1; m.nightFrom[i] = 0; m.nightTo[i] = 0; m.nightLabel[i][0] = 0; }
   m.lastWeightG = 0; m.lastWeightDate[0] = 0; m.weightN = 0;
   m.wpN = 0; m.wLastDay = 0; m.wTodayDay = todayDay - bday; m.wHasSince = false; m.wHas14 = false;
@@ -454,6 +455,15 @@ static void computeCharts(const StatsInput &in, UiModel &m, int todayDay, const 
   }
   if (wN > 0) {
     std::stable_sort(w, w + wN, [](const WPt &a, const WPt &b) { return a.day < b.day; });
+    {   // kilka wazen tego samego dnia -> srednia (jak na hostingu)
+      int o = 0;
+      for (int i = 0; i < wN;) {
+        int j = i, sum = 0;
+        while (j < wN && w[j].day == w[i].day) sum += w[j++].g;
+        w[o].day = w[i].day; w[o].g = (int)lroundf((float)sum / (j - i)); ++o; i = j;
+      }
+      wN = o;
+    }
     if (w[0].day > 0) {   // punkt urodzeniowy
       if (wN == 96) --wN;
       memmove(w + 1, w, wN * sizeof(WPt));
@@ -468,8 +478,8 @@ static void computeCharts(const StatsInput &in, UiModel &m, int todayDay, const 
     m.wLastDay = lastDay;
     m.wGainTotal = w[wN - 1].g - BIRTH_WEIGHT_G;
     if (lastDay > 0) { m.wHasSince = true; m.wSince = static_cast<int>(lroundf(static_cast<float>(m.wGainTotal) / lastDay)); }
-    // Regresja liniowa g/dobe na punktach z okna [lo, hi].
-    auto slope = [&](float lo, float hi, int &out) -> bool {
+    // Regresja liniowa g/dobe na punktach z okna [lo, hi] (min. 2 wazenia rozlozone na >= 5 dni).
+    auto slope = [&](float lo, float hi, float &out) -> bool {
       float sx = 0, sy = 0;
       int cnt = 0, dmin = 100000, dmax = -100000;
       for (int j = 0; j < wN; ++j) {
@@ -487,22 +497,46 @@ static void computeCharts(const StatsInput &in, UiModel &m, int todayDay, const 
         sxx += (w[j].day - mx) * (w[j].day - mx);
       }
       if (sxx <= 0) return false;
-      out = static_cast<int>(lroundf(sxy / sxx));
+      out = sxy / sxx;
       return true;
     };
-    m.wHas14 = slope(static_cast<float>(lastDay - 14), 1e9f, m.w14);
+    // Trend jak Domain::gainTrend na hostingu: okno +-half, poszerzane (+3, +7, +14 dni), a w ostatecznosci
+    // roznica dwoch najblizszych wazen wokol srodka. est = wartosc szacowana (mniej pewna).
+    auto trend = [&](float c, float half, int &out, bool &est) -> bool {
+      const float hs[4] = {half, half + 3, half + 7, half + 14};
+      for (int i = 0; i < 4; ++i) {
+        float v;
+        if (slope(c - hs[i], c + hs[i], v)) { out = (int)lroundf(v); est = i > 0; return true; }
+      }
+      int bi = -1, ai = -1;
+      for (int j = 0; j < wN; ++j) { if (w[j].day <= c) bi = j; else if (ai < 0) ai = j; }
+      if (bi >= 0 && ai < 0) {
+        for (int j = wN - 2; j >= 0; --j) if (w[wN - 1].day - w[j].day >= 3) { bi = j; ai = wN - 1; break; }
+      }
+      if (bi < 0 || ai < 0 || w[ai].day - w[bi].day < 3) return false;
+      out = (int)lroundf((float)(w[ai].g - w[bi].g) / (w[ai].day - w[bi].day)); est = true;
+      return true;
+    };
+    m.wHas14 = trend(static_cast<float>(lastDay - 7), 7.0f, m.w14, m.w14Est);
+    // jeden slupek na KAZDY tydzien zycia od 1 do tygodnia ostatniego wazenia (ostatnie UI_WEEKS)
     const int kLast = lastDay / 7;
     int k0 = kLast - (UI_WEEKS - 1);
     if (k0 < 1) k0 = 1;
-    for (int i = 0; i < UI_WEEKS; ++i) {
+    m.weekN = kLast >= k0 ? kLast - k0 + 1 : 0;
+    for (int i = 0; i < m.weekN; ++i) {
       const int k = k0 + i;
       m.weekNo[i] = k;
-      if (k > kLast) continue;
-      const float c = k * 7 + 3.5f;
-      int v = 0;
-      if (!slope(c - 7, c + 7, v)) continue;
+      const int cd = k * 7 + 4;   // srodek tygodnia (round(k*7+3,5))
+      if (cd >= 2) {
+        if (cd < 91) { m.weekBandLo[i] = 25; m.weekBandHi[i] = 30; }
+        else if (cd < 183) { m.weekBandLo[i] = 15; m.weekBandHi[i] = 20; }
+        else { m.weekBandLo[i] = 10; m.weekBandHi[i] = 15; }
+      }
+      int v = 0; bool est = false;
+      if (!trend(k * 7 + 3.5f, 7.0f, v, est)) continue;
       m.weekHas[i] = true;
       m.weekVal[i] = v;
+      m.weekEst[i] = est;
       m.weekPartial[i] = (k * 7 + 7 > lastDay);
     }
     m.weightN = wN;
@@ -640,7 +674,8 @@ uint32_t statsChartsHash(const UiModel &m) {
   H(bathMonth); H(bathFirstDow); H(bathDays); H(bathToday); H(bathMask); H(bathSinceDays); H(bathNextDay); H(bathLastTxt); H(bathNextTxt);
   H(todayFeed); H(todayMl); H(todayDiapers); H(todayBath); H(sleepTodayDay); H(sleepTodayNight);
   H(lastFeedEntry); H(lastBottleEntry);
-  H(camLine); H(camRating);
+  H(camLine); H(camRating); H(cam);
+  H(weekN); H(weekEst); H(weekBandLo); H(weekBandHi); H(w14Est);
   return h;
 }
 #undef H

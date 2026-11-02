@@ -124,6 +124,74 @@ final class SleepStats
         ];
     }
 
+    /** Skrót dla urządzenia ESP32 (widok "Noc z kamery" na karcie Sen): płaski obiekt z samymi
+     *  liczbami i krótkimi tekstami, bo firmware czyta go prostym wyszukiwaniem kluczy.
+     *  strip: 23 znaki = pół godziny od 18:30 do 06:00: '-' brak danych, 'o' poza łóżeczkiem,
+     *  '0'..'9' ruch (minuty z ruchem / 2, maks. 9); cry: 23 znaki '0'/'1' (płacz w tym półgodzinie);
+     *  wk: do 7 ostatnich nocy "d.mm:zasypianie:spokój_h*10:ocena" rozdzielone ';'
+     *  (zasypianie -1 brak, -2 sen aktywny; ocena 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 mało danych). */
+    public static function device(array $entries): ?array
+    {
+        $all = array_values(self::analyses($entries, 16));
+        $done = array_values(array_filter($all, static fn($a) => !empty($a['metrics']['complete'])));
+        if (!$done) return null;
+        $a = $done[count($done) - 1];
+        $hm = static fn($ts) => $ts ? date('H:i', (int)$ts) : '';
+        $rate = static fn($r) => ['spokojna' => 1, 'umiarkowana' => 2, 'niespokojna' => 3][$r] ?? 4;
+        $cell = static fn($ts) => intdiv(((int)date('G', $ts) * 60 + (int)date('i', $ts) - 1110 + 1440) % 1440, 30);
+
+        $strip = '';
+        foreach ($a['carpet'] as $v) $strip .= $v < 0 ? '-' : (string)min(9, (int)ceil($v / 2));
+        $outMin = array_fill(0, 23, 0);
+        foreach ((array)$a['outOfCrib'] as $o) {
+            for ($t = (int)$o['from']; $t < (int)$o['to']; $t += 60) { $k = $cell($t); if ($k < 23) $outMin[$k]++; }
+        }
+        foreach ($outMin as $k => $m) if ($m >= 10) $strip[$k] = 'o';
+        $cry = str_repeat('0', 23);
+        if (!empty($a['audio']['present'])) foreach ($a['audio']['events'] as $e) {
+            if ($e['kind'] !== 'placz' || $e['parent']) continue;
+            $k = $cell($e['start']); if ($k < 23) $cry[$k] = '1';
+        }
+
+        // ostatnie 7 nocy i porównanie z 7 wcześniejszymi
+        $rows = [];
+        foreach ($done as $n) {
+            $v = self::values($n);
+            if (!$v) continue;
+            $st = $n['onset']['status'] ?? '';
+            $rows[] = ['label' => (int)substr($n['night'], 8, 2) . '.' . substr($n['night'], 5, 2),
+                       'settle' => $v['settleMin'] !== null ? (int)round($v['settleMin']) : ($st === 'aktywny' ? -2 : -1),
+                       'quietH' => (float)$v['quietH'], 'rating' => $rate($n['metrics']['rating'] ?? '')];
+        }
+        $wkRows = array_slice($rows, -7);
+        $prevRows = array_slice($rows, -14, max(0, count($rows) - 7));
+        $wk = implode(';', array_map(static fn($r) => $r['label'] . ':' . $r['settle'] . ':' . (int)round($r['quietH'] * 10) . ':' . $r['rating'], $wkRows));
+        $set = static fn($rs) => array_values(array_map(static fn($r) => $r['settle'], array_filter($rs, static fn($r) => $r['settle'] >= 0)));
+        $qh = static fn($rs) => array_map(static fn($r) => $r['quietH'], $rs);
+        $fmtH = static fn($h) => str_replace('.', ',', number_format($h, 1));
+        $parts = [];
+        [$s1, $s0] = [$set($wkRows), $set($prevRows)];
+        if (count($s1) >= self::MIN_WEEK_NIGHTS && count($s0) >= self::MIN_WEEK_NIGHTS)
+            $parts[] = 'zasypia ' . (int)round(self::median($s1)) . ' min (wcześniej ' . (int)round(self::median($s0)) . ')';
+        [$q1, $q0] = [$qh($wkRows), $qh($prevRows)];
+        if (count($q1) >= self::MIN_WEEK_NIGHTS && count($q0) >= self::MIN_WEEK_NIGHTS)
+            $parts[] = 'spokój ' . $fmtH(array_sum($q1) / count($q1)) . ' h (' . $fmtH(array_sum($q0) / count($q0)) . ' h)';
+        $cmp = $parts ? '7 nocy: ' . implode(', ', $parts)
+                      : 'Porównanie tygodni po 14 nocach (jest ' . count($rows) . ')';
+
+        $on = $a['onset'] ?? null;
+        return [
+            'night' => $a['night'], 'rating' => $rate($a['metrics']['rating'] ?? ''),
+            'settleStatus' => $on['status'] ?? '', 'settleMin' => ($on['status'] ?? '') === 'ok' ? (int)$on['minutes'] : -1,
+            'placed' => $hm($on['placedAt'] ?? null), 'settled' => $hm($on['settledAt'] ?? null),
+            'sleepFrom' => $hm($a['sleepStart']), 'sleepTo' => $hm($a['sleepEnd']),
+            'quietPct' => (int)round($a['metrics']['quietPct'] ?? 0), 'longestBlock' => (int)$a['longestBlock'],
+            'wakeCount' => (int)$a['wakeCount'],
+            'cryCount' => !empty($a['audio']['present']) ? (int)$a['audio']['cryCount'] : -1,
+            'strip' => $strip, 'cry' => $cry, 'wk' => $wk, 'cmp' => $cmp,
+        ];
+    }
+
     public static function stats(array $entries, int $days = 120): array
     {
         $all = self::analyses($entries, $days);

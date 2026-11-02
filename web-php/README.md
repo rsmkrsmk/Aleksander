@@ -156,7 +156,7 @@ Adresy względem strony: `https://phpmapy1.webd.pro/api/<nazwa>` (albo wprost `�
 |---|---|
 | `GET /export.csv` i `GET /api/export.csv` | cały CSV; pobiera go urządzenie |
 | `GET /api/revision` | `{"rev":N,"count":liczba wpisów,"updatedAt":…}`; `rev` rośnie przy każdej zmianie danych |
-| `GET /api/status` | stan do panelu i urządzenia: wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`), `camNight` — skrót ostatniej zakończonej nocy z kamery (urządzenie pokazuje go na karcie Sen) |
+| `GET /api/status` | stan do panelu i urządzenia: wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`), `camNight` — skrót ostatniej zakończonej nocy z kamery (urządzenie pokazuje go na karcie Sen), `camDev` — płaski obiekt do widoku „Noc z kamery” na urządzeniu (firmware 5.3+): `night`, `rating` (1–4), `settleStatus`, `settleMin`, `placed`/`settled`/`sleepFrom`/`sleepTo` (HH:MM), `quietPct`, `longestBlock`, `wakeCount`, `cryCount` (−1 brak dźwięku), `strip` (23 znaki na pół godziny od 18:30: `-` brak danych, `o` poza łóżeczkiem, `0`–`9` ruch), `cry` (23 znaki `0`/`1`), `wk` (do 7 nocy `d.mm:zasypianie:spokój_h×10:ocena` rozdzielone `;`, zasypianie −1 brak, −2 sen aktywny), `cmp` (gotowa linia porównania 7 nocy z 7 wcześniejszymi) |
 | `GET /api/entries?date=RRRR-MM-DD` | wpisy z jednego dnia |
 | `GET /api/weight-series` | `points` (ważenia), `weeks` (słupki przyrostu), `recent` (trend ~14 dni), `today` (dzień życia), `birthWeightG` |
 | `GET /api/bath-calendar` | kąpiele: kalendarz i podsumowanie |

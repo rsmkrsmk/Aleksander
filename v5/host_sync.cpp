@@ -224,6 +224,59 @@ static void parseCamNight(const char *json) {
   portEXIT_CRITICAL(&camMux);
 }
 
+// "camDev":{...} -> UiCam (pasek nocy, kafelki, 7 nocy). Obiekt plaski, teksty bez klamer.
+static UiCam camDev;
+static void parseCamDev(const char *json) {
+  static UiCam c;
+  memset(&c, 0, sizeof c);
+  const char *b = strstr(json, "\"camDev\":{");
+  const char *e = b ? strchr(b + 10, '}') : nullptr;
+  if (b && e) {
+    b += 9;
+    char night[12] = "", st[16] = "", wk[160] = "";
+    float v;
+    jsonStr(b, e, "night", night, sizeof night);
+    int y = 0, mo = 0, d = 0;
+    if (sscanf(night, "%d-%d-%d", &y, &mo, &d) == 3) {
+      c.ok = true;
+      snprintf(c.night, sizeof c.night, "%d.%02d", d, mo);
+      c.rating = jsonNum(b, e, "rating", &v) ? (uint8_t)v : 4;
+      jsonStr(b, e, "settleStatus", st, sizeof st);
+      c.settleMin = jsonNum(b, e, "settleMin", &v) ? (int)v : -1;
+      c.status = (!strcmp(st, "ok") && c.settleMin >= 0) ? 0 : !strcmp(st, "aktywny") ? 1 : 2;
+      jsonStr(b, e, "placed", c.placed, sizeof c.placed);
+      jsonStr(b, e, "settled", c.settled, sizeof c.settled);
+      jsonStr(b, e, "sleepFrom", c.sleepFrom, sizeof c.sleepFrom);
+      jsonStr(b, e, "sleepTo", c.sleepTo, sizeof c.sleepTo);
+      c.quietPct = jsonNum(b, e, "quietPct", &v) ? (int)v : 0;
+      c.longestBlock = jsonNum(b, e, "longestBlock", &v) ? (int)v : 0;
+      c.wakeCount = jsonNum(b, e, "wakeCount", &v) ? (int)v : 0;
+      c.cryCount = jsonNum(b, e, "cryCount", &v) ? (int)v : -1;
+      jsonStr(b, e, "strip", c.strip, sizeof c.strip);
+      jsonStr(b, e, "cry", c.cry, sizeof c.cry);
+      jsonStr(b, e, "cmp", c.cmp, sizeof c.cmp);
+      jsonStr(b, e, "wk", wk, sizeof wk);
+      char *sv = nullptr;
+      for (char *t = strtok_r(wk, ";", &sv); t && c.wkN < UI_CAM_WK; t = strtok_r(nullptr, ";", &sv)) {
+        int s = 0, q = 0, r = 0; char lb[8] = "";
+        if (sscanf(t, "%7[^:]:%d:%d:%d", lb, &s, &q, &r) != 4) continue;
+        snprintf(c.wkLabel[c.wkN], sizeof c.wkLabel[0], "%s", lb);
+        c.wkSettle[c.wkN] = s; c.wkQuiet10[c.wkN] = q; c.wkRating[c.wkN] = (uint8_t)r;
+        ++c.wkN;
+      }
+    }
+  }
+  portENTER_CRITICAL(&camMux);
+  memcpy(&camDev, &c, sizeof c);
+  portEXIT_CRITICAL(&camMux);
+}
+
+void hostCamDev(UiCam &out) {
+  portENTER_CRITICAL(&camMux);
+  memcpy(&out, &camDev, sizeof out);
+  portEXIT_CRITICAL(&camMux);
+}
+
 bool hostCamNight(char *line, size_t n, uint8_t *rating) {
   portENTER_CRITICAL(&camMux);
   strncpy(line, camLine, n - 1); line[n - 1] = 0;
@@ -246,6 +299,7 @@ static void fetchStatusSettings() {
       }
     }
     parseCamNight(reinterpret_cast<const char *>(b.p));
+    parseCamDev(reinterpret_cast<const char *>(b.p));
   }
   b.release();
   lastStatus = millis();

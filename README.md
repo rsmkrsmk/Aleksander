@@ -100,6 +100,13 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 - **Tablica:** zegar, pogoda, drzemka, pierścień od ostatniego karmienia, 3 kafelki dnia, prognoza godzinowa, ubiór, wskazówka dnia.
 - **Panel:** dotknięcie tablicy. 6 kart przełączanych paskiem lub gestem; na karcie Waga dotknięcie wykresu zmienia widok.
 - **Karta Sen (od 5.2.0):** pod tytułem linia ostatniej nocy z kamery w łóżeczku, np. „Noc 1.11: zasnął po 9 min · spokój 87% · blok 1 h 03”, z kropką w kolorze oceny nocy. Dane z `/api/status` (obiekt `camNight`, odświeżane co 10 min); bez danych z kamery linii nie ma.
+- **Karta Sen, widok „Noc z kamery” (od 5.3.0):** gdy hosting ma noce z kamery, dotknięcie karty przełącza widoki (jak na Wadze; dwie kropki w prawym górnym rogu, wybór zostaje po odświeżeniu danych). Drugi widok pokazuje ostatnią zakończoną noc:
+  - wynik zasypiania („Zasnął po 18 min”, „Sen aktywny” albo „brak danych”), godziny położenia, zaśnięcia i końca snu oraz ocenę nocy (kropka: zielona spokojna, żółta umiarkowana, pomarańczowa niespokojna, szara mało danych);
+  - pasek nocy 18:30–06:00 po pół godziny: fioletowy = spokój, żółty = ruch (im mocniejszy, tym więcej ruchu), pusta ramka = dziecko poza łóżeczkiem (np. karmienie), szary = brak danych; czerwona kropka nad paskiem = płacz; zielona kreska pod paskiem = okres snu;
+  - kafelki: spokój (% czasu w łóżeczku), najdłuższy blok bez ruchu, przebudzenia (z liczbą płaczów);
+  - ostatnie 7 nocy: słupki spokojnego snu w godzinach (kolor = ocena nocy) i linia porównania z 7 wcześniejszymi nocami (mediana zasypiania, średni spokojny sen; pojawia się, gdy obie grupy mają co najmniej 4 noce).
+  Dane liczy hosting (obiekt `camDev` w `/api/status`, odświeżany co 10 min). „Co wpływa na sen” jest tylko na stronie WWW. Bez nocy z kamery karta wygląda jak dawniej (jeden widok).
+- **Karta Waga, wykres przyrostu (od 5.3.0):** liczony jak na hostingu — słupek dla **każdego** tygodnia życia od 1 do tygodnia ostatniego ważenia (bez dziur i bez pustych tygodni na przyszłość). Wartość to trend z ważeń z okna ±7 dni; gdy ważeń jest mało, okno rośnie (±10, ±14, ±21 dni), a w ostateczności wartość wynika z dwóch najbliższych ważeń — taki słupek jest jaśniejszy, z obwódką („szacunek”). Kilka ważeń jednego dnia jest uśrednianych. Tło słupka = zakres normy dla wieku (25–30, 15–20, 10–15 g/dzień), kolor: zielony w normie, pomarańczowy poniżej, niebieski powyżej, czerwony spadek. Kafelek „Ostatnie 2 tygodnie” liczony tak samo jak na stronie.
 - **Powroty i diagnostyka:** liść w panelu wraca do tablicy; po 2 min bezczynności panel też wraca do tablicy. Długie przytrzymanie zegara w panelu otwiera diagnostykę.
 
 **Tryb nocny** (21:00–7:00): ciemna paleta i jasność ~65%. W dzień ekran przyciemnia się po 60 s.
@@ -137,7 +144,7 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 - watchdog obejmuje też zadanie sieciowe,
 - poprawne jednostki timeoutów TLS.
 
-**Wynik obliczeń** porównany z v4.1 na tym samym pliku 40 dni danych (`tools/sim5`): identyczne wykresy tygodni, nocy, kąpieli i wagi.
+**Wynik obliczeń** porównany z v4.1 na tym samym pliku 40 dni danych (`tools/sim5`): identyczne wykresy tygodni, nocy, kąpieli i wagi. Od 5.3.0 wykres przyrostu wagi celowo różni się od v4.1 — liczony jest jak na hostingu (każdy tydzień, szacunki).
 
 ---
 

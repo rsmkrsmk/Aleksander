@@ -9,6 +9,7 @@ Status: **WDROŻONY W KODZIE — wszystkie etapy 0–7** (2.11.2026, na prośbę
 - dźwięk: mikrofon kamery tnie ciszę do cyfrowego zera i jest cichy, więc tło liczone od −95 dB, płacz ≥ 22 dB nad tłem (strojenie przez `/data/dzwiek_config.json` i oceny próbek),
 - próbki dźwięku trzymane 7 dni (razem z klipami nocy), tylko na t620 (D2),
 - urządzenie: linia „Noc d.mm: zasnął po … · spokój …% · blok …” na karcie Sen (obiekt `camNight` w `/api/status`).
+- urządzenie (5.3.0): drugi widok karty Sen „Noc z kamery” (zasypianie, pasek nocy co 30 min z płaczem i czasem poza łóżeczkiem, 3 kafelki, 7 nocy + porównanie z poprzednimi 7), obiekt `camDev` w `/api/status`; bez „co wpływa” (decyzja użytkownika).
 Dotyczy trzech miejsc: serwer t620 (repo `wiewiornik`), hosting (`web-php/`), urządzenie ESP32 (`v5/`).
 
 ## 1. Cel i zasady

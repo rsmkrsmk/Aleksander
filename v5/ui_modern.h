@@ -719,10 +719,15 @@ static void ui_bars_stop_all() {   // wywolac PRZED usunieciem ekranu: anim slup
 static lv_obj_t *uiWtViewA = nullptr, *uiWtViewB = nullptr, *uiWtSub = nullptr, *uiWtDot[2] = {nullptr, nullptr};
 static int uiWtShown = 0, uiWtTicks = 0;
 static int uiWtPref = 0;   // wybrany widok wagi — zachowany przy przebudowie strony (np. nowe dane)
+// Strona "Sen": widok A (sen miedzy karmieniami, 14 nocy) i B (noc z kamery), przelaczane dotknieciem.
+static lv_obj_t *uiSnViewA = nullptr, *uiSnViewB = nullptr, *uiSnSub = nullptr, *uiSnDot[2] = {nullptr, nullptr};
+static int uiSnShown = 0, uiSnPref = 0;
+static char uiSnSubB[48];
 static lv_point_precise_t uiWtMedPts[41];
 static lv_point_precise_t uiWtActPts[UI_WPTS];
 static void ui_page_reset(int page) {
   if (page == 3) { uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr; uiWtShown = 0; uiWtTicks = 0; }
+  if (page == 4) { uiSnViewA = uiSnViewB = uiSnSub = uiSnDot[0] = uiSnDot[1] = nullptr; uiSnShown = 0; }
   for (int i = 0; i < uiBarN[page]; ++i) lv_anim_delete(&uiBars[page][i], ui_cb_bar);
   uiBarN[page] = 0;
   lv_obj_clean(uiDashPage[page]);
@@ -997,12 +1002,17 @@ static void ui_weight_view_weight(lv_obj_t *v, const UiModel &m) {
   ui_label(v, "mediana WHO", &ui_f13, P.ink2, px0 + 126, base + 20);
 }
 static void ui_weight_view_gain(lv_obj_t *v, const UiModel &m, bool any) {
+  // Jak na hostingu: slupek na kazdy tydzien zycia (bez dziur), tlo = zakres normy, kolor wg normy,
+  // jasniejszy slupek z obwodka = szacunek (malo wazen w tym tygodniu), polprzezroczysty = tydzien w toku.
   if (!any) { ui_label(v, "Za mało pomiarów w odstępie kilku dni,\naby policzyć trend. Zważ dziecko za kilka dni.", &ui_f15, P.muted, 30, 120, 400); return; }
-  const int pg = 3, n = UI_WEEKS;
-  int mx = 40, mn = 0;
-  for (int i = 0; i < n; ++i) if (m.weekHas[i]) { if (m.weekVal[i] > mx) mx = m.weekVal[i]; if (m.weekVal[i] < mn) mn = m.weekVal[i]; }
-  mx = ((mx + 9) / 10) * 10; if (mn < 0) mn = ((mn - 9) / 10) * 10;
-  const int px0 = 56, pw = 392, top = 80, base = 206, ph = base - top;
+  const int n = m.weekN > 0 ? m.weekN : 1;
+  int mx = 10, mn = 0;
+  for (int i = 0; i < m.weekN; ++i) {
+    if (m.weekBandHi[i] > mx) mx = m.weekBandHi[i];
+    if (m.weekHas[i]) { if (m.weekVal[i] > mx) mx = m.weekVal[i]; if (m.weekVal[i] < mn) mn = m.weekVal[i]; }
+  }
+  mx = ((mx + 6 + 9) / 10) * 10; if (mn < 0) mn = ((mn - 4 - 9) / 10) * 10;
+  const int px0 = 56, pw = 392, top = 84, base = 196, ph = base - top;
   const int span = mx - mn;
   auto yv = [&](int val) { return base - (val - mn) * ph / span; };
   const int stepG = span > 120 ? 40 : (span > 60 ? 20 : 10);
@@ -1012,25 +1022,48 @@ static void ui_weight_view_gain(lv_obj_t *v, const UiModel &m, bool any) {
     ui_hline(v, px0, y, pw, P.brd, g == 0 ? 220 : 110);
     char t[8]; snprintf(t, sizeof t, "%d", g); ui_label(v, t, &ui_f13, P.faint, 14, y - 9, 38, LV_TEXT_ALIGN_RIGHT);
   }
-  const int slot = pw / n, bw = slot - 10 > 30 ? 30 : slot - 10;
+  const int slot = pw / n, bw = slot * 62 / 100 > 30 ? 30 : slot * 62 / 100;
   const int zero = yv(0);
-  for (int i = 0; i < n; ++i) {
+  bool anyEst = false;
+  for (int i = 0; i < m.weekN; ++i) {
     const int cx = px0 + slot * i + slot / 2;
     char t[8];
+    if (m.weekBandHi[i] > 0) {   // zakres normy
+      const int yh = yv(m.weekBandHi[i]), yl = yv(m.weekBandLo[i]);
+      ui_box(v, cx - slot / 2 + 1, yh, slot - 2, yl - yh < 2 ? 2 : yl - yh, 4, P.acc, 34);
+    }
     if (!m.weekHas[i]) { ui_label(v, "–", &ui_f15, P.faint, cx - 10, zero - 20, 20, LV_TEXT_ALIGN_CENTER); }
     else {
       const int val = m.weekVal[i], yy = yv(val);
       const int hh = val >= 0 ? zero - yy : yy - zero;
-      lv_color_t col = val < 0 ? P.danger : P.acc;
-      lv_obj_t *bar = ui_box(v, cx - bw / 2, val >= 0 ? zero - (hh < 3 ? 3 : hh) : zero, bw, hh < 3 ? 3 : hh, 8, col);
-      if (m.weekPartial[i]) lv_obj_set_style_bg_opa(bar, 140, 0);
+      const lv_color_t col = val <= 0 ? P.danger : (!m.weekBandHi[i] ? P.acc :
+                             (val < m.weekBandLo[i] ? P.feed : (val > m.weekBandHi[i] ? P.milk : P.acc)));
+      lv_obj_t *bar = ui_box(v, cx - bw / 2, val >= 0 ? zero - (hh < 3 ? 3 : hh) : zero, bw, hh < 3 ? 3 : hh, bw / 3 > 7 ? 7 : bw / 3, col);
+      if (m.weekEst[i]) {
+        anyEst = true;
+        lv_obj_set_style_bg_opa(bar, 105, 0);
+        lv_obj_set_style_border_width(bar, 1, 0); lv_obj_set_style_border_color(bar, P.ink2, 0); lv_obj_set_style_border_opa(bar, 120, 0);
+      } else if (m.weekPartial[i]) lv_obj_set_style_bg_opa(bar, 140, 0);
       snprintf(t, sizeof t, "%d", val);
       ui_label(v, t, &ui_f13, P.ink, cx - 20, val >= 0 ? yy - 19 : yy + 3, 40, LV_TEXT_ALIGN_CENTER);
     }
     snprintf(t, sizeof t, "t%d", m.weekNo[i]);
-    ui_label(v, t, &ui_f13, P.muted, cx - 20, base + 6, 40, LV_TEXT_ALIGN_CENTER);
+    ui_label(v, t, &ui_f13, P.muted, cx - 20, base + 4, 40, LV_TEXT_ALIGN_CENTER);
   }
-  (void)pg;
+  // legenda
+  int lx = px0;
+  const lv_color_t lc[4] = {P.acc, P.feed, P.milk, P.acc};
+  const char *lt[4] = {"w normie", "poniżej", "powyżej", "norma"};
+  for (int i = 0; i < 4; ++i) {
+    ui_box(v, lx, base + 26, 12, 10, 3, lc[i], i == 3 ? 60 : LV_OPA_COVER);
+    lv_obj_t *l = ui_label(v, lt[i], &ui_f13, P.ink2, lx + 16, base + 22);
+    lv_obj_update_layout(l); lx += 16 + lv_obj_get_width(l) + 12;
+  }
+  if (anyEst) {
+    lv_obj_t *e = ui_box(v, lx, base + 26, 12, 10, 3, P.acc, 105);
+    lv_obj_set_style_border_width(e, 1, 0); lv_obj_set_style_border_color(e, P.ink2, 0);
+    ui_label(v, "szacunek", &ui_f13, P.ink2, lx + 16, base + 22);
+  }
 }
 static void ui_build_weight(const UiModel &m, bool anim) {
   (void)anim;
@@ -1075,20 +1108,37 @@ static void ui_build_weight(const UiModel &m, bool anim) {
     snprintf(v2, sizeof v2, "%d", m.w14);
     c2 = m.w14 <= 0 ? P.danger : (!hi ? P.good : (m.w14 < lo || m.w14 > hi ? P.warn : P.good));
   } else snprintf(v2, sizeof v2, "—");
-  if (hi) snprintf(s2, sizeof s2, "norma %d–%d g", lo, hi); else snprintf(s2, sizeof s2, "trend z ważeń");
+  if (hi) snprintf(s2, sizeof s2, "norma %d–%d g%s", lo, hi, m.wHas14 && m.w14Est ? " (szac.)" : ""); else snprintf(s2, sizeof s2, "trend z ważeń");
   ui_wt_tile(p, 26, 246, 204, 90, "Od urodzenia", v1, m.wHasSince ? "g/dzień" : "", s1, P.acc);
   ui_wt_tile(p, 250, 246, 204, 90, "Ostatnie 2 tygodnie", v2, m.wHas14 ? "g/dzień" : "", s2, c2);
 }
 
 // ----------------------------- STRONA 4: SEN ----------------------------------
-static void ui_build_sleep(const UiModel &m, bool anim) {
-  const int pg = 4; ui_page_reset(pg);
-  lv_obj_t *p = uiDashPage[pg];
-  ui_card(p, 14, 2, 452, 340, 26);
-  ui_title(p, "Sen nocny", "między karmieniami, ostatnie 14 nocy");
+static lv_color_t ui_cam_color(int r) { return r == 1 ? P.acc : r == 2 ? P.sun : r == 3 ? P.feed : P.faint; }
+static void ui_sleep_toggle() {
+  if (!uiSnViewA || !uiSnViewB) return;
+  uiSnShown ^= 1;
+  if (uiSnShown) { lv_obj_add_flag(uiSnViewA, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiSnViewB, LV_OBJ_FLAG_HIDDEN); }
+  else { lv_obj_add_flag(uiSnViewB, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(uiSnViewA, LV_OBJ_FLAG_HIDDEN); }
+  if (uiSnSub) lv_label_set_text(uiSnSub, uiSnShown ? uiSnSubB : "między karmieniami, ostatnie 14 nocy");
+  for (int i = 0; i < 2; ++i) if (uiSnDot[i]) {
+    lv_obj_set_style_bg_color(uiSnDot[i], i == uiSnShown ? P.acc : P.brd, 0);
+    lv_obj_set_width(uiSnDot[i], i == uiSnShown ? 20 : 7);
+  }
+  if (uiSnDot[1]) lv_obj_set_x(uiSnDot[1], 412 + (uiSnShown == 0 ? 20 : 7) + 6);
+  uiSnPref = uiSnShown;
+}
+static void ui_sleep_click_cb(lv_event_t *e) {
+  (void)e;
+  lv_indev_t *in = lv_indev_active();
+  if (in && lv_indev_get_gesture_dir(in) != LV_DIR_NONE) return;   // przeciagniecie = zmiana strony
+  ui_sleep_toggle();
+}
+// Widok A: sen nocny liczony z dziennika (miedzy karmieniami), 14 nocy.
+static void ui_sleep_view_diary(lv_obj_t *p, const UiModel &m, bool anim) {
+  const int pg = 4;
   if (m.camLine[0]) {   // ostatnia noc z kamery (strona WWW): kropka w kolorze oceny + jedna linia
-    const lv_color_t rc = m.camRating == 1 ? P.acc : m.camRating == 2 ? P.sun : m.camRating == 3 ? P.feed : P.faint;
-    ui_box(p, 24, 63, 9, 9, 5, rc);
+    ui_box(p, 24, 63, 9, 9, 5, ui_cam_color(m.camRating));
     ui_label(p, m.camLine, &ui_f13, P.ink2, 39, 57, 410);
   }
   int cnt = 0, sum = 0, best = -1, bestI = -1, lastI = -1;
@@ -1096,7 +1146,7 @@ static void ui_build_sleep(const UiModel &m, bool anim) {
   if (!cnt) { ui_label(p, "Za mało danych: potrzebne karmienie wieczorem\n(17–20) i pierwsze karmienie po północy.", &ui_f15, P.muted, 30, 120, 400); return; }
   int mxh = 8; for (int i = 0; i < UI_NIGHTS; ++i) { const int h = (m.nightMin[i] + 59) / 60 + 1; if (m.nightMin[i] > 0 && h > mxh) mxh = h; }
   if (mxh % 2) ++mxh;
-  const int px0 = 44, pw = 408, base = 238, ph = 150, top = base - ph;
+  const int px0 = 44, pw = 408, base = 238, ph = 150;
   for (int g = 0; g <= mxh; g += 2) {
     const int y = base - g * ph / mxh;
     ui_hline(p, px0, y, pw, P.brd, g == 0 ? 220 : 110);
@@ -1131,6 +1181,128 @@ static void ui_build_sleep(const UiModel &m, bool anim) {
     ui_label(p, vs[i], &ui_f18, P.ink, x + 10, 288, 120);
     ui_label(p, ss[i], &ui_f13, P.muted, x + 10, 310, 120);
   }
+}
+// Widok B: ostatnia noc z kamery (dane z hostingu: pasek nocy, kafelki, 7 nocy). Bez "co wplywa".
+static void ui_sleep_view_cam(lv_obj_t *p, const UiModel &m, bool anim) {
+  const int pg = 4;
+  const UiCam &c = m.cam;
+  // wynik zasypiania + ocena nocy
+  char big[48], sub[96];
+  if (c.status == 0) snprintf(big, sizeof big, "Zasnął po %d min", c.settleMin);
+  else if (c.status == 1) snprintf(big, sizeof big, "Sen aktywny");
+  else snprintf(big, sizeof big, "Zasypianie: brak danych");
+  ui_label(p, big, &ui_f24, P.ink, 24, 56, 290);
+  if (c.status == 0 && c.placed[0] && c.settled[0])
+    snprintf(sub, sizeof sub, "położony %s, zasnął %s%s%s", c.placed, c.settled, c.sleepTo[0] ? ", sen do " : "", c.sleepTo);
+  else if (c.status == 1) snprintf(sub, sizeof sub, "przez godzinę po położeniu ciągły ruch – nie da się oszacować");
+  else if (c.sleepFrom[0]) snprintf(sub, sizeof sub, "sen %s – %s", c.sleepFrom, c.sleepTo);
+  else sub[0] = 0;
+  ui_label(p, sub, &ui_f13, P.muted, 24, 88, 432);
+  static const char *rn[5] = {"", "noc spokojna", "noc umiarkowana", "noc niespokojna", "mało danych"};
+  const lv_color_t rc = ui_cam_color(c.rating);
+  ui_box(p, 330, 66, 10, 10, 5, rc);
+  ui_label(p, rn[c.rating <= 4 ? c.rating : 4], &ui_f13, P.ink2, 346, 60, 112);
+
+  // pasek nocy 18:30-06:00: niebieski = spokoj, zolty = ruch (im mocniejszy, tym wiecej), szary = poza lozeczkiem
+  const int cw = 18, x0 = 33, sy = 118, sh = 30;
+  for (int k = 0; k < UI_CAM_CELLS; ++k) {
+    const char ch = c.strip[k];
+    const int x = x0 + k * cw;
+    if (ch == 'o') {   // poza lozeczkiem (np. karmienie): pusta ramka
+      lv_obj_t *o = ui_box(p, x, sy, cw - 2, sh, 4, P.card, LV_OPA_TRANSP);
+      lv_obj_set_style_border_width(o, 2, 0); lv_obj_set_style_border_color(o, P.muted, 0);
+    } else if (ch == '0') ui_box(p, x, sy, cw - 2, sh, 4, P.sleep);
+    else if (ch > '0' && ch <= '9') ui_box(p, x, sy, cw - 2, sh, 4, P.sun, (lv_opa_t)(95 + (ch - '0') * 17));
+    else ui_box(p, x, sy, cw - 2, sh, 4, P.brd, 90);
+    if (c.cry[k] == '1') ui_dot(p, x + (cw - 2) / 2, sy - 7, 4, P.danger);
+  }
+  // okres snu: kreska pod paskiem
+  auto cellX = [&](const char *hm) -> int {
+    int h = 0, mi = 0;
+    if (sscanf(hm, "%d:%d", &h, &mi) != 2) return -1;
+    int mod = (h * 60 + mi - 1110 + 1440) % 1440;
+    if (mod > UI_CAM_CELLS * 30) mod = mod > 1200 ? 0 : UI_CAM_CELLS * 30;
+    return x0 + mod * cw / 30;
+  };
+  const int sx0 = cellX(c.sleepFrom), sx1 = cellX(c.sleepTo);
+  if (sx0 >= 0 && sx1 > sx0) ui_box(p, sx0, sy + sh + 3, sx1 - sx0, 3, 1, P.acc);
+  static const char *hl[6] = {"19", "21", "23", "1", "3", "5"};
+  for (int i = 0; i < 6; ++i) {
+    const int k = 1 + i * 4;
+    ui_box(p, x0 + k * cw - 1, sy + sh + 1, 1, 6, 0, P.faint, 160);
+    ui_label(p, hl[i], &ui_f13, P.faint, x0 + k * cw - 15, sy + sh + 8, 30, LV_TEXT_ALIGN_CENTER);
+  }
+  // legenda
+  {
+    int lx = 33; const int ly = sy + sh + 28;
+    const lv_color_t lc[4] = {P.sleep, P.sun, P.muted, P.acc};
+    const char *lt[4] = {"spokój", "ruch", "poza łóżeczkiem", "sen"};
+    for (int i = 0; i < 4; ++i) {
+      lv_obj_t *sw = ui_box(p, lx, ly + 4, i == 3 ? 14 : 10, i == 3 ? 3 : 10, 3, lc[i], i == 2 ? LV_OPA_TRANSP : LV_OPA_COVER);
+      if (i == 2) { lv_obj_set_style_border_width(sw, 2, 0); lv_obj_set_style_border_color(sw, P.muted, 0); }
+      lv_obj_t *l = ui_label(p, lt[i], &ui_f13, P.ink2, lx + (i == 3 ? 18 : 14), ly);
+      lv_obj_update_layout(l); lx += (i == 3 ? 18 : 14) + lv_obj_get_width(l) + 12;
+    }
+    if (c.cryCount >= 0) { ui_dot(p, lx + 4, ly + 9, 4, P.danger); ui_label(p, "płacz", &ui_f13, P.ink2, lx + 12, ly); }
+  }
+  // kafelki
+  char v1[12], v2[16], v3[12], s3[32];
+  snprintf(v1, sizeof v1, "%d%%", c.quietPct);
+  ui_fmt_hm(v2, sizeof v2, c.longestBlock);
+  snprintf(v3, sizeof v3, "%d", c.wakeCount);
+  if (c.cryCount > 0) snprintf(s3, sizeof s3, "płacz: %d", c.cryCount);
+  else if (c.cryCount == 0) snprintf(s3, sizeof s3, "bez płaczu");
+  else s3[0] = 0;
+  const char *ks[3] = {"spokój", "najdłuższy blok", "przebudzenia"};
+  const char *vs[3] = {v1, v2, v3}; const char *ss[3] = {"czasu w łóżeczku", "bez ruchu", s3};
+  for (int i = 0; i < 3; ++i) {
+    const int x = 24 + i * 144;
+    ui_box(p, x, 196, 134, 62, 18, P.card2);
+    ui_label(p, ks[i], &ui_f13, P.muted, x + 10, 200, 120);
+    ui_label(p, vs[i], &ui_f18, P.ink, x + 10, 216, 120);
+    ui_label(p, ss[i], &ui_f13, P.muted, x + 10, 238, 120);
+  }
+  // 7 nocy: slupki spokojnego snu (h), kolor = ocena nocy; nad slupkiem godziny, pod nim data
+  ui_label(p, c.cmp, &ui_f13, P.ink2, 24, 264, 432);
+  if (c.wkN > 0) {
+    int mxq = 60; for (int i = 0; i < c.wkN; ++i) if (c.wkQuiet10[i] > mxq) mxq = c.wkQuiet10[i];
+    const int base = 318, hmax = 20, slot = 432 / UI_CAM_WK, bw = 26;
+    for (int i = 0; i < c.wkN; ++i) {
+      const int cx = 24 + slot * (UI_CAM_WK - c.wkN + i) + slot / 2;
+      const int h = c.wkQuiet10[i] > 0 ? 2 + c.wkQuiet10[i] * hmax / mxq : 0;
+      if (h) ui_bar(pg, p, cx - bw / 2, base, bw, h, 4, ui_cam_color(c.wkRating[i]), anim, i);
+      char t[12]; snprintf(t, sizeof t, "%d,%d h", c.wkQuiet10[i] / 10, c.wkQuiet10[i] % 10);
+      ui_label(p, t, &ui_f13, P.ink, cx - 30, base - h - 16, 60, LV_TEXT_ALIGN_CENTER);
+      ui_label(p, c.wkLabel[i], &ui_f13, P.muted, cx - 30, base + 2, 60, LV_TEXT_ALIGN_CENTER);
+    }
+  }
+}
+static void ui_build_sleep(const UiModel &m, bool anim) {
+  const int pg = 4; ui_page_reset(pg);
+  lv_obj_t *p = uiDashPage[pg];
+  ui_card(p, 14, 2, 452, 340, 26);
+  ui_label(p, "Sen nocny", &ui_f18, P.ink, 22, 12);
+  uiSnSub = ui_label(p, "między karmieniami, ostatnie 14 nocy", &ui_f13, P.muted, 22, 36, 380);
+  if (!m.cam.ok) { ui_sleep_view_diary(p, m, anim); return; }
+  // dwa widoki w tym samym miejscu; przelacza je dotkniecie (jak na stronie Waga)
+  snprintf(uiSnSubB, sizeof uiSnSubB, "z kamery, noc %s", m.cam.night);
+  uiSnViewA = ui_box(p, 0, 0, 480, 342, 0, P.bg, LV_OPA_TRANSP);
+  uiSnViewB = ui_box(p, 0, 0, 480, 342, 0, P.bg, LV_OPA_TRANSP);
+  lv_obj_t *vs[2] = {uiSnViewA, uiSnViewB};
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_add_flag(vs[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(vs[i], LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_flag(vs[i], LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(vs[i], ui_sleep_click_cb, LV_EVENT_CLICKED, nullptr);
+  }
+  ui_sleep_view_diary(uiSnViewA, m, anim);
+  ui_sleep_view_cam(uiSnViewB, m, false);
+  lv_obj_add_flag(uiSnViewB, LV_OBJ_FLAG_HIDDEN);
+  uiSnShown = 0;
+  uiSnDot[0] = ui_box(p, 412, 20, 20, 7, 3, P.acc);
+  uiSnDot[1] = ui_box(p, 438, 20, 7, 7, 3, P.brd);
+  ui_label(p, "dotknij, by zmienić", &ui_f13, P.faint, 240, 14, 164, LV_TEXT_ALIGN_RIGHT);
+  if (uiSnPref == 1) ui_sleep_toggle();   // przebudowa strony nie cofa wybranego widoku
 }
 
 // ----------------------------- STRONA 5: KAPIELE -----------------------------
@@ -1231,6 +1403,8 @@ static void ui_dash_tick(lv_timer_t *t) {   // 500 ms: sygnalizator "czas na kar
 static void uiDashCreate(bool night) {
   uiWtPref = 0;
   uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr;
+  uiSnViewA = uiSnViewB = uiSnSub = uiSnDot[0] = uiSnDot[1] = nullptr;
+  uiSnPref = 0;
   if (uiDashTimer) { lv_timer_delete(uiDashTimer); uiDashTimer = nullptr; }
   lv_obj_t *oldScr = uiDashScr; uiDashScr = nullptr;
   ui_bars_stop_all();
@@ -1303,6 +1477,7 @@ static void uiDashCreate(bool night) {
 }
 static void uiDashDestroy() {
   uiWtViewA = uiWtViewB = uiWtSub = uiWtDot[0] = uiWtDot[1] = nullptr;
+  uiSnViewA = uiSnViewB = uiSnSub = uiSnDot[0] = uiSnDot[1] = nullptr;
   if (uiDashTimer) { lv_timer_delete(uiDashTimer); uiDashTimer = nullptr; }
   ui_bars_stop_all();
   if (uiDashScr) { lv_obj_t *o = uiDashScr; uiDashScr = nullptr; uiDashCounterCard = nullptr; uiDashHasData = false; if (lv_screen_active() != o) lv_obj_delete(o); }

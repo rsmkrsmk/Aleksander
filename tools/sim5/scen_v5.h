@@ -1,11 +1,15 @@
 // Scenariusze symulatora dla v5: prawdziwe store.cpp + stats.cpp + ui_modern.h na pliku CSV.
 // Budowa (w katalogu symulatora z liblv.a, patrz tools/sim/README.md):
 //   g++ -O2 -DLV_CONF_INCLUDE_SIMPLE -Iinc -Ilvgl -I<repo>/v5 -DSIM_SCENARIOS='"scen_v5.h"' -w sim.cpp liblv.a -lm -o sim_v5
-// Uzycie: TZ=... ./sim_v5 <saver|saver_night|dash_N|dash_night_N|diag|weightB> out/x 1500   (CSV: /tmp/fw_data.csv)
+// Uzycie: TZ=... ./sim_v5 <saver|saver_night|dash_N|dash_night_N|diag|weightB|sleepB[_night]> out/x 1500   (CSV: /tmp/fw_data.csv)
 #include <vector>
 #include "store.cpp"
 #include "stats.cpp"
 #include "ui_modern.h"
+// Parser "camDev" z host_sync.cpp (wyciety przez tools/sim5/cam_glue.py do cam_glue.h) — widok "Noc z kamery".
+#ifdef SIM_CAM
+#include "cam_glue.h"
+#endif
 static UiModel M;
 static void scenario_build(const char *sc) {
   const bool night = strstr(sc, "night") != nullptr;
@@ -22,9 +26,19 @@ static void scenario_build(const char *sc) {
   SleepState sl;
   statsCompute(in, M, true, &sl);
   fprintf(stderr, "nap='%s' sleeping=%d lastWake=%ld\n", M.napLine, M.sleeping, (long)sl.lastWake);
+#ifdef SIM_CAM
+  if (getenv("CAMJSON")) {   // plik z odpowiedzia /api/status (np. z lokalnego serwera PHP)
+    FILE *cf = fopen(getenv("CAMJSON"), "rb"); std::vector<char> j; int ch;
+    while (cf && (ch = fgetc(cf)) != EOF) j.push_back((char)ch);
+    if (cf) fclose(cf);
+    j.push_back(0); parseCamDev(j.data()); hostCamDev(M.cam);
+    fprintf(stderr, "cam ok=%d night=%s strip=%s wkN=%d cmp=%s\n", M.cam.ok, M.cam.night, M.cam.strip, M.cam.wkN, M.cam.cmp);
+  }
+#endif
   uiApplyTheme(night);
   if (strstr(sc, "saver")) { uiSaverCreate(night); uiSaverUpdate(M); lv_screen_load(uiSaverScr); }
   else if (strstr(sc, "diag")) { uiDiagCreate(night, "DANE Z PANELU WWW (tylko odczyt)\n  wpisow: 701 (z WWW), 21034 B\n  rewizja: lokalna 812, zdalna 812\nOBRAZ\n  detektor przesuniecia: aktywny\n  twarde resynchronizacje: 3 (ostatni powod 8)\nURZADZENIE\n  wersja 5.0.0\n  RAM wewn.: 96 KB (min 71 KB)"); lv_screen_load(uiDiagScr); }
+  else if (strstr(sc, "sleepB")) { uiDashCreate(night); uiDashUpdate(M, false); uiDashShow(4); ui_sleep_toggle(); uiDashUpdate(M, true); }
   else if (strstr(sc, "weightB")) { uiDashCreate(night); uiDashUpdate(M, false); uiDashShow(3); ui_weight_toggle(); uiDashUpdate(M, true); }
   else {
     int pg = 0; const char *q = strrchr(sc, '_'); if (q && isdigit(q[1])) pg = q[1] - '0';
