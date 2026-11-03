@@ -42,6 +42,8 @@ HttpResult httpExchange(Client &c, const HttpPiece *pieces, int nPieces, PsBuf *
 
 // GET https://HOST_NAME<path> do bufora. Zwraca status HTTP (0 = blad sieci/TLS).
 int hostGet(const char *path, PsBuf &body, HttpProgress progress = nullptr, bool *complete = nullptr);
+// Zwykle HTTP (port HOST_HTTP_PORT, bez TLS) — tylko dla malych odpowiedzi (rewizja). 0 = brak polaczenia.
+int hostGetPlain(const char *path, PsBuf &body);
 
 uint32_t netLastTlsEndMs();          // koniec ostatniej sesji TLS (odstep miedzy sesjami)
 void netMarkTls();

@@ -27,6 +27,8 @@ static uint32_t chartsHash = 0;
 static uint32_t lastLvTick = 0;
 static uint32_t lastVsync = 0;
 static uint32_t lastLiveMs = 0, lastChartsMs = 0;
+// G4: najdluzsza praca petli poza rysowaniem (model, wykresy, nowe dane) w ostatniej pelnej minucie
+static uint32_t loopMaxAcc = 0, loopMaxLast = 0, loopWin0 = 0;
 static bool chartsDue = true;
 static bool night = false;
 static bool dimmed = false;
@@ -110,17 +112,22 @@ static void buildDiagText() {
            "DANE Z PANELU WWW (tylko odczyt)\n"
            "  wpisow: %u (%s), %u B\n"
            "  rewizja: lokalna %ld, zdalna %ld\n"
-           "  sprawdzenie rewizji: %s\n"
+           "  sprawdzenie rewizji: %s (co %u s, %s)\n"
            "  ostatnie pobranie: %s\n"
            "  nieudane pobrania z rzedu: %u\n"
            "  ostatni blad: %s\n"
            "  powiadomienia o drzemce (z WWW): %s\n"
+           "  ustawienia i noc z kamery: %s\n"
            "CACHE NA FLASHU\n"
            "  zapisow: %u, ostatni: %s%s\n"
            "OBRAZ\n"
            "  poprawka kolejnosci buforow: %s\n"
            "  klatki: %u, zaklocone: %u (naprawione: %u)\n"
            "  spoznione VSYNC: %u, zapisy flasha: %u\n"
+           "  klatki LVGL: %u, rysowanie w wysw. buforze: %u\n"
+           "  klatka pozniej: %u (ost. min %u), czekanie>400ms: %u\n"
+           "  rysowanie ost. min: sr %u ms, maks %u ms\n"
+           "  zawiniecie %u ms po VSYNC, praca petli maks %u ms\n"
            "SIEC\n"
            "  Wi-Fi: %s, IP %s, %d dBm\n"
            "  czas NTP: %s\n"
@@ -134,11 +141,14 @@ static void buildDiagText() {
            "  uruchomien: %u, restartow watchdoga: %u\n"
            "  ostatni reset: %s",
            store ? (unsigned)store->n : 0u, h.fromCache ? "z cache" : (store ? "z WWW" : "brak"), (unsigned)h.csvBytes,
-           h.revLocal, h.revRemote, a1, a2, (unsigned)h.downloadFails, hostErrorText(h.lastError),
-           hostSleepTelegramEnabled() ? "wlaczone" : "wylaczone",
+           h.revLocal, h.revRemote, a1, (unsigned)(h.pollMs / 1000), h.plainOk ? "HTTP" : "HTTPS", a2, (unsigned)h.downloadFails, hostErrorText(h.lastError),
+           hostSleepTelegramEnabled() ? "wlaczone" : "wylaczone", h.deviceApi ? "/api/device" : "/api/status",
            (unsigned)h.cacheWrites, a3, h.cachePending ? " (czeka zmiana)" : "",
            d.eofFix ? "aktywna" : "NIEAKTYWNA", (unsigned)d.frames, (unsigned)d.badFrames, (unsigned)d.parityFixes,
            (unsigned)d.lateVsyncs, (unsigned)d.flashWrites,
+           (unsigned)d.renderFrames, (unsigned)d.flushRisk, (unsigned)d.flushLate, (unsigned)d.lateLastMin,
+           (unsigned)d.flushTimeouts, (unsigned)(d.renderAvgUs / 1000), (unsigned)(d.renderMaxUs / 1000),
+           (unsigned)(d.wrapUs / 1000), (unsigned)(loopMaxLast / 1000),
            wifiStatusText(), ip, wifiOk() ? (int)WiFi.RSSI() : 0,
            timeOk() ? "OK" : "brak", w.valid ? "OK" : "brak", wAge,
            FW_VERSION, __DATE__,
@@ -320,6 +330,15 @@ void appLoop() {
       Serial.printf("LCD: poprawka %s, klatki %u, zaklocone %u (naprawione %u, EOF %u), spoznione VSYNC %u, zapisy flasha %u\n",
                     d.eofFix ? "aktywna" : "NIEAKTYWNA", (unsigned)d.frames, (unsigned)d.badFrames, (unsigned)d.parityFixes,
                     (unsigned)d.lastBadEof, (unsigned)d.lateVsyncs, (unsigned)d.flashWrites);
+      Serial.printf("LCD: klatki LVGL %u, rysowanie w wyswietlanym buforze %u (ma byc 0), klatka pozniej %u (ost. min %u), "
+                    "czekanie >400 ms %u, rysowanie ost. min sr %u us maks %u us, zawiniecie %u us po VSYNC (zawiniec %u), "
+                    "praca petli maks %u us\n",
+                    (unsigned)d.renderFrames, (unsigned)d.flushRisk, (unsigned)d.flushLate, (unsigned)d.lateLastMin,
+                    (unsigned)d.flushTimeouts, (unsigned)d.renderAvgUs, (unsigned)d.renderMaxUs, (unsigned)d.wrapUs,
+                    (unsigned)d.wraps, (unsigned)loopMaxLast);
+      const HostDiag hd = hostDiag();
+      Serial.printf("Host: rewizja co %u s przez %s (HTTP %u, HTTPS %u), ustawienia z %s\n", (unsigned)(hd.pollMs / 1000),
+                    hd.plainOk ? "HTTP" : "HTTPS", (unsigned)hd.revPlain, (unsigned)hd.revTls, hd.deviceApi ? "/api/device" : "/api/status");
     }
   }
   displayLogEvents();
@@ -341,7 +360,10 @@ void appLoop() {
     uiRefresh(model, changed, diagText);
     telegramCheckSleep(sleepState, hostSleepTelegramEnabled(), timeOk(), time(nullptr));
   }
-  work += micros() - a;
+  const uint32_t loopUs = micros() - a;
+  if (loopUs > loopMaxAcc) loopMaxAcc = loopUs;
+  if (now - loopWin0 >= 60000) { loopMaxLast = loopMaxAcc; loopMaxAcc = 0; loopWin0 = now; }
+  work += loopUs;
   (void)t0;
   diagCpuAdd(work);
 }

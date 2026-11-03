@@ -8,6 +8,8 @@
 #include "weather.h"
 #include "telegram.h"
 #include "hw_display.h"
+#include "hw_touch.h"
+#include <time.h>
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <freertos/FreeRTOS.h>
@@ -24,6 +26,11 @@ static uint32_t cacheWrites = 0, lastCacheWriteMs = 0;
 static volatile bool sleepTg = false;
 static long revLocal = -1, revRemote = -1;
 static uint32_t lastRevOk = 0, lastDlOk = 0, dlFails = 0, lastPoll = 0, lastStatus = 0;
+static uint32_t lastRevChangeMs = 0;          // C1: kiedy ostatnio zmienily sie dane
+static bool plainOk = true;                   // C1: rewizja przez zwykle HTTP dziala
+static uint32_t plainRetryMs = 0;             // po bledzie HTTP: HTTPS, ponowna proba HTTP po 6 h
+static uint32_t revPlain = 0, revTls = 0;     // licznik zapytan (diagnostyka)
+static bool deviceApi = true;                 // C2: hosting ma /api/device (po 404 - /api/status)
 static int lastErr = 0;
 static bool fromCache = false;
 static bool syncedThisBoot = false;
@@ -119,17 +126,35 @@ static void bootProgress(size_t got, long total) {
   progressFn(total > 0 ? static_cast<int>(got * 99 / total) : static_cast<int>((millis() / 60) % 100));
 }
 
+static long parseRev(const PsBuf &b) {
+  if (!b.len) return -1;
+  const char *k = strstr(reinterpret_cast<const char *>(b.p), "\"rev\"");
+  if (!k) return -1;
+  k = strchr(k, ':');
+  return k ? strtol(k + 1, nullptr, 10) : -1;
+}
+
 static long fetchRevision() {
   PsBuf b;
   b.limit = 2048;
-  const int st = hostGet(HOST_PATH_REVISION, b);
   long rev = -1;
-  if (st == 200 && b.len) {
-    const char *k = strstr(reinterpret_cast<const char *>(b.p), "\"rev\"");
-    if (k) {
-      k = strchr(k, ':');
-      if (k) rev = strtol(k + 1, nullptr, 10);
+  int st = 0;
+  // C1: najpierw zwykle HTTP (bez uscisku TLS); gdy hosting go nie obsluguje (przekierowanie na HTTPS,
+  // blad) - HTTPS jak dawniej, a HTTP sprobujemy znow za 6 h.
+  if (!plainOk && millis() - plainRetryMs > 6UL * 3600UL * 1000UL) plainOk = true;
+  if (plainOk) {
+    st = hostGetPlain(HOST_PATH_REVISION, b);
+    ++revPlain;
+    if (st == 200) rev = parseRev(b);
+    if (rev < 0) {
+      plainOk = false; plainRetryMs = millis();
+      Serial.printf("Host: rewizja przez HTTP niedostepna (HTTP %d) - uzywam HTTPS.\n", st);
     }
+  }
+  if (rev < 0) {
+    st = hostGet(HOST_PATH_REVISION, b);
+    ++revTls;
+    if (st == 200) rev = parseRev(b);
   }
   b.release();
   if (rev >= 0) {
@@ -288,7 +313,14 @@ bool hostCamNight(char *line, size_t n, uint8_t *rating) {
 static void fetchStatusSettings() {
   PsBuf b;
   b.limit = 64 * 1024;
-  const int st = hostGet(HOST_PATH_STATUS, b);
+  // C2: lekkie /api/device (te same klucze); starszy hosting bez niego - pelne /api/status
+  int st = hostGet(deviceApi ? HOST_PATH_DEVICE : HOST_PATH_STATUS, b);
+  if (deviceApi && st == 404) {
+    deviceApi = false;
+    Serial.println("Host: brak /api/device na hostingu - uzywam /api/status.");
+    delay(TLS_GAP_MS);
+    st = hostGet(HOST_PATH_STATUS, b);
+  }
   if (st == 200 && b.len) {
     const char *k = strstr(reinterpret_cast<const char *>(b.p), "\"sleepTelegram\"");
     if (k) {
@@ -343,6 +375,18 @@ static void backupIfDue() {
 // ------------------------------------------------------------------ zadanie sieciowe
 static bool tlsGapOk() { return millis() - netLastTlsEndMs() >= TLS_GAP_MS; }
 
+// C1: 10 s gdy ktos korzysta z ekranu albo dane niedawno sie zmienily; inaczej 30 s (dzien) / 60 s (noc).
+static uint32_t pollInterval() {
+  const uint32_t now = millis();
+  if (now - touchLastActivityMs() < 5UL * 60UL * 1000UL) return HOST_POLL_MS;
+  if (lastRevChangeMs && now - lastRevChangeMs < 10UL * 60UL * 1000UL) return HOST_POLL_MS;
+  const time_t t = time(nullptr);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  const bool night = timeOk() && (lt.tm_hour >= NIGHT_START_HOUR || lt.tm_hour < NIGHT_END_HOUR);
+  return night ? HOST_POLL_NIGHT_MS : HOST_POLL_IDLE_MS;
+}
+
 static void netLoop(void *) {
   diagWatchdogAddCurrentTask();
   for (;;) {
@@ -350,10 +394,11 @@ static void netLoop(void *) {
     wifiTick();
     if (wifiOk()) {
       if (tlsGapOk() && telegramPending()) telegramSendPending();
-      if (tlsGapOk() && millis() - lastPoll >= HOST_POLL_MS) {
+      if (tlsGapOk() && millis() - lastPoll >= pollInterval()) {
         lastPoll = millis();
         const long rev = fetchRevision();
         if (rev >= 0 && rev != revLocal) {
+          lastRevChangeMs = millis();
           delay(TLS_GAP_MS);
           Store *s = downloadCsv();
           if (s) { revLocal = rev; publish(s); }
@@ -389,5 +434,10 @@ HostDiag hostDiag() {
   d.lastCacheWriteMs = lastCacheWriteMs;
   d.cachePending = cacheDirty;
   d.netStackFree = netTask ? uxTaskGetStackHighWaterMark(netTask) : 0;
+  d.revPlain = revPlain;
+  d.revTls = revTls;
+  d.plainOk = plainOk;
+  d.deviceApi = deviceApi;
+  d.pollMs = pollInterval();
   return d;
 }

@@ -130,9 +130,9 @@ final class SleepStats
      *  '0'..'9' ruch (minuty z ruchem / 2, maks. 9); cry: 23 znaki '0'/'1' (płacz w tym półgodzinie);
      *  wk: do 7 ostatnich nocy "d.mm:zasypianie:spokój_h*10:ocena" rozdzielone ';'
      *  (zasypianie -1 brak, -2 sen aktywny; ocena 1 spokojna, 2 umiarkowana, 3 niespokojna, 4 mało danych). */
-    public static function device(array $entries): ?array
+    public static function device(array $entries, ?array $an16 = null): ?array
     {
-        $all = array_values(self::analyses($entries, 16));
+        $all = array_values($an16 ?? self::analyses($entries, 16));
         $done = array_values(array_filter($all, static fn($a) => !empty($a['metrics']['complete'])));
         if (!$done) return null;
         $a = $done[count($done) - 1];
@@ -192,7 +192,28 @@ final class SleepStats
         ];
     }
 
+    /** stats() z pamięcią (B1): wynik liczony ponownie tylko po nowej/zmienionej nocy, zmianie dziennika,
+     *  wersji progów albo zmianie dnia. Podpis: pliki nocy z zakresu (nazwa, mtime, rozmiar) + dziennik. */
     public static function stats(array $entries, int $days = 120): array
+    {
+        $files = glob(SleepNights::dir() . '/noc_*.json') ?: [];
+        sort($files);
+        $sigParts = [SleepAnalysis::TUNE_VERSION, self::STATS_VERSION, $days, date('Y-m-d'), md5(json_encode($entries))];
+        foreach (array_slice($files, -max(1, $days)) as $f) $sigParts[] = basename($f) . ':' . @filemtime($f) . ':' . @filesize($f);
+        $sig = md5(implode('|', $sigParts));
+        $cf = self::cacheDir() . '/stats_' . $days . '.json';
+        $hit = is_file($cf) ? json_decode((string)file_get_contents($cf), true) : null;
+        if (is_array($hit) && ($hit['sig'] ?? '') === $sig && isset($hit['s'])) return $hit['s'];
+        $out = self::computeStats($entries, $days);
+        if (!is_dir(self::cacheDir())) @mkdir(self::cacheDir(), 0775, true);
+        @file_put_contents($cf . '.tmp', json_encode(['sig' => $sig, 's' => $out], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+        @rename($cf . '.tmp', $cf);
+        return $out;
+    }
+
+    const STATS_VERSION = 2;   // zmiana sposobu liczenia stats() unieważnia pamięć
+
+    private static function computeStats(array $entries, int $days): array
     {
         $all = self::analyses($entries, $days);
         $nights = array_values($all);
@@ -340,16 +361,42 @@ final class SleepStats
         return ($a ? array_sum($a) / count($a) : 0) - ($b ? array_sum($b) / count($b) : 0);
     }
 
+    /** Test permutacyjny (B1): rangi i sumy liczone raz, w pętli tylko tasowanie i iloczyn skalarny O(n)
+     *  (dla czynników 0/1 suma w grupie "tak"). Tasowanie jak wcześniej (Fisher-Yates od tej samej kopii),
+     *  więc wyniki są te same. Wczesne zatrzymanie (Besag-Clifford): partie po 100; gdy po >= 200 losowaniach
+     *  odsetek trafień >= 0,15 (p wyraźnie > 0,1, próg strony), dalsze losowania niczego nie zmienią. */
     private static function permP(array $xs, array $ys, float $obs, string $type, int $iter = 1500): float
     {
-        $hit = 0;
-        for ($k = 0; $k < $iter; $k++) {
-            $sh = $ys;
-            for ($i = count($sh) - 1; $i > 0; $i--) { $j = mt_rand(0, $i); [$sh[$i], $sh[$j]] = [$sh[$j], $sh[$i]]; }
-            $v = $type === 'bin' ? self::groupDiff($xs, $sh) : self::spearman($xs, $sh);
-            if (abs($v) >= abs($obs) - 1e-12) $hit++;
+        $xs = array_values($xs); $ys = array_values($ys);
+        $n = count($ys); $thr = abs($obs) - 1e-12; $hit = 0; $k = 0;
+        if ($type === 'bin') {
+            $n1 = 0; foreach ($xs as $x) if ($x) $n1++;
+            $n0 = $n - $n1; $all = array_sum($ys); $base = $ys;
+        } else {
+            if ($n < 3) return 1.0;
+            $rx = self::ranks($xs); $ry = self::ranks($ys);
+            $mx = array_sum($rx) / $n; $my = array_sum($ry) / $n;
+            $dx = []; $base = []; $sxx = 0.0; $syy = 0.0;
+            for ($i = 0; $i < $n; $i++) { $dx[$i] = $rx[$i] - $mx; $base[$i] = $ry[$i] - $my; $sxx += $dx[$i] ** 2; $syy += $base[$i] ** 2; }
+            $den = ($sxx > 0 && $syy > 0) ? sqrt($sxx * $syy) : 0.0;
         }
-        return round(($hit + 1) / ($iter + 1), 3);
+        while ($k < $iter) {
+            $end = min($iter, $k + 100);
+            for (; $k < $end; $k++) {
+                $sh = $base;
+                for ($i = $n - 1; $i > 0; $i--) { $j = mt_rand(0, $i); $t = $sh[$i]; $sh[$i] = $sh[$j]; $sh[$j] = $t; }
+                if ($type === 'bin') {
+                    $s1 = 0.0; for ($i = 0; $i < $n; $i++) if ($xs[$i]) $s1 += $sh[$i];
+                    $v = ($n1 ? $s1 / $n1 : 0) - ($n0 ? ($all - $s1) / $n0 : 0);
+                } else {
+                    if ($den == 0.0) $v = 0.0;
+                    else { $sxy = 0.0; for ($i = 0; $i < $n; $i++) $sxy += $dx[$i] * $sh[$i]; $v = $sxy / $den; }
+                }
+                if (abs($v) >= $thr) $hit++;
+            }
+            if ($k >= 200 && $hit >= 0.15 * $k) break;
+        }
+        return round(($hit + 1) / ($k + 1), 3);
     }
 
     private static function ranks(array $v): array

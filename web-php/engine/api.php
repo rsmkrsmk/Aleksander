@@ -78,6 +78,28 @@ function milkAmountsFromParams(): array
     return $mother ? [$clampMl($ml), 0] : [0, $clampMl($ml)];
 }
 
+/** camNight (skrót ostatniej pełnej nocy) i camDev (widok urządzenia) z JEDNEGO wywołania analyses(16) (B2). */
+function camViews(array $entries): array
+{
+    try {
+        $an = SleepStats::analyses($entries, 16);
+        $camNight = null;
+        foreach (array_reverse($an) as $a) if (!empty($a['metrics']['complete'])) { $camNight = SleepStats::brief($a); break; }
+        return [$camNight, SleepStats::device($entries, $an)];
+    } catch (Throwable $e) {
+        return [null, null];
+    }
+}
+
+function statusCacheFile(): string { return dirname(Config::dataFile()) . '/cache/status.json'; }
+
+function statusCacheKey(Repository $repo): string
+{
+    $mt = static fn($f) => is_file($f) ? filemtime($f) . ':' . filesize($f) : '-';
+    return md5(json_encode($repo->revision()['rev'] ?? 0) . '|' . $mt(Config::dataFile()) . '|' . $mt(Config::settingsFile())
+        . '|' . $mt(SleepNights::dir() . '/index.json') . '|' . date('Y-m-d H:i'));
+}
+
 /**
  * Obsluguje jedno zadanie API. $route to logiczna nazwa endpointu, np.
  * 'status','entries','weight-series','entry','delete-entry','event',
@@ -103,7 +125,20 @@ function handle_api(string $route, string $method, Repository $repo): void
         exit;
     }
 
+    if ($route === 'device' && $method === 'GET') {   // B5: lekka odpowiedź dla urządzenia ESP32 (3 pola)
+        $entries = $repo->allEntries();
+        [$camNight, $camDev] = camViews($entries);
+        sendJson(200, ['sleepTelegram' => $repo->loadSettings()['sleepTelegram'], 'camNight' => $camNight, 'camDev' => $camDev]);
+    }
+
     if ($route === 'status' && $method === 'GET') {
+        // B2: pamięć odpowiedzi na 15 s (klucz: rewizja dziennika, pliki danych, ustawienia, noce, minuta)
+        $key = statusCacheKey($repo);
+        $cf = statusCacheFile();
+        if (is_file($cf) && time() - (int)@filemtime($cf) < 15) {
+            $c = json_decode((string)file_get_contents($cf), true);
+            if (is_array($c) && ($c['key'] ?? '') === $key && is_array($c['body'] ?? null)) sendJson(200, $c['body']);
+        }
         $entries = $repo->allEntries();
         $latest = Domain::loadLatestEntries($entries, $now);
         $ageDays = Domain::calculateAgeDays($now);
@@ -129,8 +164,12 @@ function handle_api(string $route, string $method, Repository $repo): void
         $wakeSinceMin = (!$latest['sleepInProgress'] && $latest['lastWakeTime'] !== null)
             ? intdiv($now->getTimestamp() - $latest['lastWakeTime']->getTimestamp(), 60) : -1;
 
-        $h = (int)$now->format('G');
-        $nightActive = ($h >= Config::NIGHT_START_HOUR || $h < Config::NIGHT_END_HOUR);
+        // D: okno nocy z plików nocy t620 (np. 20:30-06:00); bez nocy - stałe z config.php
+        $nh = SleepNights::nightHours();
+        $mNow = (int)$now->format('G') * 60 + (int)$now->format('i');
+        [$ns, $ne] = $nh ?? [Config::NIGHT_START_HOUR * 60, Config::NIGHT_END_HOUR * 60];
+        $nightActive = $ns > $ne ? ($mNow >= $ns || $mNow < $ne) : ($mNow >= $ns && $mNow < $ne);
+        [$camNight, $camDev] = camViews($entries);
 
         $calendar = [];
         for ($i = 0; $i < 5; $i++) {
@@ -146,7 +185,7 @@ function handle_api(string $route, string $method, Repository $repo): void
             ];
         }
 
-        sendJson(200, [
+        $body = [
             'now' => Domain::formatDateTime($now),
             'nowIso' => Domain::webDateTime($now),
             'ip' => 'panel-php',
@@ -183,24 +222,22 @@ function handle_api(string $route, string $method, Repository $repo): void
             'lastBath' => $latest['lastBath'],
             'bathIntervalDays' => Config::BATH_INTERVAL_DAYS,
             'calendar' => $calendar, 'night' => $nightActive,
-            // ostatnia noc z kamery w skrócie (urządzenie: linia na karcie Sen)
-            'camNight' => (static function () use ($entries) {
-                try {
-                    $an = SleepStats::analyses($entries, 2);
-                    foreach (array_reverse($an) as $a) if (!empty($a['metrics']['complete'])) return SleepStats::brief($a);
-                } catch (Throwable $e) {}
-                return null;
-            })(),
-            'camDev' => (static function () use ($entries) {   // widok "Noc z kamery" na urządzeniu (firmware 5.3+)
-                try { return SleepStats::device($entries); } catch (Throwable $e) { return null; }
-            })(),
+            // ostatnia noc z kamery w skrócie i widok "Noc z kamery" urządzenia (jedno wywołanie analyses)
+            'camNight' => $camNight,
+            'camDev' => $camDev,
             'mdns' => 'karmienie.local', 'undoWindowSec' => 60,
             'freeHeap' => 0, 'totalHeap' => 0, 'freePsram' => 0, 'totalPsram' => 0, 'maxAlloc' => 0,
             'uptimeSec' => 0, 'cpuLoad' => 0, 'minFreeHeap' => 0, 'rssi' => 0, 'httpRequests' => 0,
             'bootCount' => 0, 'watchdogResets' => 0, 'watchdogReady' => false,
             'storageDriver' => Config::storageDriver(),
             'resetReason' => 'php',
-        ]);
+        ];
+        $dir = dirname($cf);
+        if (is_dir($dir) || @mkdir($dir, 0775, true)) {
+            @file_put_contents($cf . '.tmp', json_encode(['key' => $key, 'body' => $body], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+            @rename($cf . '.tmp', $cf);
+        }
+        sendJson(200, $body);
     }
 
     if ($route === 'entries' && $method === 'GET') {

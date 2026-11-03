@@ -36,7 +36,7 @@ if ($route !== null) {
 }
 
 /* ---- statyki UI ---- */
-if ($method === 'GET' && preg_match('#^/([A-Za-z0-9_\-]+\.(js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map|html))$#', $uri, $mm)) {
+if ($method === 'GET' && preg_match('#^/((?:fonts/)?[A-Za-z0-9_\-]+\.(js|css|svg|png|jpg|jpeg|gif|webp|ico|woff2?|map|html))$#', $uri, $mm)) {
     $file = __DIR__ . '/' . $mm[1];
     if (is_file($file)) {
         $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
@@ -48,6 +48,7 @@ if ($method === 'GET' && preg_match('#^/([A-Za-z0-9_\-]+\.(js|css|svg|png|jpg|jp
             'woff' => 'font/woff', 'woff2' => 'font/woff2', 'map' => 'application/json',
         ];
         header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+        if ($ext === 'woff' || $ext === 'woff2') header('Cache-Control: public, max-age=31536000');
         readfile($file); exit;
     }
 }

@@ -81,7 +81,7 @@ Gałąź `v5` to firmware napisane od nowa na podstawie analizy `ANALIZA_V5.md`.
 6. **Jednorazowo** ustaw **Erase All Flash Before Sketch Upload: Enabled** (czyści stare ustawienia Wi-Fi/NVS z v4), potem wróć do Disabled.
 7. **Wgraj.** Zmiana tablicy partycji czyści stare dane LittleFS z v4. To nic nie szkodzi: dane są na hostingu, a cache odtworzy się po pierwszym pobraniu.
 
-Rozmiar (kompilacja 2.11.2026, v5.3.0): program ~2,27 MB z 8 MB, zmienne globalne 63 KB RAM.
+Rozmiar (kompilacja 3.11.2026, v5.4.0, rdzeń 3.3.12): program ~2,28 MB z 8 MB, zmienne globalne 64 KB RAM.
 
 ---
 
@@ -150,13 +150,13 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 
 ## Diagnostyka i rozwiązywanie problemów
 
-### Po wgraniu nowego firmware (v5.3.0): co sprawdzić
+### Po wgraniu nowego firmware (v5.4.0): co sprawdzić
 
 Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
 
 | Linia w logu | Znaczenie |
 |---|---|
-| `Lesny Dziennik v5.3.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
+| `Lesny Dziennik v5.4.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
 | `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
 | `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
 | `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |
@@ -166,14 +166,14 @@ Warianty linii o ekranie:
 - `LCD: struktura sterownika nie pasuje ...` albo `LCD: nie znaleziono pol sterownika ...` — poprawka jest wyłączona (inna wersja rdzenia ESP32 niż 3.3.12). Wyślij tę linię razem z wersją rdzenia.
 - `LCD: rdzen bez RESTART_IN_VSYNC ...` — rdzeń sam zeruje licznik, poprawka niepotrzebna.
 
-Przez kilka minut obserwuj obraz: ma być prosty, bez poziomych artefaktów, także zaraz po restarcie i po zmianie wpisów na stronie.
+Przez kilka minut obserwuj obraz: ma być prosty, bez poziomych artefaktów, także zaraz po restarcie i po zmianie wpisów na stronie. Od 5.4.0 animowane elementy (słupki, przesuwanie stron panelu, chmury, krople, pierścień) nie mogą mrugać ani być niedorysowane: po kilku minutach wyślij `l` — „rysowanie w wyswietlanym buforze” ma być **0**.
 
 ### Polecenia w monitorze portu (115200, wyślij jedną literę)
 
 | Znak | Co robi |
 |---|---|
 | `i` | otwiera ekran diagnostyki |
-| `l` | wypisuje statystyki obrazu: czy poprawka działa, liczba klatek, **zakłócone klatki** i ile z nich naprawiono, spóźnione VSYNC, zapisy flasha |
+| `l` | wypisuje statystyki obrazu: czy poprawka działa, liczba klatek, **zakłócone klatki** i ile z nich naprawiono, spóźnione VSYNC, zapisy flasha; od 5.4.0 także: rysowanie w wyświetlanym buforze (ma być 0), klatki pokazane o klatkę później, czas rysowania (średni i maks. w ostatniej minucie), czas od VSYNC do przełączenia bufora (ok. 30–32 ms), najdłuższą pracę pętli; oraz co ile sekund i jak (HTTP/HTTPS) sprawdzana jest rewizja danych |
 | `h` | ręczna twarda resynchronizacja obrazu |
 
 Ekran diagnostyki na urządzeniu: dotknij panel (z tablicy), potem **przytrzymaj zegar** albo tytuł (długie dotknięcie). Są tam sekcje m.in. sieć/host (rewizja, błędy pobierania, cache), pamięć, obraz.
@@ -188,6 +188,8 @@ Ekran diagnostyki na urządzeniu: dotknij panel (z tablicy), potem **przytrzymaj
 | `Cache: plik uszkodzony — pomijam` | pierwszy start po zmianie partycji | normalne; cache odtworzy się po pobraniu danych |
 | Ekran startowy utknął na kroku „dane z WWW” | hosting niedostępny albo błąd 500 strony | otwórz stronę w przeglądarce; opis błędu 500: `web-php/README.md` rozdział 5; urządzenie pokaże dane z cache |
 | `BLAD: brak PSRAM` | zły wybór w Narzędziach | PSRAM = **OPI PSRAM** |
+| Animowane elementy czasem mrugają albo są niedorysowane | LVGL rysował w buforze, który ekran jeszcze wyświetlał (naprawione w 5.4.0; opis: repo `wiewiornik`, `2112026.md` rozdział G) | wgraj 5.4.0; `l`: „rysowanie w wyswietlanym buforze” = 0, „czekanie >400 ms” = 0 |
+| Wpis z telefonu pojawia się na urządzeniu po ok. minucie | od 5.4.0 rewizja sprawdzana co 10 s tylko, gdy ktoś dotykał ekranu w ostatnich 5 min albo dane zmieniły się w ostatnich 10 min; inaczej co 30 s (dzień) / 60 s (noc) | dotknij ekranu — od razu wraca 10 s |
 | Dane na urządzeniu nie zmieniają się po wpisie na stronie | rewizja nie rośnie albo host nie odpowiada | `https://phpmapy1.webd.pro/api/revision` w przeglądarce; liczba `rev` powinna rosnąć po zapisie |
 
 ## Testy na PC
@@ -207,8 +209,15 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 
 - **Strona na hostingu** (`web-php/`): jedyne miejsce zapisu danych. Pełny opis — układ na hostingu, aktualizacja plik po pliku, API, wykres wagi, błąd 500: **`web-php/README.md`**.
 - **Jakość snu nocą z kamery:** serwer domowy t620 wysyła co rano dane nocy na stronę (`POST /api/sleep-night`); wykres jest w Sen → „Jakość snu nocą”. Opis strony: `web-php/README.md` rozdział 10; konfiguracja serwera domowego: repozytorium `wiewiornik` (prywatne), `INSTRUKCJA.md` rozdział 3c2.
-- Urządzenie (od 5.3.0) nie rozmawia z kamerą ani z t620: bierze gotowy skrót ostatniej nocy ze strony (`/api/status`, obiekty `camNight` i `camDev`) i pokazuje go na karcie **Sen** (drugi widok „Noc z kamery”). Analiza i „Co wpływa na sen” są tylko na stronie.
+- Urządzenie (od 5.3.0) nie rozmawia z kamerą ani z t620: bierze gotowy skrót ostatniej nocy ze strony (obiekty `camNight` i `camDev`; od 5.4.0 z lekkiego `/api/device`, a gdy hosting go jeszcze nie ma — z `/api/status`) i pokazuje go na karcie **Sen** (drugi widok „Noc z kamery”). Analiza i „Co wpływa na sen” są tylko na stronie.
 - Zmiany samej strony (wykresy, analiza) wymagają tylko aktualizacji plików na hostingu, bez wgrywania firmware. Firmware trzeba wgrać dopiero przy zmianach z folderu `v5/`.
+
+### Aktualizacja firmware do 5.4.0 (z 5.3.0)
+
+1. Hosting (najpierw, ale firmware działa też ze starą stroną): wgraj pliki strony z rozdziału 4 `web-php/README.md` — m.in. `api.php` (nowe `/api/device`) i nowy folder `fonts/`.
+2. Z folderu `v5` gałęzi `v5` podmień: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `hw_display.cpp`, `hw_display.h`, `net.cpp`, `net.h`, `stats.cpp`, `ui_modern.h`. Swój `secrets.h` zostaw. Biblioteki bez zmian (sprawdzone kompilacją: rdzeń 3.3.12, lvgl 9.3.0, GFX 1.6.9, SensorLib 0.5.1).
+3. Wgraj jak zwykle. Nie trzeba czyścić flasha.
+4. Sprawdź: w logu `v5.4.0`; po kilku minutach polecenie `l` — „rysowanie w wyswietlanym buforze 0”, druga linia `Host: rewizja co 30 s przez HTTP` (albo `HTTPS`, jeśli hosting nie obsługuje zwykłego HTTP — też dobrze) i `ustawienia z /api/device`.
 
 ### Aktualizacja firmware do 5.3.0 (z 5.2.0 lub wcześniejszych)
 
@@ -225,6 +234,7 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 | 5.1.0 | poprawka licznika EOF sterownika ekranu (przesuwanie obrazu), detektor przesunięcia, polecenia `l`, `h` |
 | 5.2.0 | linia ostatniej nocy z kamery na karcie Sen (`camNight`) |
 | 5.3.0 | karta Sen: drugi widok „Noc z kamery” (`camDev`); wykres przyrostu wagi jak na hostingu (każdy tydzień, szacunki, norma) |
+| 5.4.0 | koniec mrugania animacji (LVGL czeka, aż sterownik przełączy bufor: `on_frame_buf_complete` + `lv_display_set_flush_wait_cb`), liczniki obrazu w `l` i diagnostyce; krótsze przesuwanie stron i wzrost słupków; rewizja co 10/30/60 s zależnie od użycia i zwykłym HTTP (zapas HTTPS); `/api/device` zamiast `/api/status`; sumy dnia liczone tylko po zmianie danych albo minuty |
 
 Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
 - API nie ma uwierzytelniania — hasła dla całego portalu zostaną dodane później jednym ruchem (P0),

@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define FW_VERSION "5.3.0"
+#define FW_VERSION "5.4.0"
 
 // ------------------------------- Dziecko ------------------------------------
 constexpr int BIRTH_DAY = 8;
@@ -31,8 +31,13 @@ constexpr uint32_t WIFI_RETRY_MS = 30000;
 constexpr uint16_t HOST_PORT = 443;
 #define HOST_PATH_REVISION "/api/revision"
 #define HOST_PATH_CSV "/api/export.csv"
-#define HOST_PATH_STATUS "/api/status"         // stad czytamy ustawienie sleepTelegram
-constexpr uint32_t HOST_POLL_MS = 10000;          // sprawdzanie rewizji danych (decyzja D6)
+#define HOST_PATH_STATUS "/api/status"         // zapas, gdy hosting nie ma jeszcze /api/device
+#define HOST_PATH_DEVICE "/api/device"         // C2: tylko sleepTelegram, camNight, camDev (strona od 3.11.2026)
+constexpr uint16_t HOST_HTTP_PORT = 80;          // C1: rewizja zwyklym HTTP (56 B, bez TLS); po bledzie - HTTPS
+// C1: odstep sprawdzania rewizji zalezy od sytuacji (decyzja D6: wpis z telefonu ma byc widoczny szybko):
+constexpr uint32_t HOST_POLL_MS = 10000;          // dotyk w ostatnich 5 min albo zmiana danych w ostatnich 10 min
+constexpr uint32_t HOST_POLL_IDLE_MS = 30000;     // dzien, nikt nie dotyka
+constexpr uint32_t HOST_POLL_NIGHT_MS = 60000;    // noc (NIGHT_START_HOUR..NIGHT_END_HOUR), nikt nie dotyka
 constexpr uint32_t HOST_STATUS_REFRESH_MS = 10UL * 60UL * 1000UL;  // ustawienia z hostingu
 constexpr uint32_t HOST_BOOT_SYNC_MS = 25000;     // limit czekania na dane przy starcie
 constexpr size_t HOST_CSV_MAX_BYTES = 1024UL * 1024UL;  // gorny limit pobieranego CSV (PSRAM)

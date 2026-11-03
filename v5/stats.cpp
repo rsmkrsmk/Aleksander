@@ -637,10 +637,24 @@ static void computeCharts(const StatsInput &in, UiModel &m, int todayDay, const 
 void statsCompute(const StatsInput &in, UiModel &m, bool charts, SleepState *sleepOut) {
   struct tm tn;
   const int todayDay = localDayOf(in.now, &tn);
+  // C3: sumy dni i sen z calego dziennika tylko po zmianie danych albo minuty (dawniej co sekunde).
+  // Co sekunde liczy sie tylko czesc "na zywo" (zegar, liczniki "od ostatniego") z gotowych sum.
+  static DayAgg cAgg[WIN_DAYS];
+  static SleepState cSl;
+  static const Store *cStore = nullptr;
+  static uint32_t cCrc = 0, cN = 0;
+  static long cMin = -1;
+  static int cDay = -1;
+  const long minute = static_cast<long>(in.now / 60);
+  const uint32_t crc = in.store ? in.store->crc : 0, n = in.store ? in.store->n : 0;
+  if (in.store != cStore || crc != cCrc || n != cN || minute != cMin || todayDay != cDay) {
+    aggDays(in.store, todayDay, cAgg);
+    sleepScan(in.store, in.now, todayDay, cAgg, cSl);
+    cStore = in.store; cCrc = crc; cN = n; cMin = minute; cDay = todayDay;
+  }
   DayAgg agg[WIN_DAYS];
-  aggDays(in.store, todayDay, agg);
-  SleepState sl;
-  sleepScan(in.store, in.now, todayDay, agg, sl);
+  memcpy(agg, cAgg, sizeof agg);
+  SleepState sl = cSl;
   if (!sl.sleeping && sl.lastWake > 0) {
     int wmin = 0, wmax = 0;
     statsWakeWindow(statsAgeDays(in.now, in.timeOk), wmin, wmax);

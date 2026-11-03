@@ -75,8 +75,10 @@ Wszystko w katalogu danych (`panel-data/` na hostingu, `data/` w repo). Katalog 
 | `karmienia_backup.csv` | kopia bieżąca (tworzona przy zapisie; nie w repo) |
 | `ustawienia.cfg` | ustawienia z panelu (np. powiadomienia Telegram o drzemce) |
 | `RRRR-MM-DD-GG-MM-SS.bakap` | kopie sprzed wgrania całego CSV (rozdział 8) |
-| `noce/noc_RRRR-MM-DD.json`, `noce/index.json` | noce z kamery i ich wskaźniki (rozdział 10) |
+| `noce/noc_RRRR-MM-DD.json`, `noce/index.json` | noce z kamery i ich wskaźniki (rozdział 10); `noce/index_bad.json` — wadliwe pliki nocy (nie są czytane przy każdym zapytaniu, wracają same po poprawieniu pliku) |
 | `noce/analiza/RRRR-MM-DD.json` | pamięć podręczna analizy nocy; liczona od nowa sama, gdy zmieni się plik nocy, progi albo wpisy dziennika z tej doby (można bezpiecznie usunąć cały katalog) |
+| `noce/analiza/stats_<dni>.json` | pamięć wyniku `/api/sleep-stats` (od 3.11.2026): liczona od nowa po nowej nocy, zmianie dziennika albo następnego dnia |
+| `cache/status.json` | odpowiedź `/api/status` sprzed najwyżej 15 s (można usunąć) |
 
 Format CSV: nagłówek `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`, jeden wpis na wiersz. Typy: `KARMIENIE` (pierś, minuty w kolumnach `piers_*`), `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `WITAMINA_D`, `ODCIAGANIE`, `WAGA` (w polu `ml` są gramy), `SEN_START`, `SEN_STOP`, `KAPIEL`.
 
@@ -113,6 +115,7 @@ Bez gita, przez **Menedżer plików** cPanel albo FTP. Pliki bierzesz z repo: Gi
 | Z repo | Na hosting |
 |---|---|
 | `web-php/ui/index.php`, `index.html`, `indexesp.html`, `app.js` | `/home/phpmapy1/public_html/` |
+| folder `web-php/ui/fonts/` (`sora.woff`, `manrope.woff`, licencje OFL; od 3.11.2026) | `/home/phpmapy1/public_html/fonts/` (utwórz folder) |
 | `web-php/engine/*.php` (`api.php`, `Domain.php`, `config.php`, `SleepNights.php`, `SleepAnalysis.php`, `SleepStats.php`, `bootstrap.php`, `CsvRepository.php`, `MysqlRepository.php`, `Repository.php`, `development_tips.php`) | `/home/phpmapy1/panel-engine/` |
 
 **NIE nadpisuj:**
@@ -156,7 +159,8 @@ Adresy względem strony: `https://phpmapy1.webd.pro/api/<nazwa>` (albo wprost `�
 |---|---|
 | `GET /export.csv` i `GET /api/export.csv` | cały CSV; pobiera go urządzenie |
 | `GET /api/revision` | `{"rev":N,"count":liczba wpisów,"updatedAt":…}`; `rev` rośnie przy każdej zmianie danych |
-| `GET /api/status` | stan do panelu i urządzenia: wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`), `camNight` — skrót ostatniej zakończonej nocy z kamery (urządzenie pokazuje go na karcie Sen), `camDev` — płaski obiekt do widoku „Noc z kamery” na urządzeniu (firmware 5.3+): `night`, `rating` (1–4), `settleStatus`, `settleMin`, `placed`/`settled`/`sleepFrom`/`sleepTo` (HH:MM), `quietPct`, `longestBlock`, `wakeCount`, `cryCount` (−1 brak dźwięku), `strip` (23 znaki na pół godziny od 18:30: `-` brak danych, `o` poza łóżeczkiem, `0`–`9` ruch), `cry` (23 znaki `0`/`1`), `wk` (do 7 nocy `d.mm:zasypianie:spokój_h×10:ocena` rozdzielone `;`, zasypianie −1 brak, −2 sen aktywny), `cmp` (gotowa linia porównania 7 nocy z 7 wcześniejszymi) |
+| `GET /api/status` | stan do panelu (od 3.11.2026 z pamięcią 15 s w `panel-data/cache/status.json`; `night` z godzin nocy t620 z plików nocy, np. 20:30–06:00): wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`), `camNight` — skrót ostatniej zakończonej nocy z kamery (urządzenie pokazuje go na karcie Sen), `camDev` — płaski obiekt do widoku „Noc z kamery” na urządzeniu (firmware 5.3+): `night`, `rating` (1–4), `settleStatus`, `settleMin`, `placed`/`settled`/`sleepFrom`/`sleepTo` (HH:MM), `quietPct`, `longestBlock`, `wakeCount`, `cryCount` (−1 brak dźwięku), `strip` (23 znaki na pół godziny od 18:30: `-` brak danych, `o` poza łóżeczkiem, `0`–`9` ruch), `cry` (23 znaki `0`/`1`), `wk` (do 7 nocy `d.mm:zasypianie:spokój_h×10:ocena` rozdzielone `;`, zasypianie −1 brak, −2 sen aktywny), `cmp` (gotowa linia porównania 7 nocy z 7 wcześniejszymi) |
+| `GET /api/device` | lekka odpowiedź dla urządzenia (firmware 5.4+): tylko `sleepTelegram`, `camNight`, `camDev` (format jak w `/api/status`) |
 | `GET /api/entries?date=RRRR-MM-DD` | wpisy z jednego dnia |
 | `GET /api/weight-series` | `points` (ważenia), `weeks` (słupki przyrostu), `recent` (trend ~14 dni), `today` (dzień życia), `birthWeightG` |
 | `GET /api/bath-calendar` | kąpiele: kalendarz i podsumowanie |
@@ -171,7 +175,7 @@ Adresy względem strony: `https://phpmapy1.webd.pro/api/<nazwa>` (albo wprost `�
 | `POST /api/sleep-night` | odbiór nocy z kamery (rozdział 10) |
 | `GET /api/sleep-nights?days=14` | lista nocy ze wskaźnikami, od najstarszej (max 400); każda z `brief` (zasypianie, bloki, przebudzenia, płacz, pozycje) |
 | `GET /api/sleep-night?night=RRRR-MM-DD` | szczegóły jednej nocy: oś minut, godziny, ruchy, mapy (`heat.night80`, `heat.slices`), strefy, `analysis` (pełna analiza), `avgHeat` (średnia mapa 7 poprzednich nocy) lub `404` |
-| `GET /api/sleep-stats?days=120` | ostatnia noc, tygodnie (średnie i zmiany), seria nocy z kobiercem, wpływ dnia na noc |
+| `GET /api/sleep-stats?days=120` | ostatnia noc, tygodnie (średnie i zmiany), seria nocy z kobiercem, wpływ dnia na noc (od 3.11.2026 szybki test permutacyjny z wczesnym zatrzymaniem i pamięć wyniku: 120 nocy 3,8 s → 0,25 s, kolejne wejścia kilka ms) |
 
 CORS jest domyślnie wyłączony (API działa same-origin). Gdy urządzenia będą łączyć się z innego originu, ustaw `Config::corsOrigin()` (albo zmienną `CORS_ORIGIN`) na konkretny origin lub `*`.
 
@@ -284,7 +288,7 @@ Dane odświeżają się co 5 min. Prosta strona nie ma tych sekcji (zmiany grafi
 
 ### 10.7 Widok na urządzeniu (firmware 5.3.0)
 
-Urządzenie ESP32 nie liczy nic z nocy: bierze gotowy skrót z `/api/status` (`SleepStats::device`, obiekt `camDev`, format w tabeli API, rozdział 7) i pokazuje go jako drugi widok karty Sen: zasypianie i ocena nocy, pasek nocy co 30 min (spokój / ruch / poza łóżeczkiem / płacz), kafelki (spokój %, najdłuższy blok, przebudzenia), 7 ostatnich nocy z porównaniem do 7 poprzednich. „Co wpływa na sen” nie ma na urządzeniu (decyzja użytkownika). Gdy hosting nie ma jeszcze zakończonej nocy, `camDev` jest `null`, a karta Sen ma jeden widok. Stary firmware (≤ 5.2.0) ignoruje nowe pole.
+Urządzenie ESP32 nie liczy nic z nocy: bierze gotowy skrót z `/api/device` (firmware 5.4+; starsze z `/api/status`) (`SleepStats::device`, obiekt `camDev`, format w tabeli API, rozdział 7) i pokazuje go jako drugi widok karty Sen: zasypianie i ocena nocy, pasek nocy co 30 min (spokój / ruch / poza łóżeczkiem / płacz), kafelki (spokój %, najdłuższy blok, przebudzenia), 7 ostatnich nocy z porównaniem do 7 poprzednich. „Co wpływa na sen” nie ma na urządzeniu (decyzja użytkownika). Gdy hosting nie ma jeszcze zakończonej nocy, `camDev` jest `null`, a karta Sen ma jeden widok. Stary firmware (≤ 5.2.0) ignoruje nowe pole.
 
 ## 11. Włączenie MySQL
 

@@ -34,6 +34,10 @@ struct HostDiag {
   uint32_t lastCacheWriteMs;
   bool cachePending;
   uint32_t netStackFree;                     // zapas stosu zadania sieciowego (B)
+  uint32_t revPlain, revTls;                 // C1: zapytania o rewizje przez HTTP / HTTPS
+  bool plainOk;                              // C1: HTTP dziala (inaczej HTTPS)
+  bool deviceApi;                            // C2: hosting ma /api/device
+  uint32_t pollMs;                           // C1: biezacy odstep sprawdzania rewizji
 };
 HostDiag hostDiag();
 const char *hostErrorText(int e);

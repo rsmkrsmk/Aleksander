@@ -704,7 +704,7 @@ static lv_obj_t *ui_bar(int page, lv_obj_t *parent, int x, int base, int w, int 
     b.o = o; b.base = base; b.h = h; b.x = x; b.w = w;
     if (animate && h > 0) {
       lv_obj_set_height(o, 1); lv_obj_set_y(o, base - 1);
-      ui_anim_start(&b, ui_cb_bar, 0, 256, 520, 60 + idx * 55, lv_anim_path_overshoot);
+      ui_anim_start(&b, ui_cb_bar, 0, 256, 400, 60 + idx * 30, lv_anim_path_overshoot);   // G3: 1,9 s zamiast 3,2 s
     }
   }
   return o;
@@ -1369,9 +1369,9 @@ static void ui_dash_goto(int to, bool animate = true) {
   const int slotW = 452 / UI_PAGES;
   const int px = 14 + slotW * to + (slotW - 64) / 2;
   if (animate) {
-    ui_anim_start(uiDashPill, ui_cb_x, lv_obj_get_x(uiDashPill), px, 280, 0, lv_anim_path_ease_out);
+    ui_anim_start(uiDashPill, ui_cb_x, lv_obj_get_x(uiDashPill), px, 200, 0, lv_anim_path_ease_out);   // G3: krocej (bylo 280)
     lv_anim_t a; lv_anim_init(&a); lv_anim_set_var(&a, uiDashStrip); lv_anim_set_exec_cb(&a, ui_cb_x);
-    lv_anim_set_values(&a, lv_obj_get_x(uiDashStrip), -to * 480); lv_anim_set_duration(&a, 260);
+    lv_anim_set_values(&a, lv_obj_get_x(uiDashStrip), -to * 480); lv_anim_set_duration(&a, 180);   // G3: bylo 260 ms
     lv_anim_set_path_cb(&a, lv_anim_path_ease_out); lv_anim_set_completed_cb(&a, ui_slide_done); lv_anim_start(&a);
   } else {
     lv_obj_set_x(uiDashPill, px); lv_obj_set_x(uiDashStrip, -to * 480); ui_slide_done(nullptr);
@@ -1494,7 +1494,7 @@ static void uiDashShow(int page = 0) {
 static void uiDashUpdate(const UiModel &m, bool rebuild) {
   if (!uiDashScr) return;
   uiDashM = m; uiDashHasData = true;
-  ui_set(uiDashClock, "");
+  // G3: bez ui_set(uiDashClock, "") - zegar przerysowuje sie tylko przy zmianie minuty
   char b[8]; snprintf(b, sizeof b, "%s:%s", m.clockHH, m.clockMM); ui_set(uiDashClock, b);
   char a[64]; snprintf(a, sizeof a, "Aleksander · %s", m.ageText); ui_set(uiDashAge, a);
   ui_tint(uiDashLedW, m.wifiOk ? P.good : P.danger); ui_tint(uiDashLedS, m.storageOk ? P.good : P.danger); ui_tint(uiDashLedT, m.timeOk ? P.good : P.danger);

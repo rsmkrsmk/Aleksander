@@ -240,6 +240,24 @@ HttpResult httpExchange(Client &c, const HttpPiece *pieces, int nPieces, PsBuf *
   return res;
 }
 
+int hostGetPlain(const char *path, PsBuf &body) {
+  if (!wifiOk()) return 0;
+  NetworkClient c;
+  c.setTimeout(5000);
+  diagFeedWatchdog();
+  if (!c.connect(HOST_NAME, HOST_HTTP_PORT, 4000)) { c.stop(); return 0; }
+  char req[256];
+  const int n = snprintf(req, sizeof req,
+                         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: LesnyDziennik/" FW_VERSION
+                         "\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+                         path, HOST_NAME);
+  HttpPiece pc = {reinterpret_cast<const uint8_t *>(req), static_cast<size_t>(n)};
+  body.clear();
+  const HttpResult r = httpExchange(c, &pc, 1, &body, 6000, nullptr);
+  c.stop();
+  return r.complete ? r.status : (r.status ? -r.status : 0);
+}
+
 int hostGet(const char *path, PsBuf &body, HttpProgress pr, bool *complete) {
   if (complete) *complete = false;
   if (!wifiOk()) return 0;

@@ -27,6 +27,15 @@ struct DisplayDiag {
   uint32_t lateVsyncs;              // spoznione VSYNC (przestoj przerwan)
   uint32_t resyncCount;             // reczne twarde resynchronizacje
   uint32_t flashWrites;
+  // 5.4.0: mruganie animacji (2112026.md, rozdzial G)
+  uint32_t wraps;                   // zawiniecia ramki (przelaczenia bufora przez sterownik)
+  uint32_t wrapUs;                  // czas od VSYNC do zawiniecia (oczekiwane ok. 30-32 ms)
+  uint32_t renderFrames;            // narysowane klatki LVGL
+  uint32_t flushRisk;               // LVGL zaczal pisac do wyswietlanego bufora (ma byc 0)
+  uint32_t flushLate;               // klatki pokazane o klatke pozniej (powtorzona klatka, bez mrugania)
+  uint32_t lateLastMin;             // ...w ostatniej pelnej minucie
+  uint32_t renderMaxUs, renderAvgUs;// czas rysowania klatki w ostatniej pelnej minucie
+  uint32_t flushTimeouts;           // czekanie na przelaczenie bufora > 400 ms (poza zapisem flasha 0)
 };
 DisplayDiag displayDiag();
 

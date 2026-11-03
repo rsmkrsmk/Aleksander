@@ -926,6 +926,35 @@ function camNightLabel(iso){const d=new Date(iso+'T12:00:00'),n=new Date(d.getTi
 const camHM=m=>{if(m==null)return '—';const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h} h ${pad(mm)} min`:`${mm} min`};
 const camClock=ts=>ts?hm(new Date(ts*1000)):'—';
 const camNum=(v,dec=0)=>v==null?'—':Number(v).toFixed(dec).replace('.',',');
+/* B7: miejsce podpisu strefy = kratka najdalej od brzegu strefy (biegun niedostępności na siatce 16x9, BFS),
+   przy remisie najbliżej środka strefy; podpisy nie nachodzą na siebie (następna najlepsza kratka); strefa
+   mniejsza niż 3 kratki albo bez wolnego miejsca - podpis tylko w legendzie pod mapą. */
+function zoneLabelCells(cells,zz){
+  const inZ=i=>i>=0&&i<144&&cells[i]==zz,d=new Array(144).fill(-1),q=[],N=[[1,0],[-1,0],[0,1],[0,-1]];
+  for(let i=0;i<144;i++)if(inZ(i)){const x=i%16,y=i/16|0;
+    if(N.some(([a,b])=>{const X=x+a,Y=y+b;return X<0||Y<0||X>15||Y>8||!inZ(Y*16+X)})){d[i]=0;q.push(i)}}
+  for(let h=0;h<q.length;h++){const i=q[h],x=i%16,y=i/16|0;
+    for(const [a,b] of N){const X=x+a,Y=y+b,j=Y*16+X;if(X>=0&&Y>=0&&X<16&&Y<9&&inZ(j)&&d[j]<0){d[j]=d[i]+1;q.push(j)}}}
+  const all=[...Array(144).keys()].filter(inZ);if(!all.length)return [];
+  const cx=all.reduce((s,i)=>s+i%16,0)/all.length,cy=all.reduce((s,i)=>s+(i/16|0),0)/all.length;
+  const dist=i=>(i%16-cx)**2+((i/16|0)-cy)**2;
+  return all.sort((a,b)=>d[b]-d[a]||dist(a)-dist(b));
+}
+function zoneLabelSpots(cells,lab,names){
+  const out=[],boxes=[],nm=zz=>(names||'ABCD')[zz-1]||'ABCD'[zz-1];
+  const order=Object.keys(lab).sort((a,b)=>lab[a].length-lab[b].length);   // małe strefy najpierw (mniej miejsca)
+  for(const zz of order){
+    if(lab[zz].length<3)continue;
+    const name=String(nm(+zz)),w=.55*.62*name.length+.2,h=.75;
+    for(const i of zoneLabelCells(cells,+zz)){
+      let x=i%16+.5,y=(i/16|0)+.5;x=Math.min(16-w/2,Math.max(w/2,x));
+      const b=[x-w/2,y-h/2,x+w/2,y+h/2];
+      if(boxes.some(c=>b[0]<c[2]&&c[0]<b[2]&&b[1]<c[3]&&c[1]<b[3]))continue;
+      boxes.push(b);out.push({x,y,name});break;
+    }
+  }
+  return out;
+}
 const camTile=(k,v,sub,cls)=>{const d=bcalElem('div','wg-stat'+(cls?' '+cls:''));d.append(bcalElem('div','wg-k',k),bcalElem('div','wg-v',v),bcalElem('div','wg-s',sub||''));return d};
 
 /* ---------- góra podstrony: ostatnia noc + tydzień do tygodnia ---------- */
@@ -1113,7 +1142,7 @@ function camHeat(det,A){
   if(z&&z.defined&&z.cells){const ov=svgEl('svg',{viewBox:'0 0 16 9',class:'hm-zones',preserveAspectRatio:'none'});
     z.cells.forEach((zz,i)=>{if(!zz)return;const cx=i%16,cy=Math.floor(i/16);ov.append(svgEl('rect',{x:cx,y:cy,width:1,height:1,class:'hz z'+zz}))});
     const lab={};z.cells.forEach((zz,i)=>{if(!zz)return;(lab[zz]=lab[zz]||[]).push(i)});
-    Object.entries(lab).forEach(([zz,arr])=>{const cx=arr.reduce((s,i)=>s+i%16,0)/arr.length+.5,cy=arr.reduce((s,i)=>s+Math.floor(i/16),0)/arr.length+.5;const t=svgEl('text',{x:cx,y:cy,class:'hz-t','text-anchor':'middle','dominant-baseline':'middle'});t.textContent=(z.names||'ABCD')[zz-1]||'ABCD'[zz-1];ov.append(t)});
+    zoneLabelSpots(z.cells,lab,z.names).forEach(({x,y,name})=>{const t=svgEl('text',{x,y,class:'hz-t','text-anchor':'middle','dominant-baseline':'middle'});t.textContent=name;ov.append(t)});
     stage.append(ov)}
   box.append(stage);
   const draw=()=>{
@@ -1537,7 +1566,9 @@ function nudge(min){const i=$('entryTime');const d=new Date(i.value);if(Number.i
 /* ============================================================================
    API akcje
    ============================================================================ */
+let lastFull=0,lastRev=null;
 async function refresh(){
+  lastFull=Date.now();
   try{render(await request('/api/status'));}
   catch(e){toast(e.message,'err')}
 }
@@ -1910,4 +1941,12 @@ document.addEventListener('keydown',ev=>{
 /* ---------- Start ---------- */
 navTo('start');
 refresh();
-setInterval(refresh,10000);
+/* B2: co 10 s tylko mała rewizja dziennika; pełny /api/status po zmianie albo co 60 s; w ukrytej karcie nic */
+async function tick(){
+  if(document.hidden)return;
+  try{const r=await request('/api/revision');const k=r?`${r.rev}:${r.count}`:null;
+    if(k!==null&&k!==lastRev){const first=lastRev===null;lastRev=k;if(!first)return refresh()}}catch(e){}
+  if(Date.now()-lastFull>=60000)refresh();
+}
+setInterval(tick,10000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-lastFull>10000)refresh()});

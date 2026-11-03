@@ -74,6 +74,35 @@ static volatile uint32_t resyncCount = 0;
 
 static inline uint32_t nowUs() { return static_cast<uint32_t>(esp_timer_get_time()); }
 
+// =============================================================================
+//  MRUGANIE ANIMOWANYCH ELEMENTOW (ustalone 3.11.2026, 2112026.md rozdzial G; poprawka w 5.4.0)
+//  Sterownik RGB w trybie bounce przy draw_bitmap() tylko zapamietuje nowy bufor (cur_fb_index).
+//  Ekran przechodzi na niego dopiero przy "zawinieciu ramki" (ostatnia porcja klatki trafia do bufora
+//  bounce, ok. 30-32 ms po VSYNC) i wtedy wola on_frame_buf_complete. Dawniej flushCb od razu
+//  wolal lv_display_flush_ready(), wiec gdy klatka nie zdazyla przed zawinieciem, LVGL rysowal
+//  nastepna klatke w buforze, ktory ekran wciaz wyswietlal -> element znikal/byl niedorysowany.
+//  Teraz: flushCb nie zglasza gotowosci; LVGL przed pierwszym zapisem do drugiego bufora wola
+//  flushWaitCb(), ktory czeka na pierwsze zawiniecie po draw_bitmap(). Czekanie wypada na poczatku
+//  NASTEPNEGO rysowania, wiec praca petli po klatce dzieje sie w tym czasie.
+// =============================================================================
+static SemaphoreHandle_t fbSem = nullptr;
+static volatile uint32_t fbWraps = 0;       // zawiniecia ramki (sterownik wybral bufor na nastepna klatke)
+static volatile uint32_t fbWrapUs = 0;      // VSYNC -> zawiniecie (oczekiwane ok. 30-32 ms)
+static uint32_t wrapsAtFlush = 0, wrapsAtStart = 0, renderStartUs = 0;
+static bool flushedOnce = false;
+static uint32_t flushTimeouts = 0, flushRisk = 0, flushLate = 0, renderFrames = 0;
+// czas rysowania: biezaca minuta (acc) i ostatnia pelna minuta (wynik)
+static uint32_t rMaxAcc = 0, rSumAcc = 0, rNAcc = 0, rWin0 = 0;
+static uint32_t rMaxLast = 0, rAvgLast = 0, lateLast = 0, lateAcc = 0;
+
+static bool IRAM_ATTR onFrameBufComplete(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t *, void *) {
+  fbWraps = fbWraps + 1;
+  fbWrapUs = nowUs() - lastVsyncUs;
+  BaseType_t w = pdFALSE;
+  if (fbSem) xSemaphoreGiveFromISR(fbSem, &w);
+  return w == pdTRUE;
+}
+
 static bool onTransferDone(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t *, void *ctx) {
   BaseType_t woken = pdFALSE;
   if (ctx) xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(ctx), &woken);
@@ -135,11 +164,43 @@ static void locateDriverState() {
 #endif
 }
 
+// LVGL zaczyna rysowac klatke (pomiar G4).
+static void onRenderStart(lv_event_t *) {
+  // Sterownik nie przejal jeszcze ostatnio wyslanego bufora => drugi (do ktorego LVGL pisze) jest
+  // nadal wyswietlany. Przed 5.4.0 tak powstawalo mruganie; teraz licznik ma stac na 0.
+  if (flushedOnce && fbWraps == wrapsAtFlush) flushRisk = flushRisk + 1;
+  renderStartUs = nowUs();
+  wrapsAtStart = fbWraps;
+}
+
 static void flushCb(lv_display_t *d, const lv_area_t *, uint8_t *px) {
   // DIRECT: LVGL renderuje do niewidocznego FB; draw_bitmap na pelnym obszarze przelacza
   // framebuffery bez kopiowania. Tylko na ostatnim fragmencie klatki.
-  if (lv_display_flush_is_last(d)) esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, px);
-  lv_display_flush_ready(d);
+  if (!lv_display_flush_is_last(d)) { lv_display_flush_ready(d); return; }
+  const uint32_t r = nowUs() - renderStartUs;
+  ++renderFrames;
+  if (fbWraps != wrapsAtStart) ++lateAcc;   // nie zdazyla przed najblizszym zawinieciem: na ekranie klatke pozniej
+  if (r > rMaxAcc) rMaxAcc = r;
+  rSumAcc += r; ++rNAcc;
+  if (millis() - rWin0 >= 60000) {
+    rMaxLast = rMaxAcc; rAvgLast = rNAcc ? rSumAcc / rNAcc : 0; lateLast = lateAcc;
+    flushLate += lateAcc;
+    rMaxAcc = rSumAcc = rNAcc = lateAcc = 0; rWin0 = millis();
+  }
+  esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, px);   // sterownik: cur_fb_index = px
+  wrapsAtFlush = fbWraps;   // odczyt PO draw_bitmap: kazde nastepne zawiniecie wybierze juz px
+  flushedOnce = true;
+  // Bez lv_display_flush_ready(): przed pisaniem do drugiego bufora LVGL wywola flushWaitCb().
+}
+
+// LVGL czeka tu, zanim zacznie pisac do drugiego bufora (refr_sync_areas / nastepny flush).
+static void flushWaitCb(lv_display_t *) {
+  const uint32_t t0 = millis();
+  while (fbWraps == wrapsAtFlush) {
+    if (fbSem) xSemaphoreTake(fbSem, pdMS_TO_TICKS(60));
+    else delay(1);
+    if (millis() - t0 > 400) { ++flushTimeouts; break; }   // klatka przy 1 MHz (zapis flasha) = 286 ms
+  }
 }
 
 bool displayInit() {
@@ -193,9 +254,11 @@ bool displayInit() {
   if (err != ESP_OK) { Serial.printf("LCD: esp_lcd_new_rgb_panel blad 0x%x\n", (unsigned)err); return false; }
 
   transferSem = xSemaphoreCreateBinary();
+  fbSem = xSemaphoreCreateBinary();
   esp_lcd_rgb_panel_event_callbacks_t cb = {};
   cb.on_color_trans_done = onTransferDone;
   cb.on_vsync = onVsync;
+  cb.on_frame_buf_complete = onFrameBufComplete;   // zawiniecie ramki: bufor przelaczony (w starszym rdzeniu: on_bounce_frame_finish)
   err = esp_lcd_rgb_panel_register_event_callbacks(panel, &cb, transferSem);
   if (err == ESP_OK) locateDriverState();   // przed startem strumienia (esp_lcd_panel_init)
   if (err == ESP_OK) err = esp_lcd_panel_reset(panel);
@@ -207,12 +270,15 @@ bool displayInit() {
   const size_t fbBytes = SCREEN_W * SCREEN_H * 2;
   memset(fb0, 0xFF, fbBytes);
   memset(fb1, 0xFF, fbBytes);
-  esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, fb0);
+  // Pokazujemy fb1, bo LVGL pierwsza klatke rysuje w fb0 (buf_1) - nie w buforze na ekranie.
+  esp_lcd_panel_draw_bitmap(panel, 0, 0, SCREEN_W, SCREEN_H, fb1);
   xSemaphoreTake(transferSem, pdMS_TO_TICKS(100));
 
   lv_init();
   lvDisp = lv_display_create(SCREEN_W, SCREEN_H);
   lv_display_set_flush_cb(lvDisp, flushCb);
+  lv_display_set_flush_wait_cb(lvDisp, flushWaitCb);
+  lv_display_add_event_cb(lvDisp, onRenderStart, LV_EVENT_RENDER_START, nullptr);
   lv_display_set_buffers(lvDisp, fb0, fb1, fbBytes, LV_DISPLAY_RENDER_MODE_DIRECT);
   Serial.printf("LCD: 2 FB w PSRAM, bounce %u linii, wolny RAM wewn. %u KB\n", (unsigned)BOUNCE_LINES,
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
@@ -254,6 +320,15 @@ DisplayDiag displayDiag() {
   d.lateVsyncs = lateVsyncs;
   d.resyncCount = resyncCount;
   d.flashWrites = flashWrites;
+  d.wraps = fbWraps;
+  d.wrapUs = fbWrapUs;
+  d.renderFrames = renderFrames;
+  d.flushRisk = flushRisk;
+  d.flushLate = flushLate + lateAcc;
+  d.lateLastMin = lateLast;
+  d.renderMaxUs = rMaxLast;
+  d.renderAvgUs = rAvgLast;
+  d.flushTimeouts = flushTimeouts;
   return d;
 }
 
