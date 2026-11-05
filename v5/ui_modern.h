@@ -917,10 +917,20 @@ static void ui_weight_toggle() {
   if (uiWtDot[1]) lv_obj_set_x(uiWtDot[1], 22 + (uiWtShown == 0 ? 20 : 7) + 6);
   uiWtPref = uiWtShown;
 }
+// Zabezpieczenie przed wielokrotnym przelaczeniem od jednego dotkniecia: kolejne klikniecie liczy sie
+// dopiero po minGapMs od ostatniego zaakceptowanego (wspolny zegar dla wszystkich przyciskow panelu).
+static uint32_t uiLastTapMs = 0;
+static bool ui_tap_ok(uint32_t minGapMs = 350) {
+  const uint32_t now = lv_tick_get();
+  if (uiLastTapMs && now - uiLastTapMs < minGapMs) return false;
+  uiLastTapMs = now;
+  return true;
+}
 static void ui_weight_click_cb(lv_event_t *e) {
   (void)e;
   lv_indev_t *in = lv_indev_active();
   if (in && lv_indev_get_gesture_dir(in) != LV_DIR_NONE) return;   // przeciagniecie = zmiana strony, nie wykresu
+  if (!ui_tap_ok()) return;
   ui_weight_toggle();
 }
 static void ui_wt_tile(lv_obj_t *p, int x, int y, int w, int h, const char *key, const char *val, const char *unit,
@@ -1132,6 +1142,7 @@ static void ui_sleep_click_cb(lv_event_t *e) {
   (void)e;
   lv_indev_t *in = lv_indev_active();
   if (in && lv_indev_get_gesture_dir(in) != LV_DIR_NONE) return;   // przeciagniecie = zmiana strony
+  if (!ui_tap_ok()) return;
   ui_sleep_toggle();
 }
 // Widok A: sen nocny liczony z dziennika (miedzy karmieniami), 14 nocy.
@@ -1377,16 +1388,17 @@ static void ui_dash_goto(int to, bool animate = true) {
     lv_obj_set_x(uiDashPill, px); lv_obj_set_x(uiDashStrip, -to * 480); ui_slide_done(nullptr);
   }
 }
-static void ui_tab_cb(lv_event_t *e) { ui_dash_goto((int)(intptr_t)lv_event_get_user_data(e)); }
+static void ui_tab_cb(lv_event_t *e) { if (ui_tap_ok(250)) ui_dash_goto((int)(intptr_t)lv_event_get_user_data(e)); }
 static void ui_gesture_cb(lv_event_t *e) {
   (void)e;
   lv_indev_t *ind = lv_indev_active();
   if (!ind) return;
   const lv_dir_t d = lv_indev_get_gesture_dir(ind);
+  if ((d == LV_DIR_LEFT || d == LV_DIR_RIGHT) && !ui_tap_ok(300)) return;   // jedno przesuniecie = jedna strona
   if (d == LV_DIR_LEFT) ui_dash_goto(uiDashCur + 1);
   else if (d == LV_DIR_RIGHT) ui_dash_goto(uiDashCur - 1);
 }
-static void ui_back_cb(lv_event_t *) { if (uiOnBackToSaver) uiOnBackToSaver(); }
+static void ui_back_cb(lv_event_t *) { if (ui_tap_ok(500) && uiOnBackToSaver) uiOnBackToSaver(); }
 static void ui_diag_cb(lv_event_t *) { if (uiOnDiagnostics) uiOnDiagnostics(); }
 
 static void ui_dash_tick(lv_timer_t *t) {   // 500 ms: sygnalizator "czas na karmienie" (biel/czerwien jak dawniej)
@@ -1519,7 +1531,7 @@ static void uiDashUpdate(const UiModel &m, bool rebuild) {
 static lv_obj_t *uiDiagScr = nullptr;
 static lv_obj_t *uiDiagText = nullptr;
 static void (*uiOnDiagBack)() = nullptr;   // ustawiane przez firmware
-static void ui_diag_back_cb(lv_event_t *) { if (uiOnDiagBack) uiOnDiagBack(); }
+static void ui_diag_back_cb(lv_event_t *) { if (ui_tap_ok(500) && uiOnDiagBack) uiOnDiagBack(); }
 
 static void uiDiagCreate(bool night, const char *text) {
   lv_obj_t *oldScr = uiDiagScr; uiDiagScr = nullptr;

@@ -109,6 +109,11 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 - **Karta Waga, wykres przyrostu (od 5.3.0):** liczony jak na hostingu — słupek dla **każdego** tygodnia życia od 1 do tygodnia ostatniego ważenia (bez dziur i bez pustych tygodni na przyszłość). Wartość to trend z ważeń z okna ±7 dni; gdy ważeń jest mało, okno rośnie (±10, ±14, ±21 dni), a w ostateczności wartość wynika z dwóch najbliższych ważeń — taki słupek jest jaśniejszy, z obwódką („szacunek”). Kilka ważeń jednego dnia jest uśrednianych. Tło słupka = zakres normy dla wieku (25–30, 15–20, 10–15 g/dzień), kolor: zielony w normie, pomarańczowy poniżej, niebieski powyżej, czerwony spadek. Kafelek „Ostatnie 2 tygodnie” liczony tak samo jak na stronie.
 - **Powroty i diagnostyka:** liść w panelu wraca do tablicy; po 2 min bezczynności panel też wraca do tablicy. Długie przytrzymanie zegara w panelu otwiera diagnostykę.
 
+**Obsługa dotyku (od 5.4.1).** Kontroler GT911 potrafi w środku jednego dotknięcia na kilka milisekund zgłosić „brak dotyku”. Biblioteka LVGL widziała wtedy puszczenie i ponowne dotknięcie, więc jedno dotknięcie przełączało widok (Waga, Sen), kartę lub ekran kilka razy. Są dwa zabezpieczenia:
+- `hw_touch.cpp`: po ostatnim odczycie z dotykiem stan „wciśnięty” trzymany jest jeszcze 60 ms (`TOUCH_RELEASE_HOLD_MS`), więc krótki zanik odczytu nie kończy dotknięcia. Puszczenie palca jest przez to opóźnione o 60 ms, na co nie zwraca się uwagi.
+- `ui_modern.h`, funkcja `ui_tap_ok()`: wspólny odstęp między przełączeniami — 350 ms dla widoków Waga/Sen, 250 ms dla paska kart, 300 ms dla przesunięcia gestem, 500 ms dla liścia (powrót do tablicy) i powrotu z diagnostyki. Kolejne kliknięcie w tym czasie jest ignorowane.
+Jeśli nadal zdarzają się podwójne przełączenia, zwiększ `TOUCH_RELEASE_HOLD_MS` (np. do 100) w `hw_touch.cpp`. Jeśli dotyk wydaje się ociężały (zdarza się, gdy ktoś robi bardzo szybkie dwa dotknięcia), zmniejsz odstępy w `ui_tap_ok()`.
+
 **Tryb nocny** (21:00–7:00): ciemna paleta i jasność ~65%. W dzień ekran przyciemnia się po 60 s.
 
 **Brak internetu przy starcie:** urządzenie pokazuje ostatnie dane z cache. Cache jest zapisywany tylko przy zmianie danych, najwyżej raz na 30 min — to **jedyny zapis do flasha** w pracy urządzenia.
@@ -150,13 +155,13 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
 
 ## Diagnostyka i rozwiązywanie problemów
 
-### Po wgraniu nowego firmware (v5.4.0): co sprawdzić
+### Po wgraniu nowego firmware (v5.4.1): co sprawdzić
 
 Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
 
 | Linia w logu | Znaczenie |
 |---|---|
-| `Lesny Dziennik v5.4.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
+| `Lesny Dziennik v5.4.1 — tylko wyswietlacz.` | wgrała się właściwa wersja |
 | `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
 | `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
 | `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |
@@ -183,6 +188,7 @@ Ekran diagnostyki na urządzeniu: dotknij panel (z tablicy), potem **przytrzymaj
 | Objaw | Przyczyna | Co zrobić |
 |---|---|---|
 | Obraz przesunięty o ok. 1/6 ekranu, poziome pasy | licznik przerwań EOF sterownika ekranu (naprawione w 5.1.0) | wgraj 5.1.0; sprawdź w logu linię „poprawka licznika EOF aktywna”; jeśli jest, a obraz nadal skacze, wyślij wynik polecenia `l` |
+| Jedno dotknięcie przełącza widok / kartę kilka razy | zaniki odczytu dotyku GT911 (naprawione w 5.4.1) | wgraj 5.4.1; opis w „Obsługa dotyku”; gdy nadal się zdarza, zwiększ `TOUCH_RELEASE_HOLD_MS` w `hw_touch.cpp` |
 | `Host: rewizja — blad (HTTP 0)` | brak sieci albo nieudany handshake TLS (słaby sygnał) | zbliż urządzenie do routera; zobacz dBm w logu; 5.0.2+ ponawia połączenie i opisuje powód |
 | `Wi-Fi: rozlaczono, powod N` | kod powodu rozłączenia z routera (np. 201 = nie widać sieci, 15 = przerwane uzgadnianie hasła, 202 = błąd uwierzytelnienia) | sprawdź SSID i hasło w `secrets.h`, sygnał, router |
 | `Cache: plik uszkodzony — pomijam` | pierwszy start po zmianie partycji | normalne; cache odtworzy się po pobraniu danych |
@@ -212,19 +218,19 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 - Urządzenie (od 5.3.0) nie rozmawia z kamerą ani z t620: bierze gotowy skrót ostatniej nocy ze strony (obiekty `camNight` i `camDev`; od 5.4.0 z lekkiego `/api/device`, a gdy hosting go jeszcze nie ma — z `/api/status`) i pokazuje go na karcie **Sen** (drugi widok „Noc z kamery”). Analiza i „Co wpływa na sen” są tylko na stronie.
 - Zmiany samej strony (wykresy, analiza) wymagają tylko aktualizacji plików na hostingu, bez wgrywania firmware. Firmware trzeba wgrać dopiero przy zmianach z folderu `v5/`.
 
-### Aktualizacja firmware do 5.4.0 (z 5.3.0)
+### Aktualizacja firmware do 5.4.1 (z 5.3.0 lub 5.4.0)
 
 1. Hosting (najpierw, ale firmware działa też ze starą stroną): wgraj pliki strony z rozdziału 4 `web-php/README.md` — m.in. `api.php` (nowe `/api/device`) i nowy folder `fonts/`.
-2. Z folderu `v5` gałęzi `v5` podmień: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `hw_display.cpp`, `hw_display.h`, `net.cpp`, `net.h`, `stats.cpp`, `ui_modern.h`. Swój `secrets.h` zostaw. Biblioteki bez zmian (sprawdzone kompilacją: rdzeń 3.3.12, lvgl 9.3.0, GFX 1.6.9, SensorLib 0.5.1).
+2. Z folderu `v5` gałęzi `v5` podmień: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `hw_display.cpp`, `hw_display.h`, `hw_touch.cpp`, `net.cpp`, `net.h`, `stats.cpp`, `ui_modern.h` (przy aktualizacji z 5.4.0 wystarczą `app_config.h`, `hw_touch.cpp`, `ui_modern.h`). Swój `secrets.h` zostaw. Biblioteki bez zmian (sprawdzone kompilacją: rdzeń 3.3.12, lvgl 9.3.0, GFX 1.6.9, SensorLib 0.5.1).
 3. Wgraj jak zwykle. Nie trzeba czyścić flasha.
-4. Sprawdź: w logu `v5.4.0`; po kilku minutach polecenie `l` — „rysowanie w wyswietlanym buforze 0”, druga linia `Host: rewizja co 30 s przez HTTP` (albo `HTTPS`, jeśli hosting nie obsługuje zwykłego HTTP — też dobrze) i `ustawienia z /api/device`.
+4. Sprawdź: w logu `v5.4.1`; jedno dotknięcie przełącza widok / kartę tylko raz; po kilku minutach polecenie `l` — „rysowanie w wyswietlanym buforze 0”, druga linia `Host: rewizja co 30 s przez HTTP` (albo `HTTPS`, jeśli hosting nie obsługuje zwykłego HTTP — też dobrze) i `ustawienia z /api/device`.
 
-### Aktualizacja firmware do 5.3.0 (z 5.2.0 lub wcześniejszych)
+### Aktualizacja firmware do 5.3.0 (z 5.2.0 lub wcześniejszych; dziś lepiej od razu do 5.4.1 jak wyżej)
 
 1. Hosting: wgraj do `/home/phpmapy1/panel-engine/` pliki `api.php` i `SleepStats.php` z `web-php/engine/` (bez nich karta Sen zostaje z jednym widokiem; nic się nie psuje).
-2. Pobierz gałąź `v5` (Code → Download ZIP) i z folderu `v5` podmień u siebie: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `stats.cpp`, `ui_model.h`, `ui_modern.h`. Swój `secrets.h` zostaw.
+2. Pobierz gałąź `v5` (Code → Download ZIP) i z folderu `v5` podmień u siebie: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `hw_touch.cpp`, `stats.cpp`, `ui_model.h`, `ui_modern.h`. Swój `secrets.h` zostaw (przy aktualizacji z 5.3.0 wystarczą `app_config.h`, `hw_touch.cpp`, `ui_modern.h`).
 3. Wgraj jak zwykle (ustawienia jak w rozdziale „Kompilacja”). Nie trzeba czyścić flasha.
-4. Sprawdź: w logu `v5.3.0`; na karcie Sen kropki w prawym górnym rogu i po dotknięciu widok „Noc z kamery” (pojawia się do 10 min po starcie, gdy hosting ma przynajmniej jedną zakończoną noc); na karcie Waga wykres przyrostu ze słupkami w każdym tygodniu.
+4. Sprawdź: w logu `v5.3.0` (lub nowszy); na karcie Sen kropki w prawym górnym rogu i po dotknięciu widok „Noc z kamery” (pojawia się do 10 min po starcie, gdy hosting ma przynajmniej jedną zakończoną noc); na karcie Waga wykres przyrostu ze słupkami w każdym tygodniu.
 
 ### Historia wersji firmware v5
 
@@ -235,6 +241,7 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 | 5.2.0 | linia ostatniej nocy z kamery na karcie Sen (`camNight`) |
 | 5.3.0 | karta Sen: drugi widok „Noc z kamery” (`camDev`); wykres przyrostu wagi jak na hostingu (każdy tydzień, szacunki, norma) |
 | 5.4.0 | koniec mrugania animacji (LVGL czeka, aż sterownik przełączy bufor: `on_frame_buf_complete` + `lv_display_set_flush_wait_cb`), liczniki obrazu w `l` i diagnostyce; krótsze przesuwanie stron i wzrost słupków; rewizja co 10/30/60 s zależnie od użycia i zwykłym HTTP (zapas HTTPS); `/api/device` zamiast `/api/status`; sumy dnia liczone tylko po zmianie danych albo minuty |
+| 5.4.1 | obsługa dotyku: jedno dotknięcie = jedno przełączenie (odporność na zaniki odczytu GT911 + odstęp między kliknięciami), patrz „Obsługa dotyku” |
 
 Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
 - API nie ma uwierzytelniania — hasła dla całego portalu zostaną dodane później jednym ruchem (P0),

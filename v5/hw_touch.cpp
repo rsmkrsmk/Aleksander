@@ -9,6 +9,7 @@
 
 constexpr uint8_t I2C_SDA = 47;
 constexpr uint8_t I2C_SCL = 48;
+constexpr uint32_t TOUCH_RELEASE_HOLD_MS = 60;   // patrz readCb: odporność na krótkie zaniki odczytu dotyku
 
 static TouchDrvGT911 gt;
 static bool ready = false;
@@ -28,7 +29,20 @@ static void readCb(lv_indev_t *, lv_indev_data_t *data) {
   data->point.y = lastY;
   if (!ready) { suppress = false; return; }
   const uint8_t n = gt.getPoint(px, py, gt.getSupportTouchPoint());
-  if (n == 0) { suppress = false; return; }
+  static bool wasPressed = false;
+  static uint32_t lastSeenMs = 0;
+  if (n == 0) {
+    // GT911 potrafi na chwile (kilka odczytow po 5 ms) zglosic "brak dotyku" w srodku jednego dotkniecia.
+    // Bez tego LVGL widzial puszczenie i ponowne dotkniecie i liczyl kilka klikniec z jednego. Dlatego
+    // po ostatnim odczycie z dotykiem trzymamy stan "wcisniety" jeszcze TOUCH_RELEASE_HOLD_MS.
+    if (wasPressed && millis() - lastSeenMs < TOUCH_RELEASE_HOLD_MS) {
+      data->state = LV_INDEV_STATE_PRESSED;
+      return;
+    }
+    wasPressed = false; suppress = false;
+    return;
+  }
+  wasPressed = true; lastSeenMs = millis();
   lastActivity = millis();
   if (swallowQ && swallowQ()) {
     if (!suppress && swallowTap) swallowTap();
