@@ -137,22 +137,50 @@ final class SleepNights
         fflush($h); flock($h, LOCK_UN); fclose($h);
     }
 
-    /** Indeks wszystkich nocy; odbudowywany z plików, gdy go brak lub jest niepełny. */
+    private static function badFile(): string { return self::dir() . '/index_bad.json'; }
+
+    /** Indeks wszystkich nocy. Porównuje zbiory nazw plików (a nie ich liczbę) i czyta tylko pliki,
+     *  których brak w indeksie. Wadliwe pliki (urwane, bez timeline/summary) trafiają do index_bad.json
+     *  z mtime, więc nie są czytane przy każdym zapytaniu, a po poprawieniu pliku wracają (B3). */
     public static function index(): array
     {
         $idx = is_file(self::indexFile()) ? json_decode((string)file_get_contents(self::indexFile()), true) : null;
         if (!is_array($idx)) $idx = [];
-        $files = glob(self::dir() . '/noc_*.json') ?: [];
-        if (count($files) !== count($idx)) {
-            $idx = [];
-            foreach ($files as $f) {
-                $d = json_decode((string)file_get_contents($f), true);
-                if (is_array($d) && isset($d['night'], $d['timeline'], $d['summary'])) $idx[$d['night']] = self::metrics($d);
-            }
-            ksort($idx);
-            if ($idx && is_dir(self::dir())) @file_put_contents(self::indexFile(), json_encode($idx, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+        $bad = is_file(self::badFile()) ? json_decode((string)file_get_contents(self::badFile()), true) : null;
+        if (!is_array($bad)) $bad = [];
+        $names = [];
+        foreach (glob(self::dir() . '/noc_*.json') ?: [] as $f) $names[substr(basename($f), 4, 10)] = $f;
+        $changed = false; $badChanged = false;
+        foreach ($names as $night => $f) {
+            if (isset($idx[$night])) { if (isset($bad[$night])) { unset($bad[$night]); $badChanged = true; } continue; }
+            $mt = (int)@filemtime($f);
+            if (isset($bad[$night]) && (int)$bad[$night] === $mt) continue;   // wadliwy, bez zmian
+            $d = json_decode((string)file_get_contents($f), true);
+            if (is_array($d) && isset($d['night'], $d['timeline'], $d['summary']) && (string)$d['night'] === $night) {
+                $idx[$night] = self::metrics($d); $changed = true;
+                if (isset($bad[$night])) { unset($bad[$night]); $badChanged = true; }
+            } else { $bad[$night] = $mt; $badChanged = true; }
         }
+        foreach (array_keys($idx) as $night) if (!isset($names[$night])) { unset($idx[$night]); $changed = true; }
+        foreach (array_keys($bad) as $night) if (!isset($names[$night])) { unset($bad[$night]); $badChanged = true; }
+        if ($changed && is_dir(self::dir())) {
+            ksort($idx);
+            @file_put_contents(self::indexFile(), json_encode($idx, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+        }
+        if ($badChanged && is_dir(self::dir())) @file_put_contents(self::badFile(), json_encode($bad), LOCK_EX);
         return $idx;
+    }
+
+    /** Godziny nocy z ostatniego pliku nocy z t620 (np. 20:30-06:00) jako [minuty od północy start, koniec],
+     *  null gdy brak nocy - wtedy stałe z config.php (D: jedno źródło okna nocy). */
+    public static function nightHours(): ?array
+    {
+        $idx = is_file(self::indexFile()) ? json_decode((string)file_get_contents(self::indexFile()), true) : null;
+        if (!is_array($idx) || !$idx) return null;
+        $m = end($idx);
+        $p = static fn($s) => preg_match('/^(\d{1,2}):(\d{2})$/', (string)$s, $x) ? (int)$x[1] * 60 + (int)$x[2] : null;
+        $a = $p($m['start'] ?? ''); $b = $p($m['end'] ?? '');
+        return $a !== null && $b !== null ? [$a, $b] : null;
     }
 
     /** Ostatnie $days nocy (od najstarszej), do wykresu. */

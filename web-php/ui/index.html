@@ -6,9 +6,13 @@
 <meta name="theme-color" content="#0f8a5f">
 <meta name="description" content="Leśny Dziennik Aleksandra — centrum opieki nad dzieckiem">
 <title>Leśny Dziennik Aleksandra</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- B6: czcionki z własnego serwera (zmienne, podzbiór łaciński z polskimi znakami, licencja OFL w fonts/) -->
+<link rel="preload" href="fonts/manrope.woff" as="font" type="font/woff" crossorigin>
+<link rel="preload" href="fonts/sora.woff" as="font" type="font/woff" crossorigin>
+<style>
+@font-face{font-family:"Sora";src:url("fonts/sora.woff") format("woff");font-weight:100 800;font-style:normal;font-display:swap}
+@font-face{font-family:"Manrope";src:url("fonts/manrope.woff") format("woff");font-weight:200 800;font-style:normal;font-display:swap}
+</style>
 <style>
 /* ============================================================================
    LEŚNY DZIENNIK ALEKSANDRA — Centrum opieki · UI premium/minimal 2026
@@ -303,6 +307,7 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 
 /* ---------------- Przełącznik widoków (taby) ---------------- */
 .tabs{display:flex;gap:4px;padding:5px;margin-bottom:18px;background:var(--card-2);border:1px solid var(--brd);border-radius:999px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:380px){.tabs{flex-wrap:wrap;border-radius:18px;overflow-x:visible}.tabs>*{flex:1 1 auto}}
 .tabs .tab{flex:1;min-width:max-content;padding:10px 14px;border:none;background:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:.82rem;color:var(--muted);border-radius:999px;white-space:nowrap;transition:color .18s,background .18s,box-shadow .18s}
 .tabs .tab:hover{color:var(--ink)}
 .tabs .tab.active{color:#fff;background:var(--g-acc);box-shadow:var(--sh-1)}
@@ -361,6 +366,8 @@ h1,h2,h3{margin:0;font-family:var(--fd);font-weight:700;letter-spacing:-.02em;li
 .wg-k{font-size:.66rem;font-weight:700;color:var(--muted)}
 .wg-v{font-family:var(--fd);font-size:1.02rem;font-weight:800;color:var(--ink);margin-top:3px;white-space:nowrap}
 .wg-s{font-size:.66rem;color:var(--muted);margin-top:2px}
+.wg-stat .wg-k,.wg-stat .wg-s{overflow-wrap:anywhere;hyphens:auto}
+@media(max-width:400px){.wg-stat .wg-k,.wg-stat .wg-s{font-size:clamp(.6rem,2.6vw,.66rem)}}
 .wg-stat.wg-ok .wg-v{color:var(--acc-ink)} .wg-stat.wg-low .wg-v{color:var(--feed)} .wg-stat.wg-high .wg-v{color:var(--milk)} .wg-stat.wg-neg .wg-v{color:var(--danger)}
 .wg-foot{margin:12px 2px 0;text-align:left}
 @media(max-width:380px){.wg-stats{grid-template-columns:1fr}}
@@ -673,7 +680,7 @@ input[type=range]{width:100%;accent-color:var(--feed);height:42px}
 .inf-row{display:flex;align-items:center;gap:8px;font-size:.76rem;color:var(--ink-2);padding:2px 0}
 .inf-row i{width:8px;height:8px;border-radius:50%;background:var(--faint);flex-shrink:0}
 .inf-row.good i{background:var(--acc)} .inf-row.bad i{background:var(--danger)} .inf-row.flat{color:var(--muted)}
-@media (max-width:420px){.nw-row{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 54px 74px}.nw-spark{width:54px}}
+@media (max-width:420px){.nw-row{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 54px 74px}.nw-spark{width:54px}.nw-k{font-size:.71rem;overflow-wrap:anywhere}}
 .cam-nights .cn-bar{cursor:pointer}
 .cam-nights .cn-bar .cn-fill{opacity:.78;transition:opacity .15s}
 .cam-nights .cn-bar:hover .cn-fill,.cam-nights .cn-bar.sel .cn-fill{opacity:1}
