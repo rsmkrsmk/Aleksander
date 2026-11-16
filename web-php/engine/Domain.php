@@ -460,9 +460,9 @@ final class Domain
         }
         if ($before !== null && $after === null) {
             $n = count($pts);
-            for ($j = $n - 2; $j >= 0; $j--) if ($pts[$n - 1]['day'] - $pts[$j]['day'] >= 3) { $before = $pts[$j]; $after = $pts[$n - 1]; break; }
+            for ($j = $n - 2; $j >= 0; $j--) if ($pts[$n - 1]['day'] - $pts[$j]['day'] >= 2) { $before = $pts[$j]; $after = $pts[$n - 1]; break; }
         }
-        if ($before === null || $after === null || $after['day'] - $before['day'] < 3) return null;
+        if ($before === null || $after === null || $after['day'] - $before['day'] < 2) return null;
         return ['v' => ($after['g'] - $before['g']) / ($after['day'] - $before['day']), 'n' => 2, 'est' => true];
     }
 

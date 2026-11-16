@@ -202,9 +202,13 @@ Serwer (`Domain::weightWeeks`) liczy jeden słupek na **każdy** tydzień życia
 
 1. okno ±7 dni wokół środka tygodnia (co najmniej 2 ważenia odległe o ≥ 5 dni),
 2. przy mniejszej liczbie ważeń okno rośnie do ±10, ±14, ±21 dni,
-3. w ostateczności wartość wynika z dwóch najbliższych ważeń przed i po tygodniu.
+3. w ostateczności wartość wynika z dwóch najbliższych ważeń przed i po tygodniu, odległych o co najmniej 2 dni (od 5.4.2; wcześniej 3).
 
 Kroki 2–3 oznaczają słupek jako `estimated` (jaśniejszy, z przerywaną ramką, w legendzie „szacunek (mało ważeń)”). Waga urodzeniowa (`BIRTH_WEIGHT_G`) to punkt dnia 0. W pierwszych 2 dniach życia (`GAIN_DISCHARGE_DAY`) nie ma pasma odniesienia (spadek wagi po porodzie).
+
+#### Odświeżanie wykresów wagi na stronie (od 5.4.2)
+
+Na stronie „Waga” wykresy (waga na tle WHO i tygodniowy przyrost) odświeżają się same: co 10 s strona pyta o rewizję dziennika (`/api/revision`) **oraz** wprost o `/api/weight-series` i rysuje wykresy od nowa, gdy zmienił się zestaw pomiarów, tygodnie albo dzień. Poprawki w 5.4.2: (1) pierwsza rewizja po otwarciu strony nie jest już tylko „punktem odniesienia” — wcześniej ważenie dodane w pierwszych ~10 s po otwarciu strony pojawiało się dopiero po do 60 s; (2) „odcisk” danych jest zapamiętywany dopiero po udanym narysowaniu, więc błąd rysowania nie blokuje kolejnej próby; (3) odświeżenie następuje też po powrocie do karty przeglądarki. Dwa ważenia w odstępie ≥2 dni wystarczą do narysowania słupka (oznaczonego jako „szacunek”).
 
 **Pasma odniesienia** (`config.php`): do 91. dnia 25–30 g/dzień, do 183. dnia 15–20, potem 10–15.
 

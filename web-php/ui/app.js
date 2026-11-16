@@ -1411,9 +1411,12 @@ async function loadWeightSeries(){try{return await request('/api/weight-series')
    tylko gdy zmienily sie pomiary albo dzien (nowy tydzien zycia). */
 async function refreshWeightCharts(force){
   const d=await loadWeightSeries();if(!d)return;
-  const sig=JSON.stringify([d.points,d.today]);
+  const sig=JSON.stringify([d.points,d.weeks,d.today]);
   if(!force&&sig===state.weightSig)return;
-  state.weightSig=sig;renderWeightChart(d);renderGainChart(d);
+  /* sygnature zapamietujemy dopiero PO udanym rysowaniu — blad nie blokuje kolejnej proby */
+  state.weightSig=null;
+  try{await renderWeightChart(d);await renderGainChart(d);state.weightSig=sig}
+  catch(e){console.error('wykres wagi',e)}
 }
 /* Przyrost wagi: SLUPEK NA KAZDY TYDZIEN zycia (bez dziur), liczony na serwerze
    (/api/weight-series -> weeks): trend z wazen w oknie +-7 dni, przy malej liczbie wazen okno
@@ -1945,8 +1948,10 @@ refresh();
 async function tick(){
   if(document.hidden)return;
   try{const r=await request('/api/revision');const k=r?`${r.rev}:${r.count}`:null;
-    if(k!==null&&k!==lastRev){const first=lastRev===null;lastRev=k;if(!first)return refresh()}}catch(e){}
+    if(k!==null&&k!==lastRev){lastRev=k;return refresh()}}catch(e){}
   if(Date.now()-lastFull>=60000)refresh();
+  /* na stronie wagi wykresy sprawdzamy bezposrednio (tanie zapytanie) — nie zalezy od rewizji */
+  else if(state.page==='weight')refreshWeightCharts(false);
 }
 setInterval(tick,10000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-lastFull>10000)refresh()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(Date.now()-lastFull>10000)refresh();else if(state.page==='weight')refreshWeightCharts(false)}});

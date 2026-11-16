@@ -106,8 +106,10 @@ Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie               
   - kafelki: spokój (% czasu w łóżeczku), najdłuższy blok bez ruchu, przebudzenia (z liczbą płaczów);
   - ostatnie 7 nocy: słupki spokojnego snu w godzinach (kolor = ocena nocy) i linia porównania z 7 wcześniejszymi nocami (mediana zasypiania, średni spokojny sen; pojawia się, gdy obie grupy mają co najmniej 4 noce).
   Dane liczy hosting (obiekt `camDev` w `/api/status`, odświeżany co 10 min). „Co wpływa na sen” jest tylko na stronie WWW. Bez nocy z kamery karta wygląda jak dawniej (jeden widok).
-- **Karta Waga, wykres przyrostu (od 5.3.0):** liczony jak na hostingu — słupek dla **każdego** tygodnia życia od 1 do tygodnia ostatniego ważenia (bez dziur i bez pustych tygodni na przyszłość). Wartość to trend z ważeń z okna ±7 dni; gdy ważeń jest mało, okno rośnie (±10, ±14, ±21 dni), a w ostateczności wartość wynika z dwóch najbliższych ważeń — taki słupek jest jaśniejszy, z obwódką („szacunek”). Kilka ważeń jednego dnia jest uśrednianych. Tło słupka = zakres normy dla wieku (25–30, 15–20, 10–15 g/dzień), kolor: zielony w normie, pomarańczowy poniżej, niebieski powyżej, czerwony spadek. Kafelek „Ostatnie 2 tygodnie” liczony tak samo jak na stronie.
+- **Karta Waga, wykres przyrostu (od 5.3.0):** liczony jak na hostingu — słupek dla **każdego** tygodnia życia od 1 do tygodnia ostatniego ważenia (bez dziur i bez pustych tygodni na przyszłość). Wartość to trend z ważeń z okna ±7 dni; gdy ważeń jest mało, okno rośnie (±10, ±14, ±21 dni), a w ostateczności wartość wynika z dwóch najbliższych ważeń odległych o **co najmniej 2 dni** (od 5.4.2; wcześniej 3 dni) — taki słupek jest jaśniejszy, z obwódką („szacunek”). Kilka ważeń jednego dnia jest uśrednianych. Tło słupka = zakres normy dla wieku (25–30, 15–20, 10–15 g/dzień), kolor: zielony w normie, pomarańczowy poniżej, niebieski powyżej, czerwony spadek. Kafelek „Ostatnie 2 tygodnie” liczony tak samo jak na stronie.
 - **Powroty i diagnostyka:** liść w panelu wraca do tablicy; po 2 min bezczynności panel też wraca do tablicy. Długie przytrzymanie zegara w panelu otwiera diagnostykę.
+
+**Odświeżanie wykresów wagi (od 5.4.2).** Urządzenie sprawdza rewizję dziennika na hostingu co 10/30/60 s; po zmianie pobiera dane i od razu przelicza wykresy (poza tym co 60 s). Dodane ważenie pojawia się na wykresach wagi w ciągu kilkudziesięciu sekund, bez dotykania ekranu. Wykres przyrostu pokazuje słupek, gdy są co najmniej **dwa ważenia w odstępie 2 dni lub więcej** (liczy się też waga urodzeniowa jako dzień 0); przy odstępie 1 dnia pojawia się „–”, bo różnica po dobie jest zbyt zaszumiona (±100 g). Karta Waga pokazuje „Dodaj co najmniej dwa pomiary wagi…”, dopóki nie ma żadnego ważenia poza wagą urodzeniową.
 
 **Obsługa dotyku (od 5.4.1).** Kontroler GT911 potrafi w środku jednego dotknięcia na kilka milisekund zgłosić „brak dotyku”. Biblioteka LVGL widziała wtedy puszczenie i ponowne dotknięcie, więc jedno dotknięcie przełączało widok (Waga, Sen), kartę lub ekran kilka razy. Są dwa zabezpieczenia:
 - `hw_touch.cpp`: po ostatnim odczycie z dotykiem stan „wciśnięty” trzymany jest jeszcze 60 ms (`TOUCH_RELEASE_HOLD_MS`), więc krótki zanik odczytu nie kończy dotknięcia. Puszczenie palca jest przez to opóźnione o 60 ms, na co nie zwraca się uwagi.
@@ -155,13 +157,13 @@ Jeśli nadal zdarzają się podwójne przełączenia, zwiększ `TOUCH_RELEASE_HO
 
 ## Diagnostyka i rozwiązywanie problemów
 
-### Po wgraniu nowego firmware (v5.4.1): co sprawdzić
+### Po wgraniu nowego firmware (v5.4.2): co sprawdzić
 
 Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
 
 | Linia w logu | Znaczenie |
 |---|---|
-| `Lesny Dziennik v5.4.1 — tylko wyswietlacz.` | wgrała się właściwa wersja |
+| `Lesny Dziennik v5.4.2 — tylko wyswietlacz.` | wgrała się właściwa wersja |
 | `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
 | `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
 | `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |
@@ -218,6 +220,11 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 - Urządzenie (od 5.3.0) nie rozmawia z kamerą ani z t620: bierze gotowy skrót ostatniej nocy ze strony (obiekty `camNight` i `camDev`; od 5.4.0 z lekkiego `/api/device`, a gdy hosting go jeszcze nie ma — z `/api/status`) i pokazuje go na karcie **Sen** (drugi widok „Noc z kamery”). Analiza i „Co wpływa na sen” są tylko na stronie.
 - Zmiany samej strony (wykresy, analiza) wymagają tylko aktualizacji plików na hostingu, bez wgrywania firmware. Firmware trzeba wgrać dopiero przy zmianach z folderu `v5/`.
 
+### Aktualizacja firmware do 5.4.2 (z 5.4.1)
+1. W Arduino IDE podmień w folderze szkicu `v5` tylko `stats.cpp` i `app_config.h` (pobierz z gałęzi `v5`), **nie ruszaj `secrets.h`**.
+2. Skompiluj i wgraj jak zwykle.
+3. Sprawdź: w logu `v5.4.2`; po dodaniu drugiego ważenia (odstęp co najmniej 2 dni od poprzedniego) karta Waga → widok „przyrost” pokazuje słupek najpóźniej po minucie.
+
 ### Aktualizacja firmware do 5.4.1 (z 5.3.0 lub 5.4.0)
 
 1. Hosting (najpierw, ale firmware działa też ze starą stroną): wgraj pliki strony z rozdziału 4 `web-php/README.md` — m.in. `api.php` (nowe `/api/device`) i nowy folder `fonts/`.
@@ -242,6 +249,7 @@ Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5
 | 5.3.0 | karta Sen: drugi widok „Noc z kamery” (`camDev`); wykres przyrostu wagi jak na hostingu (każdy tydzień, szacunki, norma) |
 | 5.4.0 | koniec mrugania animacji (LVGL czeka, aż sterownik przełączy bufor: `on_frame_buf_complete` + `lv_display_set_flush_wait_cb`), liczniki obrazu w `l` i diagnostyce; krótsze przesuwanie stron i wzrost słupków; rewizja co 10/30/60 s zależnie od użycia i zwykłym HTTP (zapas HTTPS); `/api/device` zamiast `/api/status`; sumy dnia liczone tylko po zmianie danych albo minuty |
 | 5.4.1 | obsługa dotyku: jedno dotknięcie = jedno przełączenie (odporność na zaniki odczytu GT911 + odstęp między kliknięciami), patrz „Obsługa dotyku” |
+| 5.4.2 | wykres przyrostu wagi: dwa ważenia w odstępie ≥2 dni (wcześniej ≥3) wystarczą do narysowania słupka („szacunek”); zbieżne z hostingiem; patrz „Odświeżanie wykresów wagi” |
 
 Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
 - API nie ma uwierzytelniania — hasła dla całego portalu zostaną dodane później jednym ruchem (P0),

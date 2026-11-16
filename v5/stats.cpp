@@ -511,9 +511,9 @@ static void computeCharts(const StatsInput &in, UiModel &m, int todayDay, const 
       int bi = -1, ai = -1;
       for (int j = 0; j < wN; ++j) { if (w[j].day <= c) bi = j; else if (ai < 0) ai = j; }
       if (bi >= 0 && ai < 0) {
-        for (int j = wN - 2; j >= 0; --j) if (w[wN - 1].day - w[j].day >= 3) { bi = j; ai = wN - 1; break; }
+        for (int j = wN - 2; j >= 0; --j) if (w[wN - 1].day - w[j].day >= 2) { bi = j; ai = wN - 1; break; }
       }
-      if (bi < 0 || ai < 0 || w[ai].day - w[bi].day < 3) return false;
+      if (bi < 0 || ai < 0 || w[ai].day - w[bi].day < 2) return false;
       out = (int)lroundf((float)(w[ai].g - w[bi].g) / (w[ai].day - w[bi].day)); est = true;
       return true;
     };
