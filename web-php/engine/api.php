@@ -87,7 +87,8 @@ function camViews(array $entries): array
         foreach (array_reverse($an) as $a) if (!empty($a['metrics']['complete'])) { $camNight = SleepStats::brief($a); break; }
         return [$camNight, SleepStats::device($entries, $an)];
     } catch (Throwable $e) {
-        return [null, null];
+        error_log('camViews: ' . $e->getMessage());
+        return [null, null, true];   // trzeci element: blad analizy (nie zapisywac w pamieci)
     }
 }
 
@@ -157,9 +158,9 @@ function handle_api(string $route, string $method, Repository $repo): void
         $key = statusCacheKey($repo, date('Y-m-d H'));
         if (($c = cacheGet('device', $key, 3600)) !== null) sendJson(200, $c);
         $entries = $repo->allEntries();
-        [$camNight, $camDev] = camViews($entries);
+        [$camNight, $camDev, $camErr] = camViews($entries) + [2 => false];
         $body = ['sleepTelegram' => $repo->loadSettings()['sleepTelegram'], 'camNight' => $camNight, 'camDev' => $camDev];
-        cachePut('device', $key, $body);
+        if (!$camErr) cachePut('device', $key, $body);   // blad analizy nie zostaje w pamieci na godzine
         sendJson(200, $body);
     }
 

@@ -383,3 +383,7 @@ Strona i urządzenie liczą to samo: przerwy między **dzisiejszymi** karmieniam
 - Naraz trwa tylko jedno odświeżenie stanu; prośba w trakcie wykona się raz zaraz po nim, więc starsza odpowiedź nie nadpisze nowszej. Sprawdzanie rewizji co 10 s też nie nakłada się na siebie.
 - `index.html` ładuje `app.js?v=5.5.0`; numer jest podbijany przy każdej zmianie `app.js` (rozdział 4).
 
+
+
+### Poprawka 17.11.2026: błąd analizy nocy nie zostaje w pamięci `/api/device`
+Gdy analiza nocy z kamery rzuciła wyjątek, `/api/device` zwracał `camDev: null` i ta odpowiedź była trzymana w pamięci do godziny — urządzenie nie pokazywało wtedy drugiego widoku karty Sen („Noc z kamery”). Teraz taka odpowiedź nie jest zapisywana, a błąd trafia do `error_log` hostingu (cPanel → Błędy). Diagnoza: otwórz `/api/device` w przeglądarce — jest `"camDev":{...}` (widok jest) albo `"camDev":null` (brak ukończonej nocy lub błąd analizy).
