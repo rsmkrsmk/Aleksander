@@ -91,13 +91,40 @@ function camViews(array $entries): array
     }
 }
 
-function statusCacheFile(): string { return dirname(Config::dataFile()) . '/cache/status.json'; }
+function statusCacheFile(string $name = 'status'): string { return dirname(Config::dataFile()) . '/cache/' . $name . '.json'; }
 
-function statusCacheKey(Repository $repo): string
+/** B3: znacznik nocy z kamery i ustawien (zmienia sie po nowej nocy z t620 albo zmianie ustawienia). */
+function nightsSettingsStamp(): int
 {
+    clearstatcache();
     $mt = static fn($f) => is_file($f) ? filemtime($f) . ':' . filesize($f) : '-';
-    return md5(json_encode($repo->revision()['rev'] ?? 0) . '|' . $mt(Config::dataFile()) . '|' . $mt(Config::settingsFile())
-        . '|' . $mt(SleepNights::dir() . '/index.json') . '|' . date('Y-m-d H:i'));
+    return crc32($mt(SleepNights::dir() . '/index.json') . '|' . $mt(Config::settingsFile())) & 0x7fffffff;
+}
+
+function statusCacheKey(Repository $repo, string $timePart): string
+{
+    $r = $repo->revision();   // C1: bez czytania CSV (rewizja + czas modyfikacji i rozmiar pliku)
+    return md5(($r['rev'] ?? 0) . '|' . ($r['stamp'] ?? '') . '|' . nightsSettingsStamp() . '|' . $timePart);
+}
+
+/** Pamiec odpowiedzi (B2/C3): zwraca zapisane cialo, gdy klucz sie zgadza i plik nie starszy niz $maxAge s. */
+function cacheGet(string $name, string $key, int $maxAge): ?array
+{
+    $cf = statusCacheFile($name);
+    if (!is_file($cf) || time() - (int)@filemtime($cf) >= $maxAge) return null;
+    $c = json_decode((string)@file_get_contents($cf), true);
+    return (is_array($c) && ($c['key'] ?? '') === $key && is_array($c['body'] ?? null)) ? $c['body'] : null;
+}
+
+function cachePut(string $name, string $key, array $body): void
+{
+    $cf = statusCacheFile($name);
+    $dir = dirname($cf);
+    if (is_dir($dir) || @mkdir($dir, 0775, true)) {
+        $tmp = $cf . '.tmp' . getmypid();
+        @file_put_contents($tmp, json_encode(['key' => $key, 'body' => $body], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        if (!@rename($tmp, $cf)) @unlink($tmp);
+    }
 }
 
 /**
@@ -121,24 +148,25 @@ function handle_api(string $route, string $method, Repository $repo): void
     if ($route === 'revision' && $method === 'GET') {
         header('Cache-Control: no-store, max-age=0');
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($repo->revision());
+        echo json_encode($repo->revision() + ['nrev' => nightsSettingsStamp()]);
         exit;
     }
 
     if ($route === 'device' && $method === 'GET') {   // B5: lekka odpowiedź dla urządzenia ESP32 (3 pola)
+        // C3: pamięć do zmiany dziennika, nocy lub ustawień (najdłużej 1 h)
+        $key = statusCacheKey($repo, date('Y-m-d H'));
+        if (($c = cacheGet('device', $key, 3600)) !== null) sendJson(200, $c);
         $entries = $repo->allEntries();
         [$camNight, $camDev] = camViews($entries);
-        sendJson(200, ['sleepTelegram' => $repo->loadSettings()['sleepTelegram'], 'camNight' => $camNight, 'camDev' => $camDev]);
+        $body = ['sleepTelegram' => $repo->loadSettings()['sleepTelegram'], 'camNight' => $camNight, 'camDev' => $camDev];
+        cachePut('device', $key, $body);
+        sendJson(200, $body);
     }
 
     if ($route === 'status' && $method === 'GET') {
         // B2: pamięć odpowiedzi na 15 s (klucz: rewizja dziennika, pliki danych, ustawienia, noce, minuta)
-        $key = statusCacheKey($repo);
-        $cf = statusCacheFile();
-        if (is_file($cf) && time() - (int)@filemtime($cf) < 15) {
-            $c = json_decode((string)file_get_contents($cf), true);
-            if (is_array($c) && ($c['key'] ?? '') === $key && is_array($c['body'] ?? null)) sendJson(200, $c['body']);
-        }
+        $key = statusCacheKey($repo, date('Y-m-d H:i'));
+        if (($c = cacheGet('status', $key, 15)) !== null) sendJson(200, $c);
         $entries = $repo->allEntries();
         $latest = Domain::loadLatestEntries($entries, $now);
         $ageDays = Domain::calculateAgeDays($now);
@@ -232,11 +260,7 @@ function handle_api(string $route, string $method, Repository $repo): void
             'storageDriver' => Config::storageDriver(),
             'resetReason' => 'php',
         ];
-        $dir = dirname($cf);
-        if (is_dir($dir) || @mkdir($dir, 0775, true)) {
-            @file_put_contents($cf . '.tmp', json_encode(['key' => $key, 'body' => $body], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
-            @rename($cf . '.tmp', $cf);
-        }
+        cachePut('status', $key, $body);
         sendJson(200, $body);
     }
 
@@ -320,9 +344,16 @@ function handle_api(string $route, string $method, Repository $repo): void
 
     if ($route === 'delete-entry' && $method === 'POST') {
         if (param('line') === null) sendJson(400, ['message' => 'Brakuje indeksu linii do usuniecia.']);
-        $result = $repo->deleteByIndex((int)param('line'));
+        // A5: strona podaje tez date, godzine i typ — usuwamy tylko, gdy wiersz sie zgadza
+        $expect = null;
+        if (param('date') !== null || param('time') !== null || param('type') !== null) {
+            $expect = ['date' => (string)param('date', ''), 'time' => (string)param('time', ''), 'type' => (string)param('type', '')];
+        }
+        // A4: przy karmieniu mozna usunac tez mleko z ta sama godzina
+        $result = $repo->deleteByIndex((int)param('line'), $expect, param('withMilk') === '1');
+        if (!empty($result['stale'])) sendJson(409, ['message' => 'Lista wpisów zmieniła się w międzyczasie — odśwież i spróbuj ponownie.']);
         if (!$result['ok']) sendJson(400, ['message' => 'Nie udalo sie usunac wpisu.']);
-        sendJson(200, ['message' => 'Usunieto wpis.', 'removed' => $result['removed'] ?? '']);
+        sendJson(200, ['message' => 'Usunieto: ' . ($result['removed'] ?? ''), 'removed' => $result['removed'] ?? '']);
     }
 
     if ($route === 'update-feeding' && $method === 'POST') {

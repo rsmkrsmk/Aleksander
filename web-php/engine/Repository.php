@@ -18,8 +18,12 @@ interface Repository
     /** Dopisuje wpis. ZAWSZE zapisuje tez do CSV (backup). Zwraca true/false. */
     public function append(string $type, DateTimeImmutable $when, int $ml, int $piersLeft = -1, int $piersRight = -1): bool;
 
-    /** Usuwa wpis po lineIndex. Zwraca ['ok'=>bool, 'removed'=>string]. */
-    public function deleteByIndex(int $lineIndex): array;
+    /**
+     * Usuwa wpis po lineIndex. Zwraca ['ok'=>bool, 'removed'=>string, 'stale'=>bool].
+     * $expect (date, time, type): wpis musi sie zgadzac, inaczej nic nie usuwa i zwraca stale=true.
+     * $withMilk: dla KARMIENIA usuwa tez mleko z ta sama data i godzina.
+     */
+    public function deleteByIndex(int $lineIndex, ?array $expect = null, bool $withMilk = false): array;
 
     /**
      * Edytuje wpis KARMIENIA (i jego sparowane mleko) W MIEJSCU — bez zmiany
@@ -53,9 +57,9 @@ interface Repository
     public function rawCsv(): string;
 
     /**
-     * Rewizja danych (v4): monotoniczny licznik zmian + liczba wpisow + czas.
-     * Urzadzenie sprawdza go co 10 s (GET /api/revision), aby wykryc zmiane
-     * bez pobierania calego CSV. Zwraca ['rev'=>int,'count'=>int,'updatedAt'=>string].
+     * Rewizja danych: monotoniczny licznik zmian + znacznik pliku (czas modyfikacji i rozmiar)
+     * + czas. Urzadzenie i strona sprawdzaja ja, aby wykryc zmiane bez pobierania calego CSV.
+     * Zwraca ['rev'=>int,'stamp'=>string,'count'=>-1,'updatedAt'=>string].
      */
     public function revision(): array;
 
