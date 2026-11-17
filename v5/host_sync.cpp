@@ -25,6 +25,7 @@ static bool cacheDirty = false;
 static uint32_t cacheWrites = 0, lastCacheWriteMs = 0;
 static volatile bool sleepTg = false;
 static long revLocal = -1, revRemote = -1;
+static long nrevSeen = -1, nrevRemote = -1;   // B3: znacznik nocy z kamery i ustawien z /api/revision
 static uint32_t lastRevOk = 0, lastDlOk = 0, dlFails = 0, lastPoll = 0, lastStatus = 0;
 static uint32_t lastRevChangeMs = 0;          // C1: kiedy ostatnio zmienily sie dane
 static bool plainOk = true;                   // C1: rewizja przez zwykle HTTP dziala
@@ -126,12 +127,17 @@ static void bootProgress(size_t got, long total) {
   progressFn(total > 0 ? static_cast<int>(got * 99 / total) : static_cast<int>((millis() / 60) % 100));
 }
 
-static long parseRev(const PsBuf &b) {
+static long parseKey(const PsBuf &b, const char *key) {
   if (!b.len) return -1;
-  const char *k = strstr(reinterpret_cast<const char *>(b.p), "\"rev\"");
+  const char *k = strstr(reinterpret_cast<const char *>(b.p), key);
   if (!k) return -1;
   k = strchr(k, ':');
   return k ? strtol(k + 1, nullptr, 10) : -1;
+}
+static long parseRev(const PsBuf &b) {
+  const long r = parseKey(b, "\"rev\"");
+  if (r >= 0) nrevRemote = parseKey(b, "\"nrev\"");   // starszy hosting bez nrev -> -1 (bez zmian)
+  return r;
 }
 
 static long fetchRevision() {
@@ -310,7 +316,7 @@ bool hostCamNight(char *line, size_t n, uint8_t *rating) {
   return line[0] != 0;
 }
 
-static void fetchStatusSettings() {
+static bool fetchStatusSettings() {
   PsBuf b;
   b.limit = 64 * 1024;
   // C2: lekkie /api/device (te same klucze); starszy hosting bez niego - pelne /api/status
@@ -333,8 +339,10 @@ static void fetchStatusSettings() {
     parseCamNight(reinterpret_cast<const char *>(b.p));
     parseCamDev(reinterpret_cast<const char *>(b.p));
   }
+  const bool ok = st == 200 && b.len;
   b.release();
   lastStatus = millis();
+  return ok;
 }
 
 Store *hostSyncBlocking(uint32_t timeoutMs, HostProgressFn progress) {
@@ -351,7 +359,7 @@ Store *hostSyncBlocking(uint32_t timeoutMs, HostProgressFn progress) {
   }
   progressFn = nullptr;
   lastPoll = millis();
-  if (got) fetchStatusSettings();
+  if (got) { const want = nrevRemote; if (fetchStatusSettings() && want >= 0) nrevSeen = want; }
   if (got) cacheWriteIfDue(true);   // pierwszy zapis od razu (o ile tresc sie zmienila)
   return got;
 }
@@ -404,7 +412,14 @@ static void netLoop(void *) {
           if (s) { revLocal = rev; publish(s); }
         }
       }
-      if (tlsGapOk() && (lastStatus == 0 || millis() - lastStatus >= HOST_STATUS_REFRESH_MS)) fetchStatusSettings();
+      // B3 (5.5.0): noc z kamery i ustawienie Telegram od razu po zmianie na hostingu (nrev z rewizji),
+      // a poza tym co HOST_STATUS_REFRESH_MS jak dawniej.
+      // (po nieudanej probie kolejna najwczesniej po 15 s, zeby nie odpytywac hostingu bez przerwy)
+      const bool nightsChanged = nrevRemote >= 0 && nrevRemote != nrevSeen && millis() - lastStatus >= 15000;
+      if (tlsGapOk() && (lastStatus == 0 || nightsChanged || millis() - lastStatus >= HOST_STATUS_REFRESH_MS)) {
+        const long want = nrevRemote;
+        if (fetchStatusSettings() && want >= 0) nrevSeen = want;
+      }
       if (weatherDue()) weatherFetch();
       if (tlsGapOk()) backupIfDue();
     }

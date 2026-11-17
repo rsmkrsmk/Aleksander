@@ -186,7 +186,11 @@ static bool readBody(Client &c, long n, PsBuf *body, uint32_t timeoutMs, size_t 
       size_t want = sizeof(chunk);
       if (n >= 0 && static_cast<long>(want) > left) want = static_cast<size_t>(left);
       const int r = c.read(chunk, want);
-      if (r <= 0) continue;
+      if (r <= 0) {   // D3 (5.5.0): "sa dane", ale odczyt nic nie dal — pilnuj limitu czasu, nie kręć się
+        if (millis() - t0 > timeoutMs) return false;
+        delay(3);
+        continue;
+      }
       if (body) body->append(chunk, static_cast<size_t>(r));
       received += static_cast<size_t>(r);
       if (n >= 0) left -= r;

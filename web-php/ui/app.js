@@ -49,12 +49,20 @@ function fmtGap(m){if(m==null||m<0)return'—';const h=Math.floor(m/60),mm=m%60;
 function fmtDur(m){if(m==null||m<0)return'—';const h=Math.floor(m/60),mm=m%60;return h>0?`${h}h ${mm} min`:`${mm} min`}
 function isoHM(iso){return(iso&&iso.length>=16)?iso.slice(11,16):''}
 
+/* C4 (5.5.0): kazde zapytanie ma limit czasu 15 s — zawieszone polaczenie nie blokuje odswiezania */
 async function request(url,options){
-  const r=await fetch(url,options);let data={};
+  const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),15000);
+  let r;
+  try{r=await fetch(url,Object.assign({},options||{},{signal:ac.signal}))}
+  catch(e){throw new Error(e&&e.name==='AbortError'?'Serwer nie odpowiada (limit 15 s)':'Błąd połączenia z serwerem')}
+  finally{clearTimeout(tm)}
+  let data={};
   try{data=await r.json()}catch(e){}
   if(!r.ok)throw new Error(data.message||'Błąd połączenia z serwerem');
   return data;
 }
+/* D2 (5.5.0): tekst z danych wstawiany do HTML zawsze kodowany */
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
 /* ---------- Toasty ---------- */
 function toast(msg,kind='ok'){
@@ -62,7 +70,7 @@ function toast(msg,kind='ok'){
   const ic=kind==='ok'
     ?'<path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
     :'<path d="M12 8v5M12 16.5v.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>';
-  t.innerHTML=`<span class="ti"><svg viewBox="0 0 24 24">${ic}</svg></span><span>${msg}</span>`;
+  t.innerHTML=`<span class="ti"><svg viewBox="0 0 24 24">${ic}</svg></span><span></span>`;t.lastChild.textContent=msg;
   w.appendChild(t);requestAnimationFrame(()=>t.classList.add('show'));
   setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),320)},3200);
 }
@@ -319,6 +327,29 @@ function renderDiag(data){
 /* ============================================================================
    Dziennik dnia + wpisy
    ============================================================================ */
+/* A4+A5 (5.5.0): usuwanie wpisu. Serwer usuwa wiersz tylko, gdy data, godzina i typ sie zgadzaja
+   (inaczej 409 „lista zmieniła się”). Przy karmieniu pytamy, czy usunac tez mleko z tej samej godziny. */
+async function deleteEntryFlow(en,list,desc){
+  if(!confirm(`Usunąć wpis?\n${desc}`))return false;
+  let withMilk=false;
+  if(en.type==='KARMIENIE'){
+    let all=list;
+    if(!all&&en.date){try{all=(await request('/api/entries?date='+encodeURIComponent(en.date))).entries||[]}catch(e){all=[]}}
+    const milks=(all||[]).filter(x=>x.time===en.time&&(x.type||'').startsWith('MLEKO')&&(!en.date||!x.date||x.date===en.date));
+    if(milks.length)withMilk=confirm(`Usunąć też mleko z tej samej godziny?\n${milks.map(m=>`${m.label||m.type} ${m.ml} ml`).join(', ')}\n\nOK = usuń karmienie i mleko, Anuluj = tylko karmienie`);
+  }
+  const body={line:String(en.lineIndex),time:en.time||'',type:en.type||''};
+  if(en.date)body.date=en.date;
+  if(withMilk)body.withMilk='1';
+  try{
+    await request('/api/delete-entry',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)});
+    toast(withMilk?'Usunięto karmienie i mleko':'Usunięto wpis');return true;
+  }catch(ex){
+    toast(ex.message,'err');
+    if(/zmieniła się/.test(ex.message)){invalidateEntries();refresh()}
+    return false;
+  }
+}
 function buildEntry(en,onDeleted){
   const [cls,icon]=entryIcon(en.type);
   const row=document.createElement('div');row.className='entry';
@@ -326,14 +357,12 @@ function buildEntry(en,onDeleted){
   const amt=(en.type==='KARMIENIE'||Number(en.ml)===0)?'':`${en.ml} ml`;
   row.innerHTML=
     `<span class="e-ic ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span>`+
-    `<div class="e-main"><div class="e-title">${en.label||en.type}${amt?` · ${amt}`:''}</div>${sub?`<div class="e-sub">${sub}</div>`:''}</div>`+
-    `<span class="e-time">${en.time}</span>`+
+    `<div class="e-main"><div class="e-title">${esc(en.label||en.type)}${amt?` · ${esc(amt)}`:''}</div>${sub?`<div class="e-sub">${esc(sub)}</div>`:''}</div>`+
+    `<span class="e-time">${esc(en.time)}</span>`+
     `<button class="e-del" title="Usuń wpis"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>`;
   row.querySelector('.e-del').addEventListener('click',async e=>{
     e.stopPropagation();
-    if(!confirm(`Usunąć wpis?\n${en.label||en.type}, ${en.time}${amt?', '+amt:''}`))return;
-    try{await request('/api/delete-entry',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({line:String(en.lineIndex)})});toast('Usunięto wpis');await refresh();if(onDeleted)onDeleted()}
-    catch(ex){toast(ex.message,'err')}
+    if(await deleteEntryFlow(en,null,`${en.label||en.type}, ${en.time}${amt?', '+amt:''}`)){await refresh();if(onDeleted)onDeleted()}
   });
   return row;
 }
@@ -354,7 +383,7 @@ function buildTimeline(entries, onChanged){
     if(e.type==='SEN_START'){sStart=e.time;return}
     if(e.type==='SEN_STOP'){
       if(sStart!=null){const a=toMin(sStart),b=toMin(e.time);const band=document.createElement('div');band.className='tl-sleepband';
-        band.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen ${sStart}–${e.time}${(a!=null&&b!=null&&b>a)?` · ${fmtGap(b-a)}`:''}`;
+        band.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen ${esc(sStart)}–${esc(e.time)}${(a!=null&&b!=null&&b>a)?` · ${fmtGap(b-a)}`:''}`;
         wrap.append(band);sStart=null}
       return;
     }
@@ -381,10 +410,10 @@ function buildTimeline(entries, onChanged){
       ? `<button class="tl-edit" title="Edytuj karmienie"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h4l10-10-4-4L4 16v4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" stroke="currentColor" stroke-width="1.8"/></svg></button>`
       : '';
     row.innerHTML=
-      `<span class="tl-time">${e.time}</span>`+
+      `<span class="tl-time">${esc(e.time)}</span>`+
       `<span class="tl-rail"><span class="tl-node"></span></span>`+
       `<div class="tl-card"><span class="tl-ic ${cls}"><svg viewBox="0 0 24 24" fill="none">${icon}</svg></span>`+
-        `<div class="tl-main"><div class="tl-t">${title}</div><div class="tl-s">${sub}</div></div>`+
+        `<div class="tl-main"><div class="tl-t">${esc(title)}</div><div class="tl-s">${esc(sub)}</div></div>`+
         gapHtml+
         editBtn+
         `<button class="tl-del" title="Usuń wpis"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>`+
@@ -401,14 +430,12 @@ function buildTimeline(entries, onChanged){
     }
     row.querySelector('.tl-del').addEventListener('click',async ev=>{
       ev.stopPropagation();
-      if(!confirm(`Usunąć wpis?\n${title}, ${e.time}`))return;
-      try{await request('/api/delete-entry',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({line:String(e.lineIndex)})});toast('Usunięto wpis');invalidateEntries();await refresh();if(onChanged)onChanged()}
-      catch(ex){toast(ex.message,'err')}
+      if(await deleteEntryFlow(e,entries,`${title}, ${e.time}`)){invalidateEntries();await refresh();if(onChanged)onChanged()}
     });
     wrap.append(row);
   });
   // sen w toku (otwarty start bez stop)
-  if(sStart!=null){const band=document.createElement('div');band.className='tl-sleepband';band.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen od ${sStart} · w toku`;wrap.append(band)}
+  if(sStart!=null){const band=document.createElement('div');band.className='tl-sleepband';band.innerHTML=`<svg viewBox="0 0 24 24" fill="none"><path d="M20 14A8 8 0 0 1 10 4a7 7 0 1 0 10 10Z" fill="currentColor"/></svg>Sen od ${esc(sStart)} · w toku`;wrap.append(band)}
   return wrap;
 }
 
@@ -606,7 +633,7 @@ async function renderAnalysis(){
     let prev=null;
     all.forEach(f=>{const it=document.createElement('div');it.className='ritem'+(f.milk?' milk':'');
       const sub=f.milk?'butelka':(prev!=null?'po '+fmtGap(f.mins-prev):'pierwsze');if(!f.milk)prev=f.mins;
-      it.innerHTML=`<div class="rt">${f.time}</div><div class="rn2"></div><div class="ri"><div class="t">${f.milk?(f.label+(f.ml?` · ${f.ml} ml`:'')):'Karmienie'}</div><div class="s">${sub}</div></div>`;
+      it.innerHTML=`<div class="rt">${esc(f.time)}</div><div class="rn2"></div><div class="ri"><div class="t">${f.milk?esc(f.label+(f.ml?` · ${f.ml} ml`:'')):'Karmienie'}</div><div class="s">${sub}</div></div>`;
       wrap.append(it)});
     rh.append(wrap);
   });
@@ -1569,11 +1596,20 @@ function nudge(min){const i=$('entryTime');const d=new Date(i.value);if(Number.i
 /* ============================================================================
    API akcje
    ============================================================================ */
-let lastFull=0,lastRev=null;
-async function refresh(){
-  lastFull=Date.now();
-  try{render(await request('/api/status'));}
-  catch(e){toast(e.message,'err')}
+let lastFull=0,lastRev=null,refreshing=null,refreshAgain=false;
+/* C4 (5.5.0): jedno odswiezenie naraz. Prosba w trakcie trwajacego odswiezenia wykona sie raz
+   zaraz po nim — starsza odpowiedz nigdy nie nadpisze nowszej. */
+function refresh(){
+  if(refreshing){refreshAgain=true;return refreshing}
+  refreshing=(async()=>{
+    do{
+      refreshAgain=false;lastFull=Date.now();
+      try{render(await request('/api/status'))}
+      catch(e){toast(e.message,'err')}
+    }while(refreshAgain);
+    refreshing=null;
+  })();
+  return refreshing;
 }
 async function postEvent(type,ml=0){
   try{await request('/api/event',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({type,ml:String(ml)})});await refresh();return true}
@@ -1947,7 +1983,13 @@ refresh();
 /* B2: co 10 s tylko mała rewizja dziennika; pełny /api/status po zmianie albo co 60 s; w ukrytej karcie nic */
 async function tick(){
   if(document.hidden)return;
-  try{const r=await request('/api/revision');const k=r?`${r.rev}:${r.count}`:null;
+  if(tickBusy)return;tickBusy=true;
+  try{await tickRun()}finally{tickBusy=false}
+}
+let tickBusy=false;
+async function tickRun(){
+  /* klucz zmian: licznik rewizji + znacznik pliku danych (czas i rozmiar) + noce/ustawienia */
+  try{const r=await request('/api/revision');const k=r?`${r.rev}:${r.stamp!=null?r.stamp:r.count}:${r.nrev!=null?r.nrev:''}`:null;
     if(k!==null&&k!==lastRev){lastRev=k;return refresh()}}catch(e){}
   if(Date.now()-lastFull>=60000)refresh();
   /* na stronie wagi wykresy sprawdzamy bezposrednio (tanie zapytanie) — nie zalezy od rewizji */

@@ -318,7 +318,9 @@ static void computeLive(const StatsInput &in, UiModel &m, int todayDay, const st
     const int g = mods[i] - mods[i - 1];
     if (g > 0) { sum += g; ++cnt; if (g > longest) longest = g; }
   }
-  if (lf && m.sinceFeedMin > longest) longest = m.sinceFeedMin;
+  // B2 (5.5.0, jak na stronie): trwajaca przerwa liczy sie do "najdluzszej dzis" tylko, gdy ostatnie
+  // karmienie bylo dzisiaj (przerwa od wczorajszego karmienia nie jest przerwa "dzisiejsza").
+  if (lf && lf->day == todayDay && m.sinceFeedMin > longest) longest = m.sinceFeedMin;
   m.feedCount = t0.feed;
   m.longestGapMin = longest;
   m.avgGapMin = cnt ? static_cast<int>(sum / cnt) : 0;

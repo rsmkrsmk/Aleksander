@@ -88,6 +88,25 @@ final class Domain
     }
 
     /* ------------------------------- Typy wpisow --------------------------------- */
+    /** Wszystkie typy wpisow znane stronie i urzadzeniu (store.cpp). */
+    const KNOWN_TYPES = ['KARMIENIE', 'MLEKO', 'MLEKO_MATKI', 'MLEKO_MODYFIKOWANE', 'MLEKO_MIESZANE',
+        'PIELUCHA_MOKRA', 'PIELUCHA_BRUDNA', 'ODCIAGANIE', 'WITAMINA_D', 'WAGA', 'SEN_START', 'SEN_STOP', 'KAPIEL'];
+
+    /** D2: wiersz CSV do importu — data RRRR-MM-DD, godzina GG:MM, znany typ, liczby. */
+    public static function validCsvRow(string $line): bool
+    {
+        if (!preg_match('/^(\d{4})-(\d{2})-(\d{2}),([01]\d|2[0-3]):[0-5]\d,([A-Z_]+),\s*-?\d*\s*(,\s*-?\d*\s*){0,3}$/', $line, $m)) return false;
+        return checkdate((int)$m[2], (int)$m[3], (int)$m[1]) && in_array($m[5], self::KNOWN_TYPES, true);
+    }
+
+    /** A5: czy wpis zgadza sie z oczekiwanym (date, time, type) przeslanym przez strone. */
+    public static function entryMatches(array $e, array $expect): bool
+    {
+        foreach (['date', 'time', 'type'] as $k) {
+            if (isset($expect[$k]) && $expect[$k] !== '' && (string)$e[$k] !== (string)$expect[$k]) return false;
+        }
+        return true;
+    }
     public static function isMilkType(string $t): bool { return $t === 'MLEKO' || $t === 'MLEKO_MATKI' || $t === 'MLEKO_MODYFIKOWANE' || $t === 'MLEKO_MIESZANE'; }
     public static function milkTypeLabel(string $t): string
     {
@@ -185,7 +204,9 @@ final class Domain
     private static function sleepHourIsNight(int $hour): bool { return $hour >= Config::SLEEP_NIGHT_START_HOUR || $hour < Config::SLEEP_NIGHT_END_HOUR; }
 
     /* ------------------ Ostatnie wpisy / rytm (na liscie wpisow) ----------------- */
-    // $entries: uporzadkowana chronologicznie lista wpisow (jak w pliku/append-only).
+    // $entries: lista wpisow w kolejnosci z pliku (moze zawierac wpisy dopisane wstecz).
+    // Od 5.5.0 wszystko, co zalezy od czasu, liczone jest PO CZASIE, a nie po kolejnosci wierszy
+    // (tak samo jak na urzadzeniu, stats.cpp): stan snu, ostatnia waga, przerwy miedzy karmieniami.
     public static function loadLatestEntries(array $entries, DateTimeImmutable $now): array
     {
         $res = [
@@ -195,35 +216,48 @@ final class Domain
             'avgFeedingGapMin' => 0, 'longestFeedingGapMin' => 0, 'todayFeedingCount' => 0, 'nextFeedingEta' => null,
         ];
         $today = self::dateIso(self::dayOffsetFromToday(0, $now));
-        $prevFeedingToday = null; $sumGap = 0; $gapCount = 0; $sawStart = false;
         // Najpozniejszy wpis w ogole (Any) i najpozniejszy PRZESZLY (Past).
         // Gdy zegar cofniety, data z pliku bywa "w przyszlosci" — uzywamy Any jako
         // fallbacku, zeby "ostatnie karmienie/butelka" nigdy nie znikaly.
         $feedAny = null; $feedPast = null; $milkAny = null; $milkPast = null;
         $feedAnyText = ''; $feedPastText = ''; $milkAnyText = ''; $milkPastText = '';
         $nowLimit = $now->getTimestamp() + 60;
-        foreach ($entries as $e) {
+        $todayFeeds = []; $sleepEv = []; $weightTs = null; $bathDate = null;
+        foreach ($entries as $idx => $e) {
             $stamp = self::csvDateTimeToDate($e['date'], $e['time']);
-            if ($e['type'] === 'KARMIENIE' && $stamp !== null) {
-                if ($feedAny === null || $stamp->getTimestamp() >= $feedAny->getTimestamp()) { $feedAny = $stamp; $feedAnyText = self::formatEntryForUi($e); }
-                if ($stamp->getTimestamp() <= $nowLimit && ($feedPast === null || $stamp->getTimestamp() >= $feedPast->getTimestamp())) { $feedPast = $stamp; $feedPastText = self::formatEntryForUi($e); }
-                if ($e['date'] === $today) {
-                    $res['todayFeedingCount']++;
-                    if ($prevFeedingToday !== null) {
-                        $gap = intdiv($stamp->getTimestamp() - $prevFeedingToday->getTimestamp(), 60);
-                        if ($gap > 0) { $sumGap += $gap; $gapCount++; if ($gap > $res['longestFeedingGapMin']) $res['longestFeedingGapMin'] = $gap; }
-                    }
-                    $prevFeedingToday = $stamp;
-                }
+            if ($stamp === null) continue;
+            $ts = $stamp->getTimestamp();
+            if ($e['type'] === 'KARMIENIE') {
+                if ($feedAny === null || $ts >= $feedAny->getTimestamp()) { $feedAny = $stamp; $feedAnyText = self::formatEntryForUi($e); }
+                if ($ts <= $nowLimit && ($feedPast === null || $ts >= $feedPast->getTimestamp())) { $feedPast = $stamp; $feedPastText = self::formatEntryForUi($e); }
+                if ($e['date'] === $today) { $res['todayFeedingCount']++; if ($ts <= $nowLimit) $todayFeeds[] = $ts; }
+            } elseif (self::isMilkType($e['type'])) {
+                if ($milkAny === null || $ts >= $milkAny->getTimestamp()) { $milkAny = $stamp; $milkAnyText = self::formatEntryForUi($e); }
+                if ($ts <= $nowLimit && ($milkPast === null || $ts >= $milkPast->getTimestamp())) { $milkPast = $stamp; $milkPastText = self::formatEntryForUi($e); }
+            } elseif ($e['type'] === 'WAGA' && $e['ml'] > 0) {
+                // B1: najnowsza waga po dacie i godzinie (waga dopisana wstecz nie zastepuje nowszej)
+                if ($weightTs === null || $ts >= $weightTs) { $weightTs = $ts; $res['lastWeightG'] = $e['ml']; }
+            } elseif ($e['type'] === 'KAPIEL') {
+                if ($bathDate === null || strcmp($e['date'], $bathDate) >= 0) $bathDate = $e['date'];
+            } elseif ($e['type'] === 'SEN_START' || $e['type'] === 'SEN_STOP') {
+                if ($ts <= $nowLimit) $sleepEv[] = [$ts, $idx, $e['type'], $stamp];   // A1: bez wpisow z przyszlosci
             }
-            if (self::isMilkType($e['type']) && $stamp !== null) {
-                if ($milkAny === null || $stamp->getTimestamp() >= $milkAny->getTimestamp()) { $milkAny = $stamp; $milkAnyText = self::formatEntryForUi($e); }
-                if ($stamp->getTimestamp() <= $nowLimit && ($milkPast === null || $stamp->getTimestamp() >= $milkPast->getTimestamp())) { $milkPast = $stamp; $milkPastText = self::formatEntryForUi($e); }
-            }
-            if ($e['type'] === 'WAGA') $res['lastWeightG'] = $e['ml'];
-            if ($e['type'] === 'KAPIEL') $res['lastBath'] = $e['date'];
-            if ($e['type'] === 'SEN_START') { $res['sleepInProgress'] = true; $res['sleepStartedTime'] = $stamp; $sawStart = true; }
-            elseif ($e['type'] === 'SEN_STOP') { $res['sleepInProgress'] = false; $res['sleepStartedTime'] = null; if ($sawStart) { $res['lastWakeTime'] = $stamp; $sawStart = false; } }
+        }
+        $res['lastBath'] = $bathDate;
+        // A1: sen po czasie (jak buildDayStats i firmware). START otwiera sesje, STOP zamyka otwarta
+        // sesje (pobudka = czas STOP). A2: otwarta sesja dluzsza niz SLEEP_MAX_SESSION_MIN to
+        // zapomniany STOP — nie pokazujemy "Spi" bez konca.
+        usort($sleepEv, static fn($a, $b) => $a[0] <=> $b[0] ?: $a[1] <=> $b[1]);
+        $open = null;
+        foreach ($sleepEv as $ev) {
+            if ($ev[2] === 'SEN_START') { $open = $ev[3]; continue; }
+            if ($open === null) continue;
+            $res['lastWakeTime'] = $ev[3];
+            $open = null;
+        }
+        if ($open !== null) {
+            $dur = intdiv($now->getTimestamp() - $open->getTimestamp(), 60);
+            if ($dur <= Config::SLEEP_MAX_SESSION_MIN) { $res['sleepInProgress'] = true; $res['sleepStartedTime'] = $open; }
         }
         // Wybor "ostatniego": preferujemy najpozniejszy PRZESZLY; jesli zegar cofniety
         // (brak przeszlych), uzywamy najpozniejszego ogolem — "ostatnie" nigdy nie znika.
@@ -231,6 +265,18 @@ final class Domain
         elseif ($feedAny !== null) { $res['lastFeeding'] = $feedAnyText; $res['lastFeedingTime'] = $feedAny; }
         if ($milkPast !== null) { $res['lastMilk'] = $milkPastText; $res['lastMilkTime'] = $milkPast; }
         elseif ($milkAny !== null) { $res['lastMilk'] = $milkAnyText; $res['lastMilkTime'] = $milkAny; }
+        // B2: przerwy miedzy dzisiejszymi karmieniami PO CZASIE; najdluzsza obejmuje tez trwajaca
+        // przerwe od ostatniego karmienia, o ile to karmienie bylo dzisiaj (tak samo na urzadzeniu).
+        sort($todayFeeds);
+        $sumGap = 0; $gapCount = 0;
+        for ($i = 1, $n = count($todayFeeds); $i < $n; $i++) {
+            $gap = intdiv($todayFeeds[$i] - $todayFeeds[$i - 1], 60);
+            if ($gap > 0) { $sumGap += $gap; $gapCount++; if ($gap > $res['longestFeedingGapMin']) $res['longestFeedingGapMin'] = $gap; }
+        }
+        if ($todayFeeds) {
+            $ongoing = intdiv($now->getTimestamp() - end($todayFeeds), 60);
+            if ($ongoing > $res['longestFeedingGapMin']) $res['longestFeedingGapMin'] = $ongoing;
+        }
         if ($gapCount >= 1) $res['avgFeedingGapMin'] = intdiv($sumGap, $gapCount);
         if ($res['lastFeedingTime'] !== null) $res['nextFeedingEta'] = $res['lastFeedingTime']->modify('+' . Config::COUNTER_BLINK_MIN . ' minutes');
         return $res;
@@ -350,7 +396,7 @@ final class Domain
         foreach ($entries as $e) {
             if (strncmp($e['date'], $targetDate, strlen($targetDate)) !== 0) continue;
             $out[] = [
-                'time' => $e['time'], 'type' => $e['type'],
+                'date' => $e['date'], 'time' => $e['time'], 'type' => $e['type'],
                 'label' => self::isMilkType($e['type']) ? self::milkTypeLabel($e['type']) : $e['type'],
                 'ml' => $e['ml'], 'piersLeftMin' => $e['piersLeft'], 'piersRightMin' => $e['piersRight'],
                 'lineIndex' => $e['lineIndex'] ?? -1,

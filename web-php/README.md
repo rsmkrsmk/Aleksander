@@ -17,6 +17,7 @@ Strona opieki nad niemowlęciem: wpisy (karmienia, sen, pieluchy, waga, kąpiele
 11. [Włączenie MySQL](#11-włączenie-mysql)
 12. [Uruchomienie lokalne i testy](#12-uruchomienie-lokalne-i-testy)
 13. [Bezpieczeństwo i czego jeszcze nie ma](#13-bezpieczeństwo-i-czego-jeszcze-nie-ma)
+14. [Zmiany 5.5.0 — poprawki z przeglądu kodu (17.11.2026)](#14-zmiany-550--poprawki-z-przeglądu-kodu-17112026)
 
 ---
 
@@ -71,7 +72,8 @@ Wszystko w katalogu danych (`panel-data/` na hostingu, `data/` w repo). Katalog 
 | Plik | Zawartość |
 |---|---|
 | `karmienia.csv` | **dane** (źródło prawdy): wszystkie wpisy |
-| `karmienia.rev` | numer rewizji; rośnie przy każdej zmianie. Urządzenie sprawdza go co 10 s (`GET /api/revision`) i pobiera CSV tylko gdy się zmienił |
+| `karmienia.rev` | numer rewizji; rośnie przy każdej zmianie. Urządzenie sprawdza go co 10–60 s (`GET /api/revision`) i pobiera CSV tylko gdy się zmienił |
+| `karmienia.csv.lock` | pusty plik blokady (od 5.5.0): zapisy czekają na siebie zamiast się nadpisywać; nie usuwaj w trakcie pracy strony (usunięty odtworzy się sam) |
 | `karmienia_backup.csv` | kopia bieżąca (tworzona przy zapisie; nie w repo) |
 | `ustawienia.cfg` | ustawienia z panelu (np. powiadomienia Telegram o drzemce) |
 | `RRRR-MM-DD-GG-MM-SS.bakap` | kopie sprzed wgrania całego CSV (rozdział 8) |
@@ -79,8 +81,9 @@ Wszystko w katalogu danych (`panel-data/` na hostingu, `data/` w repo). Katalog 
 | `noce/analiza/RRRR-MM-DD.json` | pamięć podręczna analizy nocy; liczona od nowa sama, gdy zmieni się plik nocy, progi albo wpisy dziennika z tej doby (można bezpiecznie usunąć cały katalog) |
 | `noce/analiza/stats_<dni>.json` | pamięć wyniku `/api/sleep-stats` (od 3.11.2026): liczona od nowa po nowej nocy, zmianie dziennika albo następnego dnia |
 | `cache/status.json` | odpowiedź `/api/status` sprzed najwyżej 15 s (można usunąć) |
+| `cache/device.json` | odpowiedź `/api/device` dla urządzenia (od 5.5.0): ważna do zmiany dziennika, nocy lub ustawień, najdłużej 1 h (można usunąć) |
 
-Format CSV: nagłówek `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`, jeden wpis na wiersz. Typy: `KARMIENIE` (pierś, minuty w kolumnach `piers_*`), `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `WITAMINA_D`, `ODCIAGANIE`, `WAGA` (w polu `ml` są gramy), `SEN_START`, `SEN_STOP`, `KAPIEL`.
+Format CSV: nagłówek `data,godzina,typ,ml,piers_lewa_min,piers_prawa_min`, jeden wpis na wiersz. Od 5.5.0 wiersz musi mieć datę `RRRR-MM-DD`, godzinę `GG:MM` i znany typ (lista niżej) — inne wiersze są pomijane w obliczeniach i na stronie (zostają w pliku), a import i wgrywanie całego CSV ich nie przyjmują (liczą je jako „pominięte”). Typy: `KARMIENIE` (pierś, minuty w kolumnach `piers_*`), `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `WITAMINA_D`, `ODCIAGANIE`, `WAGA` (w polu `ml` są gramy), `SEN_START`, `SEN_STOP`, `KAPIEL`.
 
 ## 3. Wdrożenie na hostingu
 
@@ -126,9 +129,9 @@ Bez gita, przez **Menedżer plików** cPanel albo FTP. Pliki bierzesz z repo: Gi
 | `public_html/paths.php` | wskazuje `panel-engine`/`panel-data` (wersja z repo rozpoznaje to sama, ale nie ma powodu jej podmieniać) |
 | `panel-data/*` | to są **dane** (CSV, ustawienia, noce) |
 
-Po wgraniu: odśwież stronę **Ctrl+F5** (przeglądarka trzyma starą wersję `app.js`).
+Po wgraniu: odśwież stronę **Ctrl+F5**. Od 5.5.0 `index.html` ładuje `app.js?v=<wersja>` (np. `app.js?v=5.5.0`) — przy każdej zmianie `app.js` ta liczba jest podbijana w `index.html`, więc przeglądarka (też w telefonie) pobierze nowy plik sama. **Dlatego przy aktualizacji wgrywaj zawsze oba pliki: `app.js` i `index.html`.**
 
-**Szybki test po aktualizacji** (w przeglądarce): `https://phpmapy1.webd.pro/api/revision` → `{"rev":...}`; `https://phpmapy1.webd.pro/api/sleep-nights?days=14` → `{"nights":[...]}` (lista może być pusta).
+**Szybki test po aktualizacji** (w przeglądarce): `https://phpmapy1.webd.pro/api/revision` → `{"rev":...,"stamp":"...","count":-1,...,"nrev":...}` (od 5.5.0 są pola `stamp` i `nrev`); `https://phpmapy1.webd.pro/api/sleep-nights?days=14` → `{"nights":[...]}` (lista może być pusta).
 
 ## 5. Błąd 500 i inne awarie
 
@@ -158,15 +161,15 @@ Adresy względem strony: `https://phpmapy1.webd.pro/api/<nazwa>` (albo wprost `�
 | Metoda i adres | Co robi |
 |---|---|
 | `GET /export.csv` i `GET /api/export.csv` | cały CSV; pobiera go urządzenie |
-| `GET /api/revision` | `{"rev":N,"count":liczba wpisów,"updatedAt":…}`; `rev` rośnie przy każdej zmianie danych |
+| `GET /api/revision` | `{"rev":N,"stamp":"czas-rozmiar","count":-1,"updatedAt":…,"nrev":M}` (od 5.5.0). `rev` rośnie przy każdej zmianie danych przez stronę; `stamp` = czas modyfikacji i rozmiar pliku danych (zmienia się też przy podmianie pliku w cPanel); `nrev` = znacznik nocy z kamery i ustawień (zmienia się po nowej nocy z t620 albo zmianie ustawienia). Odpowiedź nie czyta już pliku CSV; `count` zostaje dla zgodności (zawsze −1) |
 | `GET /api/status` | stan do panelu (od 3.11.2026 z pamięcią 15 s w `panel-data/cache/status.json`; `night` z godzin nocy t620 z plików nocy, np. 20:30–06:00): wiek, statystyki dnia, sen (`czuwa`/`okno`/`przekroczone`/`spi`), ustawienia (`sleepTelegram`), `camNight` — skrót ostatniej zakończonej nocy z kamery (urządzenie pokazuje go na karcie Sen), `camDev` — płaski obiekt do widoku „Noc z kamery” na urządzeniu (firmware 5.3+): `night`, `rating` (1–4), `settleStatus`, `settleMin`, `placed`/`settled`/`sleepFrom`/`sleepTo` (HH:MM), `quietPct`, `longestBlock`, `wakeCount`, `cryCount` (−1 brak dźwięku), `strip` (23 znaki na pół godziny od 18:30: `-` brak danych, `o` poza łóżeczkiem, `0`–`9` ruch), `cry` (23 znaki `0`/`1`), `wk` (do 7 nocy `d.mm:zasypianie:spokój_h×10:ocena` rozdzielone `;`, zasypianie −1 brak, −2 sen aktywny), `cmp` (gotowa linia porównania 7 nocy z 7 wcześniejszymi) |
-| `GET /api/device` | lekka odpowiedź dla urządzenia (firmware 5.4+): tylko `sleepTelegram`, `camNight`, `camDev` (format jak w `/api/status`) |
-| `GET /api/entries?date=RRRR-MM-DD` | wpisy z jednego dnia |
+| `GET /api/device` | lekka odpowiedź dla urządzenia (firmware 5.4+): tylko `sleepTelegram`, `camNight`, `camDev` (format jak w `/api/status`); od 5.5.0 z pamięcią w `cache/device.json` |
+| `GET /api/entries?date=RRRR-MM-DD` | wpisy z jednego dnia (każdy z `date`, `time`, `type`, `label`, `ml`, minutami piersi i `lineIndex`) |
 | `GET /api/weight-series` | `points` (ważenia), `weeks` (słupki przyrostu), `recent` (trend ~14 dni), `today` (dzień życia), `birthWeightG` |
 | `GET /api/bath-calendar` | kąpiele: kalendarz i podsumowanie |
 | `POST /api/entry` | nowe karmienie (`type`, `when`, `ml`, piersi) |
 | `POST /api/update-feeding` | edycja karmienia (`feedLine`, `when`, mleko) |
-| `POST /api/delete-entry` | usunięcie wpisu (`line`) |
+| `POST /api/delete-entry` | usunięcie wpisu: `line` (numer wiersza) oraz od 5.5.0 `date`, `time`, `type` — wiersz jest usuwany tylko, gdy się zgadza, inaczej `409` „Lista wpisów zmieniła się…”; `withMilk=1` przy karmieniu usuwa też mleko z tą samą datą i godziną. Bez `date/time/type` działa jak dawniej (bez sprawdzania) |
 | `POST /api/event` | zdarzenia: `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `WITAMINA_D`, `ODCIAGANIE`, `WAGA` (gramy w `ml`), `SEN_START`, `SEN_STOP`, `KAPIEL`; opcjonalnie `when` (nie w przyszłości) |
 | `POST /api/setting` | ustawienie `sleepTelegram` (`key`, `value`) |
 | `POST /api/import` | import CSV z panelu (surowe body, limit 512 KB) |
@@ -328,4 +331,55 @@ Lokalnie dane (`data/karmienia.csv`) są osobnym zbiorem, nie synchronizują si�
 - Wyjątek opcjonalny: `UPLOAD_TOKEN` dla `upload-data` (rozdział 8).
 - Dane i silnik leżą poza katalogiem publicznym; `data/` ma `.htaccess` z całkowitym zakazem dostępu.
 - Pominięte funkcje sprzętowe (Telegram, pogoda, watchdog, mDNS) obsługuje urządzenie, nie strona.
-- Znane uwagi z przeglądu kodu: `ulepszenia19-10-26.md` (m.in. wyścigi zapisu CSV, auto-sen dopisujący zdarzenia w przyszłości).
+- Znane uwagi z przeglądu kodu: `ulepszenia19-10-26.md` i `ulepszenia-17-11-26.md` (projekt). Wyścigi zapisu CSV naprawione w 5.5.0 (rozdział 14). Nadal otwarte: auto-sen przy karmieniu z WWW dopisuje `SEN_START` na +60 min (wpis z przyszłości; od 5.5.0 strona i urządzenie go pomijają, dopóki ta godzina nie nadejdzie).
+
+## 14. Zmiany 5.5.0 — poprawki z przeglądu kodu (17.11.2026)
+
+Oznaczenia (A1, B2…) jak w liście `ulepszenia-17-11-26.md` w projekcie.
+
+### 14.1 Stan snu liczony po czasie (A1, A2)
+
+`Domain::loadLatestEntries` (stan do `/api/status`: „Śpi”, przycisk „Zasnął/Obudził się”, okno czuwania, powiadomienia) brał wcześniej **ostatni wiersz** `SEN_START`/`SEN_STOP` w pliku. Wpisy dopisane wstecz albo z przyszłości psuły stan:
+- karmienie wpisane przez stronę dopisuje sen na +60 min — strona od razu pokazywała „Śpi”, a urządzenie „czuwa”;
+- karmienie dopisane wstecz (np. sprzed 5 h) dawało „Śpi od 10:00”, choć dziecko obudziło się później;
+- zapomniany „Obudził się” dawał „Śpi” bez końca.
+
+Teraz: zdarzenia snu są sortowane po dacie i godzinie, wpisy z przyszłości (dalej niż +1 min) są pomijane, `START` otwiera sesję, `STOP` ją zamyka (pobudka = godzina `STOP`), a otwarta sesja dłuższa niż `SLEEP_MAX_SESSION_MIN` (840 min = 14 h) jest traktowana jak zapomniany STOP — strona nie pokazuje wtedy „Śpi”. To ta sama reguła co na urządzeniu (`stats.cpp`, `sleepScan`) i w statystykach dnia (`buildDayStats`).
+
+### 14.2 Ostatnia waga po dacie (B1)
+
+„Ostatnia waga” (pole formularza wagi, diagnostyka) to teraz ważenie o **najpóźniejszej dacie i godzinie**, a nie ostatni wiersz pliku. Waga dopisana wstecz nie zastępuje już nowszej.
+
+### 14.3 Najdłuższa przerwa między karmieniami dziś (B2)
+
+Strona i urządzenie liczą to samo: przerwy między **dzisiejszymi** karmieniami posortowanymi po godzinie oraz trwającą przerwę od ostatniego karmienia — ale tylko, gdy to karmienie było dzisiaj (przerwa od wczorajszego wieczornego karmienia nie jest „dzisiejszą”). Średnia przerwa: tylko między dzisiejszymi karmieniami. (Pole `longestFeedingGapMin` / `longestGapMin` nie jest obecnie pokazywane na ekranach — poprawka ujednolica dane na przyszłość.)
+
+### 14.4 Usuwanie wpisów (A4, A5)
+
+- Strona wysyła przy usuwaniu numer wiersza **oraz** datę, godzinę i typ. Serwer usuwa wiersz tylko, gdy wszystko się zgadza. Gdy w międzyczasie ktoś usunął inny wpis (drugi telefon) i numery się przesunęły, serwer niczego nie usuwa i odpowiada „Lista wpisów zmieniła się w międzyczasie — odśwież i spróbuj ponownie” (strona sama odświeża listę).
+- Usuwanie **karmienia**: po pierwszym pytaniu „Usunąć wpis?” strona sprawdza, czy o tej samej godzinie zapisano mleko (butelkę). Jeśli tak, pyta drugi raz: „Usunąć też mleko z tej samej godziny? … OK = usuń karmienie i mleko, Anuluj = tylko karmienie”. Wcześniej mleko zostawało i dalej liczyło się do ml dnia.
+
+### 14.5 Bezpieczny zapis pliku danych (A6)
+
+- Każda zmiana pliku (dopisanie, usunięcie, edycja karmienia, import, wgranie całego CSV, ustawienia) i podbicie rewizji odbywa się pod jedną blokadą (`karmienia.csv.lock`). Dwa zapisy w tej samej chwili (np. dwa telefony) czekają na siebie — żaden wpis nie ginie (test: 80 równoczesnych dopisań + 15 edycji karmienia → wszystkie wiersze na miejscu, rewizja +95).
+- Przepisanie całego pliku (usunięcie, edycja, import, podmiana) zapisuje najpierw plik tymczasowy, a potem podmienia go jednym ruchem (`rename`). Urządzenie i `/api/status` widzą zawsze stary albo nowy plik, nigdy pusty ani urwany.
+
+### 14.6 Tylko poprawne wiersze danych (D2)
+
+- Wiersz bierze udział w obliczeniach i trafia na stronę tylko, gdy ma datę `RRRR-MM-DD`, godzinę `GG:MM` i jeden ze znanych typów (`KARMIENIE`, `MLEKO`, `MLEKO_MATKI`, `MLEKO_MODYFIKOWANE`, `MLEKO_MIESZANE`, `PIELUCHA_MOKRA`, `PIELUCHA_BRUDNA`, `ODCIAGANIE`, `WITAMINA_D`, `WAGA`, `SEN_START`, `SEN_STOP`, `KAPIEL`). Inne wiersze zostają w pliku, ale są pomijane.
+- Import i `upload-data` nie przyjmują wierszy z nieznanym typem lub błędną datą (komunikat „Pominięto N niepoprawnych”).
+- Teksty z danych (typ, etykieta, godzina, komunikaty serwera w dymkach) są na stronie kodowane — plik danych nie może wstrzyknąć kodu do strony.
+
+### 14.7 Rewizja bez czytania CSV, szybsze odpowiedzi (C1, C3, B3)
+
+- `/api/revision` nie czyta już całego CSV (wcześniej robiło to co 10 s każde urządzenie i każda otwarta karta). Zamiast liczby wierszy podaje `stamp` (czas modyfikacji + rozmiar pliku) i `nrev` (znacznik nocy z kamery i ustawień).
+- Strona odświeża się, gdy zmieni się `rev`, `stamp` albo `nrev` — także po podmianie pliku w cPanel i po nowej nocy z t620.
+- `/api/device` ma pamięć (`cache/device.json`): liczy analizę nocy tylko po zmianie dziennika, nocy albo ustawień (najdłużej co godzinę).
+- Urządzenie od 5.5.0 czyta `nrev` i pobiera noc z kamery oraz ustawienie powiadomień **od razu po zmianie** (wcześniej do 10 min opóźnienia).
+
+### 14.8 Odświeżanie strony (C4, D1)
+
+- Każde zapytanie strony ma limit czasu 15 s (komunikat „Serwer nie odpowiada (limit 15 s)”), zawieszone połączenie nie blokuje kolejnych odświeżeń.
+- Naraz trwa tylko jedno odświeżenie stanu; prośba w trakcie wykona się raz zaraz po nim, więc starsza odpowiedź nie nadpisze nowszej. Sprawdzanie rewizji co 10 s też nie nakłada się na siebie.
+- `index.html` ładuje `app.js?v=5.5.0`; numer jest podbijany przy każdej zmianie `app.js` (rozdział 4).
+

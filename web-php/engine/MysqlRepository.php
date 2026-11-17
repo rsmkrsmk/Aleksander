@@ -72,20 +72,30 @@ final class MysqlRepository implements Repository
         return $ok;
     }
 
-    public function deleteByIndex(int $entryIndex): array
+    public function deleteByIndex(int $entryIndex, ?array $expect = null, bool $withMilk = false): array
     {
         $sel = $this->db->prepare("SELECT * FROM `{$this->tEntries()}` WHERE id = :id");
         $sel->execute([':id' => $entryIndex]);
         $r = $sel->fetch();
-        if (!$r) return ['ok' => false];
-        $removed = Domain::describeCsvEntry([
+        if (!$r) return ['ok' => false, 'stale' => $expect !== null];
+        $e = [
             'date' => $r['entry_date'], 'time' => substr((string)$r['entry_time'], 0, 5),
             'type' => $r['type'], 'ml' => (int)$r['ml'], 'piersLeft' => (int)$r['piers_left'], 'piersRight' => (int)$r['piers_right'],
-        ]);
+        ];
+        if ($expect !== null && !Domain::entryMatches($e, $expect)) return ['ok' => false, 'stale' => true];
+        $removed = [Domain::describeCsvEntry($e)];
         $this->db->prepare("DELETE FROM `{$this->tEntries()}` WHERE id = :id")->execute([':id' => $entryIndex]);
+        if ($withMilk && $e['type'] === 'KARMIENIE') {
+            foreach ($this->allEntries() as $m) {
+                if (Domain::isMilkType($m['type']) && $m['date'] === $e['date'] && $m['time'] === $e['time']) {
+                    $this->db->prepare("DELETE FROM `{$this->tEntries()}` WHERE id = :id")->execute([':id' => $m['lineIndex']]);
+                    $removed[] = Domain::describeCsvEntry($m);
+                }
+            }
+        }
         // Odswiez backup CSV z aktualnego stanu bazy.
         $this->rewriteCsvBackup();
-        return ['ok' => true, 'removed' => $removed];
+        return ['ok' => true, 'removed' => implode(', ', $removed)];
     }
 
     public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array
@@ -133,7 +143,7 @@ final class MysqlRepository implements Repository
             if ($t === '') continue;
             if (!$sawHeader) { if (strncmp($t, 'data,', 5) === 0) $sawHeader = true; continue; }
             if (strlen($t) > 160) { $skipped++; continue; }
-            $e = Domain::parseCsvLine($t);
+            $e = Domain::validCsvRow($t) ? Domain::parseCsvLine($t) : null;   // D2: tylko znane typy
             if ($e === null) { $skipped++; continue; }
             $rows[] = $e; $imported++;
         }
@@ -185,7 +195,7 @@ final class MysqlRepository implements Repository
             if ($when === null) continue;
             $out[] = rtrim(Domain::toCsvRow($e['type'], $when, $e['ml'], $e['piersLeft'], $e['piersRight']), "\n");
         }
-        @file_put_contents(Config::dataFile(), implode("\n", $out) . "\n", LOCK_EX);
+        CsvRepository::atomicWrite(Config::dataFile(), implode("\n", $out) . "\n");   // A6: bez chwili pustego pliku
     }
 
     public function rawCsv(): string

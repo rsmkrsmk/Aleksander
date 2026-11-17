@@ -26,6 +26,44 @@ final class CsvRepository implements Repository
         if (!is_file($this->file)) file_put_contents($this->file, Config::CSV_HEADER . "\n");
     }
 
+    /* A6 (5.5.0): kazda zmiana pliku (dopisanie, usuniecie, edycja, import, podmiana) i podbicie
+       rewizji idzie pod JEDNA blokada (plik .lock obok danych) — rownoczesny zapis z drugiego
+       telefonu czeka, zamiast zginac. Przepisanie calego pliku idzie przez plik tymczasowy
+       i rename(), wiec czytajacy (urzadzenie, /api/status) widzi stary albo nowy plik, nigdy pusty. */
+    private function locked(callable $fn)
+    {
+        $this->ensureFile();
+        $h = @fopen($this->file . '.lock', 'c');
+        if ($h) flock($h, LOCK_EX);
+        try { return $fn(); }
+        finally { if ($h) { flock($h, LOCK_UN); fclose($h); } }
+    }
+
+    /** Atomowa podmiana pliku: zapis do .tmp + rename (rename na tym samym dysku jest atomowe). */
+    public static function atomicWrite(string $file, string $content): bool
+    {
+        $tmp = $file . '.tmp' . getmypid();
+        if (@file_put_contents($tmp, $content) === false) { @unlink($tmp); return false; }
+        if (is_file($file)) @chmod($tmp, fileperms($file) & 0777);
+        if (!@rename($tmp, $file)) { @unlink($tmp); return false; }
+        return true;
+    }
+
+    /** Linie pliku: [naglowek, [linie bez koncowej pustej]]. */
+    private function readLines(): array
+    {
+        $lines = explode("\n", (string)file_get_contents($this->file));
+        $header = array_shift($lines);
+        if (!empty($lines) && end($lines) === '') array_pop($lines);
+        return [$header, $lines];
+    }
+
+    private function writeLines(string $header, array $lines): bool
+    {
+        $body = implode("\n", $lines);
+        return self::atomicWrite($this->file, $header . "\n" . $body . ($body !== '' ? "\n" : ''));
+    }
+
     // Fizyczny indeks = pozycja wiersza po naglowku (liczona dla KAZDEJ linii,
     // takze pustej/niepoprawnej) — spojnie z firmware i /api/entries.
     public function allEntries(): array
@@ -38,6 +76,8 @@ final class CsvRepository implements Repository
             $raw = rtrim($raw, "\r\n");
             $trim = trim($raw);
             if ($trim === '') continue;
+            // D2 (5.5.0): tylko poprawne wiersze (data, godzina, znany typ) trafiaja do strony i obliczen
+            if (!Domain::validCsvRow($trim)) continue;
             $e = Domain::parseCsvLine($trim);
             if ($e === null) continue;
             $e['lineIndex'] = $idx;
@@ -48,43 +88,55 @@ final class CsvRepository implements Repository
 
     public function append(string $type, DateTimeImmutable $when, int $ml, int $piersLeft = -1, int $piersRight = -1): bool
     {
-        $this->ensureFile();
         $row = Domain::toCsvRow($type, $when, $ml, $piersLeft, $piersRight);
-        $ok = file_put_contents($this->file, $row, FILE_APPEND | LOCK_EX) !== false;
-        if ($ok) $this->bumpRevision();
-        return $ok;
+        return $this->locked(function () use ($row) {
+            $ok = file_put_contents($this->file, $row, FILE_APPEND) !== false;
+            if ($ok) $this->bumpRevision();
+            return $ok;
+        });
     }
 
-    public function deleteByIndex(int $entryIndex): array
+    /**
+     * Usuwa wiersz po fizycznym indeksie. A5: gdy podano $expect (date, time, type), wiersz musi sie
+     * zgadzac — inaczej ['ok'=>false,'stale'=>true] (lista na stronie byla nieaktualna, nic nie usuwamy).
+     * A4: $withMilk i wiersz KARMIENIE => usuwamy tez mleko (MLEKO_*) z ta sama data i godzina.
+     */
+    public function deleteByIndex(int $entryIndex, ?array $expect = null, bool $withMilk = false): array
     {
         if ($entryIndex < 0 || !is_file($this->file)) return ['ok' => false];
-        $lines = explode("\n", (string)file_get_contents($this->file));
-        $header = array_shift($lines);
-        if (!empty($lines) && end($lines) === '') array_pop($lines); // koncowy pusty po \n
-        $kept = []; $removed = ''; $found = false;
-        foreach ($lines as $idx => $raw) {
-            $raw = rtrim($raw, "\r");
-            if ($idx === $entryIndex) {
-                $e = Domain::parseCsvLine(trim($raw));
-                if ($e !== null) $removed = Domain::describeCsvEntry($e);
-                $found = true;
-            } else {
-                $kept[] = $raw;
+        return $this->locked(function () use ($entryIndex, $expect, $withMilk) {
+            [$header, $lines] = $this->readLines();
+            if ($entryIndex >= count($lines)) return ['ok' => false, 'stale' => $expect !== null];
+            $target = Domain::parseCsvLine(trim(rtrim((string)$lines[$entryIndex], "\r")));
+            if ($expect !== null && ($target === null || !Domain::entryMatches($target, $expect))) return ['ok' => false, 'stale' => true];
+            $drop = [$entryIndex => true];
+            $removed = $target !== null ? [Domain::describeCsvEntry($target)] : [];
+            if ($withMilk && $target !== null && $target['type'] === 'KARMIENIE') {
+                foreach ($lines as $idx => $raw) {
+                    if ($idx === $entryIndex) continue;
+                    $e = Domain::parseCsvLine(trim(rtrim((string)$raw, "\r")));
+                    if ($e !== null && Domain::isMilkType($e['type']) && $e['date'] === $target['date'] && $e['time'] === $target['time']) {
+                        $drop[$idx] = true; $removed[] = Domain::describeCsvEntry($e);
+                    }
+                }
             }
-        }
-        if (!$found || $entryIndex >= count($lines)) return ['ok' => false];
-        $body = implode("\n", $kept);
-        file_put_contents($this->file, $header . "\n" . $body . ($body !== '' ? "\n" : ''), LOCK_EX);
-        $this->bumpRevision();
-        return ['ok' => true, 'removed' => $removed];
+            $kept = [];
+            foreach ($lines as $idx => $raw) if (!isset($drop[$idx])) $kept[] = rtrim((string)$raw, "\r");
+            if (!$this->writeLines($header, $kept)) return ['ok' => false];
+            $this->bumpRevision();
+            return ['ok' => true, 'removed' => implode(', ', $removed), 'count' => count($drop)];
+        });
     }
 
     public function updateFeeding(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array
     {
         if ($feedLineIndex < 0 || !is_file($this->file)) return ['ok' => false, 'message' => 'Brak wpisu.'];
-        $lines = explode("\n", (string)file_get_contents($this->file));
-        $header = array_shift($lines);
-        if (!empty($lines) && end($lines) === '') array_pop($lines); // koncowy pusty po \n
+        return $this->locked(fn() => $this->updateFeedingLocked($feedLineIndex, $when, $motherMl, $modifiedMl));
+    }
+
+    private function updateFeedingLocked(int $feedLineIndex, DateTimeImmutable $when, int $motherMl, int $modifiedMl): array
+    {
+        [$header, $lines] = $this->readLines();
 
         // 1) Zlokalizuj wiersz KARMIENIA po fizycznym indeksie.
         if ($feedLineIndex >= count($lines)) return ['ok' => false, 'message' => 'Nie znaleziono wpisu.'];
@@ -128,16 +180,13 @@ final class CsvRepository implements Repository
                 $out[] = $raw;
             }
         }
-        $body = implode("\n", $out);
-        file_put_contents($this->file, $header . "\n" . $body . ($body !== '' ? "\n" : ''), LOCK_EX);
+        if (!$this->writeLines($header, $out)) return ['ok' => false, 'message' => 'Nie udalo sie zapisac pliku.'];
         $this->bumpRevision();
         return ['ok' => true, 'message' => 'Zapisano zmiany karmienia.'];
     }
 
     public function importCsv(string $rawText): array
     {
-        $this->ensureFile();
-        @copy($this->file, Config::backupFile());
         $lines = preg_split('/\r?\n/', $rawText);
         $out = [Config::CSV_HEADER]; $imported = 0; $skipped = 0; $sawHeader = false;
         foreach ($lines as $line) {
@@ -145,18 +194,22 @@ final class CsvRepository implements Repository
             if ($t === '') continue;
             if (!$sawHeader) { if (strncmp($t, 'data,', 5) === 0) $sawHeader = true; continue; }
             if (strlen($t) > 160) { $skipped++; continue; }
-            if (Domain::parseCsvLine($t) === null) { $skipped++; continue; }
+            if (!Domain::validCsvRow($t)) { $skipped++; continue; }   // D2: tylko znane typy i poprawna data
             $out[] = $t; $imported++;
         }
         if (!$sawHeader || $imported === 0) return ['ok' => false, 'imported' => 0, 'skipped' => $skipped];
-        file_put_contents($this->file, implode("\n", $out) . "\n", LOCK_EX);
-        $this->bumpRevision();
+        $ok = $this->locked(function () use ($out) {
+            @copy($this->file, Config::backupFile());
+            if (!self::atomicWrite($this->file, implode("\n", $out) . "\n")) return false;
+            $this->bumpRevision();
+            return true;
+        });
+        if (!$ok) return ['ok' => false, 'imported' => 0, 'skipped' => $skipped];
         return ['ok' => true, 'imported' => $imported, 'skipped' => $skipped];
     }
 
     public function replaceRawCsv(string $rawText): array
     {
-        $this->ensureFile();
         // 1) Walidacja przeslanego pliku: musi miec naglowek i >=1 poprawny wiersz.
         $lines = preg_split('/\r?\n/', $rawText);
         $out = [Config::CSV_HEADER]; $valid = 0; $skipped = 0; $sawHeader = false;
@@ -166,23 +219,22 @@ final class CsvRepository implements Repository
             if (!$sawHeader) { if (strncmp($t, 'data,', 5) === 0) { $sawHeader = true; continue; } }
             if (strncmp($t, 'data,', 5) === 0) continue; // pomin ewentualne kolejne naglowki
             if (strlen($t) > 160) { $skipped++; continue; }
-            if (Domain::parseCsvLine($t) === null) { $skipped++; continue; }
+            if (!Domain::validCsvRow($t)) { $skipped++; continue; }   // D2: tylko znane typy i poprawna data
             $out[] = $t; $valid++;
         }
         if (!$sawHeader) return ['ok' => false, 'backup' => '', 'lines' => 0, 'message' => 'Brak naglowka CSV (spodziewano "data,...").'];
         if ($valid === 0) return ['ok' => false, 'backup' => '', 'lines' => 0, 'message' => 'Brak poprawnych wierszy danych.'];
 
-        // 2) Kopia zapasowa DOTYCHCZASOWYCH danych z aktualnym czasem: YYYY-MM-DD-HH-MM-SS.bakap
-        $backupPath = Config::timestampedBackupFile();
-        $backupName = '';
-        if (is_file($this->file) && filesize($this->file) > 0) {
-            if (@copy($this->file, $backupPath)) $backupName = basename($backupPath);
-        }
-
-        // 3) Podmiana danych na przeslane (znormalizowane: naglowek + poprawne wiersze).
-        $ok = file_put_contents($this->file, implode("\n", $out) . "\n", LOCK_EX) !== false;
+        // 2) Kopia zapasowa DOTYCHCZASOWYCH danych (YYYY-MM-DD-HH-MM-SS.bakap) i 3) podmiana — pod blokada.
+        [$ok, $backupName] = $this->locked(function () use ($out) {
+            $backupPath = Config::timestampedBackupFile();
+            $name = '';
+            if (is_file($this->file) && filesize($this->file) > 0 && @copy($this->file, $backupPath)) $name = basename($backupPath);
+            if (!self::atomicWrite($this->file, implode("\n", $out) . "\n")) return [false, $name];
+            $this->bumpRevision();
+            return [true, $name];
+        });
         if (!$ok) return ['ok' => false, 'backup' => $backupName, 'lines' => 0, 'message' => 'Nie udalo sie zapisac danych.'];
-        $this->bumpRevision();
 
         return ['ok' => true, 'backup' => $backupName, 'lines' => $valid,
                 'message' => "Przyjeto plik: {$valid} wpisow." . ($skipped > 0 ? " Pominieto {$skipped} niepoprawnych." : '') . ($backupName !== '' ? " Kopia: {$backupName}." : '')];
@@ -194,23 +246,23 @@ final class CsvRepository implements Repository
         return (string)file_get_contents($this->file);
     }
 
-    // --- Rewizja danych (v4) ----------------------------------------------------
-    // Licznik monotoniczny w osobnym pliku meta. Urzadzenie sprawdza go co 10 s
-    // (GET /api/revision); gdy wartosc sie zmienila — pobiera pelny CSV.
+    // --- Rewizja danych ----------------------------------------------------------
+    // Licznik monotoniczny w osobnym pliku meta. Urzadzenie i strona sprawdzaja go co 10-60 s
+    // (GET /api/revision); gdy sie zmieni — pobieraja dane. C1 (5.5.0): bez czytania CSV —
+    // 'stamp' = czas modyfikacji + rozmiar pliku danych (wylapuje tez podmiane przez cPanel),
+    // ('nrev' — znacznik nocy z kamery i ustawien, B3 — dokleja api.php.)
+    // 'count' zostaje dla zgodnosci ze starszymi stronami (-1 = nieliczone).
     public function revision(): array
     {
         $rev = 0; $f = Config::revisionFile();
-        if (is_file($f)) $rev = (int)trim((string)file_get_contents($f));
-        $count = 0;
-        if (is_file($this->file)) {
-            foreach (explode("\n", (string)file_get_contents($this->file)) as $ln) {
-                if (trim($ln) !== '') $count++;
-            }
-            $count = max(0, $count - 1); // minus naglowek
-        }
-        return ['rev' => $rev, 'count' => $count, 'updatedAt' => (new DateTimeImmutable())->format('Y-m-d H:i:s')];
+        if (is_file($f)) $rev = (int)trim((string)@file_get_contents($f));
+        clearstatcache();
+        $stamp = is_file($this->file) ? (filemtime($this->file) . '-' . filesize($this->file)) : '0';
+        return ['rev' => $rev, 'stamp' => $stamp, 'count' => -1,
+                'updatedAt' => (new DateTimeImmutable())->format('Y-m-d H:i:s')];
     }
 
+    /** Wywolywane POD blokada locked(). */
     private function bumpRevision(): void
     {
         $f = Config::revisionFile();
@@ -218,7 +270,7 @@ final class CsvRepository implements Repository
         if (is_file($f)) $cur = (int)trim((string)file_get_contents($f));
         $dir = dirname($f);
         if (!is_dir($dir)) @mkdir($dir, 0775, true);
-        file_put_contents($f, (string)($cur + 1) . "\n", LOCK_EX);
+        self::atomicWrite($f, (string)($cur + 1) . "\n");
     }
 
     public function loadSettings(): array
@@ -237,6 +289,6 @@ final class CsvRepository implements Repository
     {
         $dir = dirname(Config::settingsFile());
         if (!is_dir($dir)) @mkdir($dir, 0775, true);
-        file_put_contents(Config::settingsFile(), 'sleepTelegram=' . (!empty($settings['sleepTelegram']) ? 1 : 0) . "\n", LOCK_EX);
+        self::atomicWrite(Config::settingsFile(), 'sleepTelegram=' . (!empty($settings['sleepTelegram']) ? 1 : 0) . "\n");
     }
 }
