@@ -161,13 +161,15 @@ Jeśli nadal zdarzają się podwójne przełączenia, zwiększ `TOUCH_RELEASE_HO
 
 ## Diagnostyka i rozwiązywanie problemów
 
-### Po wgraniu nowego firmware (v5.5.0): co sprawdzić
+### Po wgraniu nowego firmware (v5.5.1): co sprawdzić
+
+> **5.5.1** — poprawka błędu kompilacji w `host_sync.cpp` (linia z `want` miała składnię JavaScript `const want`, a w C++ trzeba `const long want`). Poza tym bez zmian względem 5.5.0.
 
 Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
 
 | Linia w logu | Znaczenie |
 |---|---|
-| `Lesny Dziennik v5.5.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
+| `Lesny Dziennik v5.5.1 — tylko wyswietlacz.` | wgrała się właściwa wersja |
 | `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
 | `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
 | `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |

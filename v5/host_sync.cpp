@@ -359,7 +359,7 @@ Store *hostSyncBlocking(uint32_t timeoutMs, HostProgressFn progress) {
   }
   progressFn = nullptr;
   lastPoll = millis();
-  if (got) { const want = nrevRemote; if (fetchStatusSettings() && want >= 0) nrevSeen = want; }
+  if (got) { const long want = nrevRemote; if (fetchStatusSettings() && want >= 0) nrevSeen = want; }
   if (got) cacheWriteIfDue(true);   // pierwszy zapis od razu (o ile tresc sie zmienila)
   return got;
 }
