@@ -1,0 +1,29 @@
+# wiewiorka.mom — katalog strony (public_html/wiewiorka, domena wiewiorka.mom).
+# Wszystko, czego nie ma jako plik, trafia do index.php (logowanie, API, strona).
+# Wersję PHP dziedziczy z public_html/.htaccess (tamtego pliku nie ruszamy).
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Wymuszenie HTTPS — WŁĄCZ (usuń # z dwóch linii niżej) dopiero, gdy
+    # https://wiewiorka.mom działa (certyfikat AutoSSL w cPanel), inaczej strona się nie otworzy.
+    # RewriteCond %{HTTPS} !=on
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+DirectoryIndex index.php
+Options -Indexes
+
+# paths.php to tylko konfiguracja ścieżek — nie wywołujemy go bezpośrednio.
+<Files "paths.php">
+    Require all denied
+</Files>
+# Strona HTML zawsze przez index.php (nagłówki bezpieczeństwa, brak pamięci podręcznej).
+<Files "index.html">
+    Require all denied
+</Files>

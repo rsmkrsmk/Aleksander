@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 4 100 106">
+  <defs>
+    <linearGradient id="tg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#b85d27"/><stop offset="1" stop-color="#e3884a"/></linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d0743a"/><stop offset="1" stop-color="#b65a26"/></linearGradient>
+  </defs>
+  <!-- ogon -->
+  <path d="M64 100 C98 106 118 84 114 58 C111 38 116 22 98 12 C82 4 62 14 66 32 C68 44 82 46 86 36 C92 50 88 64 76 74 C68 81 63 90 64 100 Z" fill="url(#tg)"/>
+  <path d="M90 24 C100 30 104 44 102 58 C100 72 92 84 80 92" fill="none" stroke="#f3b27c" stroke-width="3" stroke-linecap="round" opacity=".7"/>
+  <!-- tułów -->
+  <path d="M40 104 C30 92 32 72 44 64 C54 58 70 62 74 76 C78 90 72 104 60 106 Z" fill="url(#bg)"/>
+  <ellipse cx="52" cy="88" rx="11" ry="15" fill="#f7e3c4"/>
+  <!-- stopy -->
+  <ellipse cx="46" cy="106" rx="9" ry="4.5" fill="#9e4c1f"/>
+  <ellipse cx="66" cy="106" rx="9" ry="4.5" fill="#9e4c1f"/>
+  <!-- głowa -->
+  <path d="M30 58 C26 48 34 36 46 34 C58 32 68 40 67 52 C66 62 56 68 46 67 C38 66 32 64 30 58 Z" fill="url(#bg)"/>
+  <ellipse cx="38" cy="59" rx="9" ry="6.5" fill="#f7e3c4"/>
+  <!-- ucho -->
+  <path d="M52 36 C52 28 56 20 61 17 C62 23 63 30 60 38 Z" fill="#b65a26"/>
+  <path d="M55 34 C56 28 58 24 60 22 C60 27 60 31 58 36 Z" fill="#f2b98d"/>
+  <path d="M61 17 C60 13 62 10 64 9 C63 12 64 14 63 17" fill="none" stroke="#9e4c1f" stroke-width="1.6" stroke-linecap="round"/>
+  <!-- oko, nos, policzek -->
+  <g class="eyes"><circle cx="46" cy="48" r="3.4" fill="#2a1a12"/><circle cx="47.2" cy="46.8" r="1.1" fill="#fff"/></g>
+  <circle cx="30.5" cy="56" r="2.3" fill="#5a2f1c"/>
+  <circle cx="45" cy="58" r="3.2" fill="#f08f86" opacity=".45"/>
+  <path d="M33 60 C35 62 37 62 39 60" fill="none" stroke="#5a2f1c" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- żołądź w łapkach -->
+  <ellipse cx="40" cy="80" rx="7" ry="8.5" fill="#c9893f"/>
+  <path d="M32 75 C33 69 47 69 48 75 C44 77 36 77 32 75 Z" fill="#7a4e26"/>
+  <path d="M40 69 L41 65" stroke="#7a4e26" stroke-width="2" stroke-linecap="round"/>
+  <ellipse cx="35" cy="82" rx="4" ry="3" fill="#b65a26"/>
+  <ellipse cx="46" cy="82" rx="4" ry="3" fill="#b65a26"/>
+</svg>

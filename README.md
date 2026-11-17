@@ -1,268 +1,242 @@
-# Leśny Dziennik Aleksandra — v5 (urządzenie = tylko wyświetlacz)
+# wiewiorka.mom
 
-Dziennik opieki nad niemowlęciem na płytce **Waveshare ESP32-S3-Touch-LCD-4B** (480×480, dotyk GT911) z panelem WWW na hostingu (`web-php/`).
+Strona do wspomagania opieki nad niemowlęciem: karmienia, butelki, pieluchy, sen, waga, kąpiele, witamina D, kalendarz, statystyki i pocztówki-wspomnienia. Przewodnim motywem jest **opiekuńcza wiewiórka**, która „czuwa” nad maleństwem. Każdy użytkownik ma własne konto i widzi wyłącznie swoje dane.
 
-W wersji 5:
-- Wpisy dodaje się **wyłącznie na stronie WWW**.
-- Urządzenie pobiera dane z hostingu i je **wyświetla**: tablica, panel z 6 kartami, diagnostyka, pogoda, powiadomienia Telegram.
-- Urządzenie **niczego nie zapisuje na hosting**.
+Gałąź `wiewiorka.mom` to kopia strony **Leśny Dziennik 5.5.0** (gałąź `v5`) z kontami, profilem dziecka i nowym wyglądem. Gałęzie `v5` i `v4.1-claude-pazdziernik` (strona Aleksandra i urządzenie ESP32) zostają bez zmian i są źródłem — zmiany wprowadzone tam można przenosić tutaj ręcznie.
 
-Gałąź `v5` to firmware napisane od nowa na podstawie analizy `ANALIZA_V5.md`. Poprzednia wersja (v4.1, jeden plik `v3.ino`) jest na gałęzi `v4.1-claude-pazdziernik`.
+## Spis treści
 
----
-
-## Zawartość
-
-| Ścieżka | Rola |
-|---|---|
-| `v5/` | **firmware v5** — folder szkicu Arduino (otwierasz `v5/v5.ino`) |
-| `web-php/` | panel WWW (PHP): źródło danych, formularze, API (`/api/revision`, `/api/export.csv`, `/api/status`) |
-| `tools/sim/`, `tools/sim5/` | symulator PC interfejsu LVGL i testy obliczeń v5 |
-| `tools/genassets.py`, `tools/lvfont.py` | generatory grafik (`ui_assets.h`) i fontów (`ui_fonts.h`) |
-| `ANALIZA_V5.md` | specyfikacja: co robi urządzenie, wzory, decyzje projektowe D1–D6 |
-| `ulepszenia19-10-26.md` | przegląd kodu z 19.10.2026 (bezpieczeństwo, hosting, pomysły) |
-| `docs/archiwum/` | dokumenty z wersji v3/v4 (historyczne) |
-
-### Moduły firmware (`v5/`)
-
-| Plik | Co robi |
-|---|---|
-| `v5.ino` | tylko `setup()`/`loop()` → `app.cpp` |
-| `app.cpp` | kolejność startu (ekran startowy, 5 kroków), pętla UI zsynchronizowana z VSYNC, przełączanie ekranów, przyciemnianie, tryb nocny, diagnostyka |
-| `hw_display.cpp` | ST7701 przez ekspander TCA9554, `esp_lcd` RGB (bounce 80 linii + 2 FB w PSRAM), LVGL DIRECT, podświetlenie, twarda resynchronizacja obrazu, detektor przesunięcia, `FlashWriteGuard` |
-| `hw_touch.cpp` | GT911 (SensorLib) jako wskaźnik LVGL; dotyk tablicy tylko otwiera panel |
-| `net.cpp` | Wi-Fi (bez zapisów NVS), NTP, wspólny klient HTTP(S) z buforem w PSRAM (Content-Length / chunked) |
-| `host_sync.cpp` | **zadanie sieciowe (rdzeń 0)**: rewizja co 10 s → pobranie CSV → parsowanie → przekazanie do UI; co 10 min `/api/status` (ustawienie Telegrama, noc z kamery: `camNight`, `camDev`); pogoda; Telegram; kopia dzienna; cache na flashu |
-| `store.cpp` | parser CSV → tablica wpisów w PSRAM, posortowana po czasie |
-| `stats.cpp` | **wszystkie obliczenia** do ekranu (karmienia, przerwy, rytm, mleko, sen, okno drzemki, waga, noce, kąpiele, wiek, wskazówka) — czysty C++, testowany na PC |
-| `weather.cpp`, `weather_parse.cpp` | Open-Meteo (HTTP), parser, pamięć RTC |
-| `telegram.cpp` | wiadomość startowa, okno drzemki, kopia CSV (`sendDocument`) |
-| `diag.cpp` | watchdog zadań, liczniki uruchomień (RTC), CPU, minimum RAM |
-| `ui.cpp` + `ui_modern.h` | ekrany: start (jeż), tablica, panel (Dziś, Mleko, Odstępy, Waga, Sen, Kąpiel), diagnostyka |
-| `ui_model.h` | dane do wyświetlenia (`UiModel`, `UiCam` = noc z kamery) |
-| `ui_fonts.h`, `ui_assets.h`, `development_tips.h` | fonty z polskimi znakami, grafiki, wskazówki dnia 0–600 |
-| `app_config.h` | stałe (urodziny, progi, czasy, adresy hostingu) |
-| `secrets.h.example` | wzór pliku z Wi-Fi i Telegramem (`secrets.h` nie trafia do repozytorium) |
-| `partitions.csv` | aplikacja 8 MB + 1 MB LittleFS na cache danych |
-| `lv_conf.h` | konfiguracja LVGL (do skopiowania do bibliotek, patrz niżej) |
+1. [Układ katalogów (repo = hosting)](#1-układ-katalogów-repo--hosting)
+2. [Wdrożenie krok po kroku (cPanel, webd.pl)](#2-wdrożenie-krok-po-kroku-cpanel-webdpl)
+3. [Konta i logowanie](#3-konta-i-logowanie)
+4. [Dane maleństwa (profil)](#4-dane-maleństwa-profil)
+5. [Wygląd: motyw wiewiórki](#5-wygląd-motyw-wiewiórki)
+6. [Czym ta wersja różni się od Leśnego Dziennika](#6-czym-ta-wersja-różni-się-od-leśnego-dziennika)
+7. [API](#7-api)
+8. [Pliki danych](#8-pliki-danych)
+9. [Aktualizacja strony](#9-aktualizacja-strony)
+10. [Typowe problemy](#10-typowe-problemy)
+11. [Uruchomienie lokalne i testy](#11-uruchomienie-lokalne-i-testy)
 
 ---
 
-## Kompilacja (Arduino IDE)
+## 1. Układ katalogów (repo = hosting)
 
-1. **Biblioteki i płytka.** Wersje sprawdzone 20.10.2026 kompilacją pełnego szkicu:
+Katalogi w repozytorium mają **te same nazwy i to samo położenie** co na hostingu (`/home/phpmapy1/`), więc nic nie trzeba przemianowywać:
 
-   | Składnik | Wersja |
-   |---|---|
-   | esp32 by Espressif | 3.3.12 |
-   | lvgl | 9.3.0 |
-   | GFX Library for Arduino | 1.6.9 |
-   | SensorLib | 0.5.1 |
-
-   Starsze 3.2.x powinny działać (kod ma zgodność wsteczną).
-2. **`lv_conf.h`:** skopiuj `v5/lv_conf.h` do folderu bibliotek Arduino, obok folderu `lvgl`, czyli `Dokumenty/Arduino/libraries/lv_conf.h`. Jeśli masz już plik z v4, możesz go zostawić — jest taki sam.
-3. **Sekrety:** w folderze `v5` skopiuj `secrets.h.example` jako `secrets.h` i uzupełnij:
-   - `WIFI_SSID`, `WIFI_PASSWORD`,
-   - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
-
-   Stary `secrets.h` z v4 też zadziała, ale **Telegram trzeba dopisać**, bo w v4 był w `config.h`.
-
-   ⚠️ Token bota, który był w publicznym repozytorium, należy unieważnić (@BotFather → `/revoke`) i wpisać nowy.
-4. **Otwórz `v5/v5.ino`.** Folder musi nazywać się `v5`.
-5. **Narzędzia:**
-
-   | Ustawienie | Wartość |
-   |---|---|
-   | Płytka | **ESP32S3 Dev Module** |
-   | PSRAM | **OPI PSRAM** |
-   | Flash Size | **16MB (128Mb)** |
-   | Partition Scheme | **Custom** (zawsze używany jest `v5/partitions.csv`; przy innym wyborze też, ale limit rozmiaru bywa mniejszy) |
-   | USB CDC On Boot | jak dotąd (Enabled, jeśli log Seriala czytasz przez natywny port USB) |
-6. **Jednorazowo** ustaw **Erase All Flash Before Sketch Upload: Enabled** (czyści stare ustawienia Wi-Fi/NVS z v4), potem wróć do Disabled.
-7. **Wgraj.** Zmiana tablicy partycji czyści stare dane LittleFS z v4. To nic nie szkodzi: dane są na hostingu, a cache odtworzy się po pierwszym pobraniu.
-
-Rozmiar (kompilacja 3.11.2026, v5.4.0, rdzeń 3.3.12): program ~2,28 MB z 8 MB, zmienne globalne 64 KB RAM.
-
----
-
-## Jak działa
-
-```
-Panel WWW (PHP) ──GET /api/revision co 10 s──► zadanie sieciowe (rdzeń 0)
-               ──GET /api/export.csv przy zmianie──► parser → tablica wpisów w PSRAM ──► pętla UI (rdzeń 1)
-               ──GET /api/status co 10 min (powiadomienia o drzemce, noc z kamery)       │
-Open-Meteo ────HTTP co 20 min──► pogoda (RAM + RTC)                                     ├─ stats.cpp → UiModel
-Telegram ◄─── start, okno drzemki, kopia CSV raz dziennie                                └─ LVGL: tablica / panel / diagnostyka
-```
-
-**Ekrany i nawigacja**
-- **Start:** jeż, 5 kroków — Wi-Fi, zegar, pamięć (cache), pogoda, dane z WWW.
-- **Tablica:** zegar, pogoda, drzemka, pierścień od ostatniego karmienia, 3 kafelki dnia, prognoza godzinowa, ubiór, wskazówka dnia.
-- **Panel:** dotknięcie tablicy. 6 kart przełączanych paskiem lub gestem; na kartach **Waga** (waga / przyrost) i **Sen** (sen z dziennika / noc z kamery) dotknięcie wykresu zmienia widok.
-- **Karta Sen (od 5.2.0):** pod tytułem linia ostatniej nocy z kamery w łóżeczku, np. „Noc 1.11: zasnął po 9 min · spokój 87% · blok 1 h 03”, z kropką w kolorze oceny nocy. Dane z `/api/status` (obiekt `camNight`, odświeżane co 10 min); bez danych z kamery linii nie ma.
-- **Karta Sen, widok „Noc z kamery” (od 5.3.0):** gdy hosting ma noce z kamery, dotknięcie karty przełącza widoki (jak na Wadze; dwie kropki w prawym górnym rogu, wybór zostaje po odświeżeniu danych). Drugi widok pokazuje ostatnią zakończoną noc:
-  - wynik zasypiania („Zasnął po 18 min”, „Sen aktywny” albo „brak danych”), godziny położenia, zaśnięcia i końca snu oraz ocenę nocy (kropka: zielona spokojna, żółta umiarkowana, pomarańczowa niespokojna, szara mało danych);
-  - pasek nocy 18:30–06:00 po pół godziny: fioletowy = spokój, żółty = ruch (im mocniejszy, tym więcej ruchu), pusta ramka = dziecko poza łóżeczkiem (np. karmienie), szary = brak danych; czerwona kropka nad paskiem = płacz; zielona kreska pod paskiem = okres snu;
-  - kafelki: spokój (% czasu w łóżeczku), najdłuższy blok bez ruchu, przebudzenia (z liczbą płaczów);
-  - ostatnie 7 nocy: słupki spokojnego snu w godzinach (kolor = ocena nocy) i linia porównania z 7 wcześniejszymi nocami (mediana zasypiania, średni spokojny sen; pojawia się, gdy obie grupy mają co najmniej 4 noce).
-  Dane liczy hosting (obiekt `camDev` w `/api/device`); od 5.5.0 urządzenie pobiera go od razu, gdy na hostingu pojawi się nowa noc albo zmieni się ustawienie (pole `nrev` w `/api/revision`), a poza tym co 10 min. „Co wpływa na sen” jest tylko na stronie WWW. Bez nocy z kamery karta wygląda jak dawniej (jeden widok).
-- **Karta Waga, wykres przyrostu (od 5.3.0):** liczony jak na hostingu — słupek dla **każdego** tygodnia życia od 1 do tygodnia ostatniego ważenia (bez dziur i bez pustych tygodni na przyszłość). Wartość to trend z ważeń z okna ±7 dni; gdy ważeń jest mało, okno rośnie (±10, ±14, ±21 dni), a w ostateczności wartość wynika z dwóch najbliższych ważeń odległych o **co najmniej 2 dni** (od 5.4.2; wcześniej 3 dni) — taki słupek jest jaśniejszy, z obwódką („szacunek”). Kilka ważeń jednego dnia jest uśrednianych. Tło słupka = zakres normy dla wieku (25–30, 15–20, 10–15 g/dzień), kolor: zielony w normie, pomarańczowy poniżej, niebieski powyżej, czerwony spadek. Kafelek „Ostatnie 2 tygodnie” liczony tak samo jak na stronie.
-- **Powroty i diagnostyka:** liść w panelu wraca do tablicy; po 2 min bezczynności panel też wraca do tablicy. Długie przytrzymanie zegara w panelu otwiera diagnostykę.
-
-**Noc z kamery i ustawienia od razu (od 5.5.0).** Przy każdym sprawdzeniu rewizji (co 10/30/60 s) urządzenie czyta też pole `nrev` — znacznik nocy z kamery i ustawień na hostingu. Gdy się zmieni (t620 wysłał nową noc, ktoś przełączył powiadomienia o drzemce na stronie), urządzenie od razu pobiera `/api/device`: karta Sen pokazuje nową noc, a ustawienie powiadomień działa w ciągu kilkudziesięciu sekund (wcześniej do 10 min). Gdy pobranie się nie uda, kolejna próba najwcześniej po 15 s. Starsza strona bez `nrev` — jak dawniej, co 10 min.
-
-**Najdłuższa przerwa dziś (od 5.5.0).** Model ekranu liczy najdłuższą przerwę między karmieniami tak samo jak strona: przerwy między dzisiejszymi karmieniami i trwająca przerwa od ostatniego karmienia — tylko gdy było dzisiaj (dawniej wliczała się też przerwa od wczorajszego karmienia).
-
-**Odświeżanie wykresów wagi (od 5.4.2).** Urządzenie sprawdza rewizję dziennika na hostingu co 10/30/60 s; po zmianie pobiera dane i od razu przelicza wykresy (poza tym co 60 s). Dodane ważenie pojawia się na wykresach wagi w ciągu kilkudziesięciu sekund, bez dotykania ekranu. Wykres przyrostu pokazuje słupek, gdy są co najmniej **dwa ważenia w odstępie 2 dni lub więcej** (liczy się też waga urodzeniowa jako dzień 0); przy odstępie 1 dnia pojawia się „–”, bo różnica po dobie jest zbyt zaszumiona (±100 g). Karta Waga pokazuje „Dodaj co najmniej dwa pomiary wagi…”, dopóki nie ma żadnego ważenia poza wagą urodzeniową.
-
-**Obsługa dotyku (od 5.4.1).** Kontroler GT911 potrafi w środku jednego dotknięcia na kilka milisekund zgłosić „brak dotyku”. Biblioteka LVGL widziała wtedy puszczenie i ponowne dotknięcie, więc jedno dotknięcie przełączało widok (Waga, Sen), kartę lub ekran kilka razy. Są dwa zabezpieczenia:
-- `hw_touch.cpp`: po ostatnim odczycie z dotykiem stan „wciśnięty” trzymany jest jeszcze 60 ms (`TOUCH_RELEASE_HOLD_MS`), więc krótki zanik odczytu nie kończy dotknięcia. Puszczenie palca jest przez to opóźnione o 60 ms, na co nie zwraca się uwagi.
-- `ui_modern.h`, funkcja `ui_tap_ok()`: wspólny odstęp między przełączeniami — 350 ms dla widoków Waga/Sen, 250 ms dla paska kart, 300 ms dla przesunięcia gestem, 500 ms dla liścia (powrót do tablicy) i powrotu z diagnostyki. Kolejne kliknięcie w tym czasie jest ignorowane.
-Jeśli nadal zdarzają się podwójne przełączenia, zwiększ `TOUCH_RELEASE_HOLD_MS` (np. do 100) w `hw_touch.cpp`. Jeśli dotyk wydaje się ociężały (zdarza się, gdy ktoś robi bardzo szybkie dwa dotknięcia), zmniejsz odstępy w `ui_tap_ok()`.
-
-**Tryb nocny** (21:00–7:00): ciemna paleta i jasność ~65%. W dzień ekran przyciemnia się po 60 s.
-
-**Brak internetu przy starcie:** urządzenie pokazuje ostatnie dane z cache. Cache jest zapisywany tylko przy zmianie danych, najwyżej raz na 30 min — to **jedyny zapis do flasha** w pracy urządzenia.
-
-**Powiadomienia o oknie drzemki** włącza się na **stronie WWW** (przełącznik „Sen: powiadomienia Telegram”). Urządzenie tylko odczytuje to ustawienie.
-
-**Stabilność obrazu**
-- Przyczyną przesuwania obrazu o 80 linii i poziomych artefaktów był licznik przerwań w sterowniku ESP-IDF. W rdzeniu Arduino 3.3.x z `RESTART_IN_VSYNC` nigdy nie był zerowany. Od v5.1.0 urządzenie zeruje go w każdej klatce. Szczegóły: `ANALIZA_V5.md` 7.4, model `tools/sim5/rgb_bounce_model.py`.
-- Przy zapisie flasha i starcie Wi-Fi zegar pikseli spada na chwilę do 1 MHz.
-- Diagnostyka (sekcja OBRAZ) i polecenie `l` w monitorze portu pokazują, ile klatek było zakłóconych i naprawionych.
-
-**Polecenia w monitorze portu (115200):**
-- `i` — diagnostyka,
-- `l` — statystyki obrazu,
-- `h` — ręczna twarda resynchronizacja.
-
-### Zmiany względem v4.1
-
-**Usunięte:**
-- formularze i zapisy z urządzenia (pielucha, odciąganie), wysyłanie CSV na hosting,
-- stare ekrany LVGL,
-- serwer WWW, mDNS, OTA,
-- lokalna archiwizacja,
-- cache pogody na flashu, ustawienia na flashu.
-
-**Poprawione:**
-- „Śpi od –” — zdarzenia snu z przyszłości (auto-sen panelu WWW) są pomijane,
-- sen liczony z posortowanych zdarzeń, z odrzuceniem sesji > 14 h,
-- średnia przerwa z posortowanych czasów,
-- ostatnia waga = najpóźniejszy pomiar,
-- widok wagi nie wraca sam do wykresu wagi,
-- karta panelu przebudowuje się tylko przy zmianie danych,
-- watchdog obejmuje też zadanie sieciowe,
-- poprawne jednostki timeoutów TLS.
-
-**Wynik obliczeń** porównany z v4.1 na tym samym pliku 40 dni danych (`tools/sim5`): identyczne wykresy tygodni, nocy, kąpieli i wagi. Od 5.3.0 wykres przyrostu wagi celowo różni się od v4.1 — liczony jest jak na hostingu (każdy tydzień, szacunki).
-
----
-
-## Diagnostyka i rozwiązywanie problemów
-
-### Po wgraniu nowego firmware (v5.5.0): co sprawdzić
-
-Otwórz monitor portu (115200). W logu startowym ma być, kolejno:
-
-| Linia w logu | Znaczenie |
-|---|---|
-| `Lesny Dziennik v5.5.0 — tylko wyswietlacz.` | wgrała się właściwa wersja |
-| `LCD: poprawka licznika EOF aktywna (pole +296 B, blokada tak).` | **poprawka przesuwania obrazu działa** (sterownik ekranu znaleziony i zabezpieczony) |
-| `LCD: 2 FB w PSRAM, bounce 80 linii, wolny RAM wewn. … KB` | ekran wystartował |
-| `Wi-Fi (...): ... IP ..., ... dBm` | Wi-Fi połączone; sygnał słabszy niż ok. −75 dBm powoduje błędy sieci |
-| `Host: CSV pobrany (... wpisow ...)` | dane z hostingu pobrane |
-
-Warianty linii o ekranie:
-- `LCD: struktura sterownika nie pasuje ...` albo `LCD: nie znaleziono pol sterownika ...` — poprawka jest wyłączona (inna wersja rdzenia ESP32 niż 3.3.12). Wyślij tę linię razem z wersją rdzenia.
-- `LCD: rdzen bez RESTART_IN_VSYNC ...` — rdzeń sam zeruje licznik, poprawka niepotrzebna.
-
-Przez kilka minut obserwuj obraz: ma być prosty, bez poziomych artefaktów, także zaraz po restarcie i po zmianie wpisów na stronie. Od 5.4.0 animowane elementy (słupki, przesuwanie stron panelu, chmury, krople, pierścień) nie mogą mrugać ani być niedorysowane: po kilku minutach wyślij `l` — „rysowanie w wyswietlanym buforze” ma być **0**.
-
-### Polecenia w monitorze portu (115200, wyślij jedną literę)
-
-| Znak | Co robi |
-|---|---|
-| `i` | otwiera ekran diagnostyki |
-| `l` | wypisuje statystyki obrazu: czy poprawka działa, liczba klatek, **zakłócone klatki** i ile z nich naprawiono, spóźnione VSYNC, zapisy flasha; od 5.4.0 także: rysowanie w wyświetlanym buforze (ma być 0), klatki pokazane o klatkę później, czas rysowania (średni i maks. w ostatniej minucie), czas od VSYNC do przełączenia bufora (ok. 30–32 ms), najdłuższą pracę pętli; oraz co ile sekund i jak (HTTP/HTTPS) sprawdzana jest rewizja danych |
-| `h` | ręczna twarda resynchronizacja obrazu |
-
-Ekran diagnostyki na urządzeniu: dotknij panel (z tablicy), potem **przytrzymaj zegar** albo tytuł (długie dotknięcie). Są tam sekcje m.in. sieć/host (rewizja, błędy pobierania, cache), pamięć, obraz.
-
-### Typowe problemy
-
-| Objaw | Przyczyna | Co zrobić |
+| Repo | Hosting | Co to jest |
 |---|---|---|
-| Obraz przesunięty o ok. 1/6 ekranu, poziome pasy | licznik przerwań EOF sterownika ekranu (naprawione w 5.1.0) | wgraj 5.1.0; sprawdź w logu linię „poprawka licznika EOF aktywna”; jeśli jest, a obraz nadal skacze, wyślij wynik polecenia `l` |
-| Jedno dotknięcie przełącza widok / kartę kilka razy | zaniki odczytu dotyku GT911 (naprawione w 5.4.1) | wgraj 5.4.1; opis w „Obsługa dotyku”; gdy nadal się zdarza, zwiększ `TOUCH_RELEASE_HOLD_MS` w `hw_touch.cpp` |
-| `Host: rewizja — blad (HTTP 0)` | brak sieci albo nieudany handshake TLS (słaby sygnał) | zbliż urządzenie do routera; zobacz dBm w logu; 5.0.2+ ponawia połączenie i opisuje powód |
-| `Wi-Fi: rozlaczono, powod N` | kod powodu rozłączenia z routera (np. 201 = nie widać sieci, 15 = przerwane uzgadnianie hasła, 202 = błąd uwierzytelnienia) | sprawdź SSID i hasło w `secrets.h`, sygnał, router |
-| `Cache: plik uszkodzony — pomijam` | pierwszy start po zmianie partycji | normalne; cache odtworzy się po pobraniu danych |
-| Ekran startowy utknął na kroku „dane z WWW” | hosting niedostępny albo błąd 500 strony | otwórz stronę w przeglądarce; opis błędu 500: `web-php/README.md` rozdział 5; urządzenie pokaże dane z cache |
-| `BLAD: brak PSRAM` | zły wybór w Narzędziach | PSRAM = **OPI PSRAM** |
-| Animowane elementy czasem mrugają albo są niedorysowane | LVGL rysował w buforze, który ekran jeszcze wyświetlał (naprawione w 5.4.0; opis: repo `wiewiornik`, `2112026.md` rozdział G) | wgraj 5.4.0; `l`: „rysowanie w wyswietlanym buforze” = 0, „czekanie >400 ms” = 0 |
-| Wpis z telefonu pojawia się na urządzeniu po ok. minucie | od 5.4.0 rewizja sprawdzana co 10 s tylko, gdy ktoś dotykał ekranu w ostatnich 5 min albo dane zmieniły się w ostatnich 10 min; inaczej co 30 s (dzień) / 60 s (noc) | dotknij ekranu — od razu wraca 10 s |
-| Dane na urządzeniu nie zmieniają się po wpisie na stronie | rewizja nie rośnie albo host nie odpowiada | `https://phpmapy1.webd.pro/api/revision` w przeglądarce; liczba `rev` powinna rosnąć po zapisie |
+| `public_html/wiewiorka/` | `/home/phpmapy1/public_html/wiewiorka/` | strona (domena `wiewiorka.mom` wskazuje na ten katalog) |
+| `panel-engine-wiewiorka/` | `/home/phpmapy1/panel-engine-wiewiorka/` | silnik PHP (poza katalogiem publicznym) |
+| `panel-data-wiewiorka/` | `/home/phpmapy1/panel-data-wiewiorka/` | dane kont (poza katalogiem publicznym, **zapisywalny**) |
 
-## Testy na PC
+Strona Aleksandra (`public_html/` bez podkatalogu, `panel-engine/`, `panel-data/`) jest od tej wersji całkowicie niezależna: osobny silnik, osobne dane. Wgranie wiewiorka.mom niczego w niej nie zmienia, a urządzenie ESP32 dalej łączy się tylko ze stroną Aleksandra.
+
+Zawartość:
+
+```
+public_html/wiewiorka/
+  index.php      router: logowanie, API, strona (wszystko przechodzi tędy)
+  paths.php      ścieżki do silnika i danych (dwa poziomy wyżej)
+  index.html     wygląd (style, ekrany logowania, konto, maskotka)
+  app.js         logika strony
+  .htaccess      przekierowanie do index.php, opcjonalne wymuszenie HTTPS
+  fonts/         czcionki Sora i Manrope (licencja OFL)
+  img/           grafiki SVG: wiewiorka.svg, wiewiorka-spi.svg, las-gora.svg, las-dol.svg, favicon.svg
+panel-engine-wiewiorka/
+  Auth.php       konta, hasła, logowanie, blokady, profil dziecka
+  api.php        API danych (wywoływane tylko przez index.php po zalogowaniu)
+  config.php     normy (sen, waga, formularze) + profil dziecka z konta
+  Domain.php, CsvRepository.php, Repository.php, bootstrap.php, development_tips.php,
+  SleepAnalysis.php, SleepNights.php, SleepStats.php (część „noc z kamery” nieaktywna)
+  .htaccess      zakaz dostępu z WWW
+panel-data-wiewiorka/
+  .htaccess      zakaz dostępu z WWW (reszta plików powstaje sama na serwerze)
+```
+
+## 2. Wdrożenie krok po kroku (cPanel, webd.pl)
+
+Bez gita: pliki pobierasz z GitHub (gałąź `wiewiorka.mom` → plik → **Download raw file**) albo całą gałąź jako ZIP (**Code → Download ZIP**) i wgrywasz przez **Menedżer plików** cPanel.
+
+### 2.1 Katalogi i pliki
+
+1. W Menedżerze plików wejdź do `/home/phpmapy1/` (katalog domowy, ten sam poziom co `public_html`).
+2. Utwórz trzy katalogi: `public_html/wiewiorka`, `panel-engine-wiewiorka`, `panel-data-wiewiorka`.
+3. Wgraj:
+   - całą zawartość `public_html/wiewiorka/` z repo (z podkatalogami `fonts/` i `img/` oraz plikiem `.htaccess`) → `/home/phpmapy1/public_html/wiewiorka/`;
+   - wszystkie pliki z `panel-engine-wiewiorka/` (razem z `.htaccess`) → `/home/phpmapy1/panel-engine-wiewiorka/`;
+   - `panel-data-wiewiorka/.htaccess` → `/home/phpmapy1/panel-data-wiewiorka/`.
+   Pliki zaczynające się od kropki (`.htaccess`) w Menedżerze plików są widoczne po włączeniu **Ustawienia → Pokaż ukryte pliki**.
+4. Prawa zapisu: katalog `panel-data-wiewiorka` musi być zapisywalny dla PHP. Na webd.pl domyślne `755` (właściciel = Twoje konto, PHP działa jako Ty) wystarcza. Jeśli przy pierwszym wejściu pojawi się „Katalog danych portalu jest niezapisywalny”, ustaw `775` (prawy klik → Zmień uprawnienia).
+
+**Nie ruszaj** niczego w `public_html/` poza nowym podkatalogiem `wiewiorka` — w szczególności `public_html/.htaccess` (wybór PHP 8; po nadpisaniu wraca PHP 5.6 i obie strony dają błąd 500). Nowa strona dziedziczy z niego wersję PHP.
+
+### 2.2 Domena wiewiorka.mom
+
+1. Kup / przenieś domenę `wiewiorka.mom` i ustaw jej serwery DNS na serwery webd.pl (albo rekord A na adres serwera hostingu — w panelu rejestratora).
+2. cPanel → **Domeny** → **Utwórz nową domenę**: nazwa `wiewiorka.mom`, odznacz „dzieli katalog główny z…”, **Katalog główny dokumentów**: `public_html/wiewiorka`. Zapisz.
+3. cPanel → **SSL/TLS Status** → zaznacz `wiewiorka.mom` i `www.wiewiorka.mom` → **Run AutoSSL**. Certyfikat pojawia się zwykle w kilka–kilkanaście minut po tym, jak DNS zacznie wskazywać na hosting.
+4. Gdy `https://wiewiorka.mom` się otwiera: w `public_html/wiewiorka/.htaccess` usuń `#` z dwóch linii pod „Wymuszenie HTTPS” — od tej chwili `http://` przekierowuje na `https://`.
+
+Dopóki domena nie działa, strona jest też pod `https://phpmapy1.webd.pro/wiewiorka/` (konta i dane są te same; logowanie z tego adresu jest osobne od logowania na domenie, bo przeglądarka trzyma ciasteczka osobno dla każdego adresu).
+
+### 2.3 Pierwsze uruchomienie
+
+1. Otwórz `https://wiewiorka.mom/`. Przy pierwszym wejściu silnik sam tworzy w `panel-data-wiewiorka/` plik **`portal.cfg`** z losowym kodem zaproszenia i sekretem.
+2. W Menedżerze plików otwórz `panel-data-wiewiorka/portal.cfg` (Edytuj). Linia `zaproszenie=wiewiorka-xxxxxx` to kod, który trzeba podać przy zakładaniu konta. Możesz go zmienić na własny (np. `zaproszenie=lesne-maluchy-2026`) i zapisać. Pusta wartość (`zaproszenie=`) zamyka rejestrację — istniejące konta logują się dalej.
+3. **Nie zmieniaj** linii `sekret=` (zmiana wylogowuje wszystkich; nie udostępniaj jej nikomu).
+4. Na stronie: „Załóż konto” → kod zaproszenia, login, hasło (2×) → „Twoje maleństwo” (data urodzenia, waga urodzeniowa, imię nieobowiązkowe) → strona startowa.
+
+### 2.4 Szybki test po wdrożeniu
+
+- `https://wiewiorka.mom/api/auth` → `{"loggedIn":false,...,"registrationOpen":true}`.
+- `https://wiewiorka.mom/api/status` bez logowania → `{"message":"Zaloguj się…","auth":true}` (kod 401).
+- `https://wiewiorka.mom/paths.php` i `https://wiewiorka.mom/index.html` → brak dostępu (403).
+- Strona Aleksandra `https://phpmapy1.webd.pro/` działa jak wcześniej.
+
+## 3. Konta i logowanie
+
+- **Pierwsza wizyta** na danym urządzeniu pokazuje „Załóż konto”; kolejne — „Zaloguj się” (przełączniki „Załóż konto” / „Zaloguj się” pod formularzem).
+- **Zakładanie konta** wymaga kodu zaproszenia z `portal.cfg`. Login: 3–32 znaki (litery bez polskich znaków, cyfry, `.`, `-`, `_`), wielkość liter bez znaczenia (`Tata` = `tata`). Hasło: co najmniej 8 znaków.
+- **Hasła** są zapisywane wyłącznie jako skrót bcrypt (`password_hash`), nigdy jawnie. Nikt (także administrator) nie odczyta hasła z pliku.
+- **Zalogowanie** to podpisane ciasteczko `wm_auth` (HMAC-SHA256 z sekretem z `portal.cfg`): numer konta, ważność, wersja konta. Ciasteczko jest `HttpOnly` (niedostępne dla skryptów), `SameSite=Lax`, przez HTTPS także `Secure`, i ważne tylko dla adresu strony. Bez plików sesji — działa po restartach serwera.
+  - „Zapamiętaj mnie” (domyślnie zaznaczone): logowanie ważne 30 dni, odnawiane przy korzystaniu.
+  - Bez „Zapamiętaj mnie”: do zamknięcia przeglądarki (najdłużej 1 dzień).
+- **Blokady**: 5 nieudanych logowań na jeden login albo 20 z jednego adresu IP w ciągu 15 minut → logowanie zablokowane do końca okna („Zbyt wiele nieudanych prób. Spróbuj ponownie za N min.”). Tak samo 5 błędnych kodów zaproszenia z jednego IP.
+- **Ochrona przed podszywaniem (CSRF)**: każdy zapis (POST) musi przyjść z tej samej strony (nagłówek `Origin`/`Referer` = adres strony); inaczej 403 „Odrzucono zapis spoza strony”.
+- **Izolacja danych**: po sprawdzeniu logowania router podaje silnikowi wyłącznie katalog `panel-data-wiewiorka/u_<nr konta>/`. API nie przyjmuje numeru konta ani ścieżki od przeglądarki, więc nie da się odczytać ani zmienić danych innego konta (sprawdzone testem: drugie konto nie widzi ani nie usunie wpisów pierwszego, podrobione ciasteczko z innym numerem konta jest odrzucane).
+- **Konto** (przycisk „konto” w prawym górnym rogu): dane maleństwa, zmiana hasła (po zmianie inne urządzenia są wylogowane, to zostaje zalogowane), „Wyloguj”.
+
+### Reset zapomnianego hasła (bez e-maila)
+
+Strona nie zbiera adresów e-mail, więc reset robi administrator w Menedżerze plików:
+
+1. Najprościej: usuń konto i załóż je od nowa z tym samym loginem, zachowując dane:
+   1. w `panel-data-wiewiorka/konta.json` znajdź wpis z loginem i zanotuj jego `"id"` (np. `4`);
+   2. zmień nazwę katalogu `u_4` na np. `u_4_stare`;
+   3. usuń z `konta.json` cały blok tego loginu (od `"login-małymi-literami": {` do zamykającego `},` — zachowaj poprawny JSON);
+   4. użytkownik zakłada konto ponownie (dostaje nowy numer, np. `u_7`);
+   5. przenieś pliki z `u_4_stare/` do nowego `u_7/` (nadpisz) — wrócą wpisy i profil.
+2. Albo: wygeneruj nowy skrót hasła (np. na swoim komputerze `php -r 'echo password_hash("NoweHaslo123", PASSWORD_DEFAULT);'`) i wklej go w `konta.json` w pole `"hash"` tego konta, a `"ver"` zwiększ o 1.
+
+## 4. Dane maleństwa (profil)
+
+Po założeniu konta strona prosi o:
+
+| Pole | Do czego służy | Zakres |
+|---|---|---|
+| Imię (nieobowiązkowe) | powitanie („Zosia pod opieką wiewiórki”), nagłówek, tytuł karty, wiek („Zosia ma 58 dni”), pocztówki | do 30 znaków: litery, spacja, `-`, `'`; puste → „Maluszek” / „Maleństwo” |
+| Data urodzenia | wiek, porada dnia, okna czuwania i normy snu (wg wieku), dni życia na wykresach | nie w przyszłości, nie starsza niż 6 lat |
+| Waga urodzeniowa (g) | punkt startowy wykresów wagi (WHO) i przyrostu, „od urodzenia” | 500–6500 g |
+
+Zapisane w `panel-data-wiewiorka/u_<nr>/profil.json`. Zmiana w „konto” → „Dane maleństwa” od razu przelicza stronę. Bez uzupełnionego profilu API danych odpowiada 409 i strona pokazuje ekran „Twoje maleństwo”.
+
+## 5. Wygląd: motyw wiewiórki
+
+Układ, kolory, czcionki i wszystkie podstrony są takie jak w Leśnym Dzienniku (styl „bajkowy” z przerywanymi ramkami, tryb dzień/noc). Doszły elementy wiewiórki — wszystkie narysowane od podstaw jako SVG (bez cudzych grafik i bibliotek):
+
+- **Logo**: wiewiórka z żołędziem w kremowym kółku z rudą obwódką (to samo w ikonce karty przeglądarki — `img/favicon.svg`). Nazwa strony „wiewiorka.mom”, pod nią imię i wiek.
+- **Powitanie z maskotką** na starcie: „Dzień dobry / Miłego dnia / Dobry wieczór / Dobranoc” wg godziny, „{Imię} pod opieką wiewiórki” i zdanie od wiewiórki. Maskotka zmienia się wg stanu dnia:
+  | Stan | Wiewiórka | Zdanie |
+  |---|---|---|
+  | dziecko śpi (sen w toku) | zwinięta w kłębek pod ogonem, „z z Z” | „Zosia śpi — wiewiórka pilnuje ciszy.” |
+  | okno drzemki / przekroczone okno czuwania | przymknięte oczy | „Pora na drzemkę. Ziewamy?” / „Okno czuwania minęło — czas wyciszyć maleństwo.” |
+  | ≥3 h / ≥4 h od karmienia | podskakuje, pomarańczowy wykrzyknik | „Za chwilę może być głodny.” / „Minęły 4 godziny od karmienia.” |
+  | noc | księżyc i gwiazdki | „Nocna zmiana. Wiewiórka czuwa przy Was.” |
+  | pozostałe | mruga, trzyma żołądź | „Czuwam razem z Wami.” |
+  Animacje (mrugnięcie, podskok) wyłączają się, gdy telefon ma włączone „ogranicz ruch”.
+- **Tło**: gałąź dębu z liśćmi i żołędziami w prawym górnym rogu oraz gałąź z małą wiewiórką w lewym dolnym; delikatne, za kartami, w trybie nocnym przygaszone.
+- **Puste stany** („Brak wpisów”, „Brak pomiarów”…) z małą wiewiórką.
+- **Ekran logowania**: zielone leśne tło z gałęziami, duża wiewiórka, „wiewiorka.mom”, krótki opis i karta z formularzem.
+
+Zmiany wyglądu są tylko w `index.html` (sekcja CSS na końcu stylów „wiewiorka.mom — motyw opiekuńczej wiewiórki”) i `img/`.
+
+## 6. Czym ta wersja różni się od Leśnego Dziennika
+
+| Leśny Dziennik (v5) | wiewiorka.mom |
+|---|---|
+| jedno dziecko, dane wpisane w `config.php` | dowolnie wiele kont, każde z własnym profilem i danymi |
+| bez logowania | logowanie, zakładanie kont z kodem zaproszenia |
+| silnik `panel-engine`, dane `panel-data` | `panel-engine-wiewiorka`, `panel-data-wiewiorka/u_<nr>` |
+| noce z kamery (t620), urządzenie ESP32, Telegram, wgrywanie CSV z zewnątrz (`upload-data`), wersja prosta `indexesp.html` | brak (ukryte w wyglądzie, wyłączone w API) |
+| MySQL jako opcja | tylko CSV (osobny plik na konto) |
+| adresy `/api/...` od korzenia | adresy względne — strona działa na domenie i w podkatalogu |
+
+Wszystko inne (karmienia z butelką, pieluchy, odciąganie, witamina D, waga z wykresami WHO i przyrostu, kąpiele, sen z oknami czuwania, kalendarz, statystyki, historia, rytm, pocztówki-wspomnienia, import i eksport CSV — własnych danych) działa tak samo, łącznie z poprawkami 5.5.0 (sen po czasie, bezpieczny zapis pliku, usuwanie z weryfikacją i z mlekiem, limit czasu zapytań).
+
+## 7. API
+
+Wszystkie adresy względem strony (`https://wiewiorka.mom/…`). Odpowiedzi JSON.
+
+**Konta (bez logowania):**
+
+| Metoda i adres | Pola | Co robi |
+|---|---|---|
+| `GET api/auth` | — | `loggedIn`, `login`, `profileComplete`, `profile` (`name`, `birthDate`, `birthWeightG`), `registrationOpen` |
+| `POST api/register` | `invite`, `login`, `password`, `password2`, `remember` (1/0) | zakłada konto i loguje (201) |
+| `POST api/login` | `login`, `password`, `remember` | loguje (200) albo 400 z komunikatem |
+| `POST api/logout` | — | wylogowuje |
+
+**Po zalogowaniu** (bez logowania → 401 `{"auth":true}`):
+
+| Metoda i adres | Co robi |
+|---|---|
+| `POST api/profile` (`name`, `birthDate` RRRR-MM-DD, `birthWeightG`) | zapisuje dane maleństwa |
+| `POST api/password` (`old`, `password`, `password2`) | zmienia hasło |
+
+**Dane** (po zalogowaniu i z uzupełnionym profilem; bez profilu → 409 `{"profile":true}`): `GET api/status` (dodatkowo pole `childName`), `GET api/entries?date=`, `GET api/weight-series`, `GET api/bath-calendar`, `GET api/revision`, `GET export.csv`, `POST api/entry`, `POST api/event`, `POST api/delete-entry`, `POST api/update-feeding`, `POST api/import` — format jak w Leśnym Dzienniku 5.5.0.
+
+Wyłączone (404): `upload-data`, `sleep-night`, `sleep-nights`, `device`, `setting`, `send-backup`.
+
+## 8. Pliki danych
+
+W `panel-data-wiewiorka/` (wszystko powstaje samo):
+
+| Plik | Zawartość |
+|---|---|
+| `portal.cfg` | `zaproszenie=` kod rejestracji, `sekret=` klucz podpisu logowań |
+| `konta.json` | konta: login, skrót hasła (bcrypt), numer, wersja, data założenia |
+| `proby.json` | nieudane próby logowania i kodu (sprzątane po 15 min) |
+| `konta.lock` | blokada zapisu kont (pusty) |
+| `u_<nr>/karmienia.csv` | wpisy konta (format CSV jak w Leśnym Dzienniku) |
+| `u_<nr>/profil.json` | dane maleństwa |
+| `u_<nr>/karmienia.rev`, `karmienia.csv.lock`, `karmienia_backup.csv`, `cache/` | rewizja, blokada, kopia sprzed importu, pamięć odpowiedzi |
+
+**Kopia zapasowa**: wystarczy skopiować cały katalog `panel-data-wiewiorka` (cPanel → Menedżer plików → Kompresuj → pobierz). Każdy użytkownik może też pobrać swoje dane: Statystyki → „Pobierz CSV”.
+
+**Usunięcie konta**: usuń jego wpis z `konta.json` i katalog `u_<nr>`.
+
+## 9. Aktualizacja strony
+
+Przy każdej zmianie wgrywasz tylko zmienione pliki z gałęzi `wiewiorka.mom`:
+
+- `public_html/wiewiorka/*` → `/home/phpmapy1/public_html/wiewiorka/` — przy zmianie `app.js` zawsze razem z `index.html` (ładuje `app.js?v=<wersja>`, numer podbijany przy każdej zmianie, więc telefony pobiorą nowy plik same);
+- `panel-engine-wiewiorka/*` → `/home/phpmapy1/panel-engine-wiewiorka/`.
+
+Nigdy nie nadpisuj `panel-data-wiewiorka/` (konta i dane) ani `public_html/.htaccess`.
+
+## 10. Typowe problemy
+
+| Objaw | Przyczyna / co zrobić |
+|---|---|
+| „Katalog danych portalu jest niezapisywalny…” | brak katalogu `panel-data-wiewiorka` obok `public_html` albo brak prawa zapisu — utwórz go / ustaw 775 |
+| Błąd 500 na całej stronie | najczęściej nadpisany `public_html/.htaccess` (PHP 5.6) — przywróć wybór PHP 8 w cPanel (MultiPHP Manager) |
+| Po zalogowaniu od razu znowu ekran logowania | przeglądarka blokuje ciasteczka albo strona otwarta raz przez `http`, raz przez `https` — włącz wymuszenie HTTPS (rozdział 2.2) |
+| „Nieprawidłowy kod zaproszenia” | sprawdź `zaproszenie=` w `portal.cfg` (bez spacji); po 5 błędach z jednego adresu 15 min blokady |
+| „Zbyt wiele nieudanych prób” | odczekaj podany czas albo usuń `panel-data-wiewiorka/proby.json` |
+| Zapomniane hasło | rozdział 3, „Reset zapomnianego hasła” |
+| Stary wygląd po aktualizacji | wgraj `index.html` razem z `app.js`; w razie potrzeby Ctrl+F5 |
+
+## 11. Uruchomienie lokalne i testy
 
 ```bash
-cd tools/sim5
-g++ -std=c++17 -O1 -I../../v5 test_stats.cpp ../../v5/store.cpp ../../v5/stats.cpp -o test_stats
-python3 ../sim/gen_csv.py                      # syntetyczne dane do /tmp/fw_data.csv
-TZ="CET-1CEST,M3.5.0,M10.5.0/3" ./test_stats /tmp/fw_data.csv
+# z katalogu repozytorium (wymaga PHP 8)
+cd public_html/wiewiorka && php -S 127.0.0.1:8120 index.php
+# strona: http://127.0.0.1:8120/  — dane trafią do panel-data-wiewiorka/ (poza gitem)
 ```
 
-Zrzuty ekranów robi symulator LVGL (`tools/sim`, scenariusz `tools/sim5/scen_v5.h`, opis w pliku).
+Sprawdzone przed wydaniem (PHP 8.3 + Chromium/Playwright, ekran telefonu 400×860):
 
----
-
-## Panel WWW i kamera
-
-- **Strona na hostingu** (`web-php/`): jedyne miejsce zapisu danych. Pełny opis — układ na hostingu, aktualizacja plik po pliku, API, wykres wagi, błąd 500: **`web-php/README.md`**.
-- **Jakość snu nocą z kamery:** serwer domowy t620 wysyła co rano dane nocy na stronę (`POST /api/sleep-night`); wykres jest w Sen → „Jakość snu nocą”. Opis strony: `web-php/README.md` rozdział 10; konfiguracja serwera domowego: repozytorium `wiewiornik` (prywatne), `INSTRUKCJA.md` rozdział 3c2.
-- Urządzenie (od 5.3.0) nie rozmawia z kamerą ani z t620: bierze gotowy skrót ostatniej nocy ze strony (obiekty `camNight` i `camDev`; od 5.4.0 z lekkiego `/api/device`, a gdy hosting go jeszcze nie ma — z `/api/status`) i pokazuje go na karcie **Sen** (drugi widok „Noc z kamery”). Analiza i „Co wpływa na sen” są tylko na stronie.
-- Zmiany samej strony (wykresy, analiza) wymagają tylko aktualizacji plików na hostingu, bez wgrywania firmware. Firmware trzeba wgrać dopiero przy zmianach z folderu `v5/`.
-
-### Aktualizacja firmware do 5.5.0 (z 5.4.x)
-Najpierw zaktualizuj stronę na hostingu (`web-php/README.md`, rozdział 4 i 14) — bez niej 5.5.0 działa jak 5.4.2 (brak `nrev`).
-1. W Arduino IDE podmień w folderze szkicu `v5` pliki: `app_config.h`, `host_sync.cpp`, `net.cpp`, `stats.cpp` (pobierz z gałęzi `v5`). **Nie ruszaj `secrets.h`.**
-2. Skompiluj i wgraj jak zwykle.
-3. Sprawdź: w logu `v5.5.0`; na stronie przełącz „Powiadomienia snu (Telegram)” w diagnostyce — po ok. 10–60 s diagnostyka urządzenia (przytrzymaj zegar) pokazuje nowe ustawienie w linii „powiadomienia o drzemce”.
-
-### Aktualizacja firmware do 5.4.2 (z 5.4.1)
-1. W Arduino IDE podmień w folderze szkicu `v5` tylko `stats.cpp` i `app_config.h` (pobierz z gałęzi `v5`), **nie ruszaj `secrets.h`**.
-2. Skompiluj i wgraj jak zwykle.
-3. Sprawdź: w logu `v5.4.2`; po dodaniu drugiego ważenia (odstęp co najmniej 2 dni od poprzedniego) karta Waga → widok „przyrost” pokazuje słupek najpóźniej po minucie.
-
-### Aktualizacja firmware do 5.4.1 (z 5.3.0 lub 5.4.0)
-
-1. Hosting (najpierw, ale firmware działa też ze starą stroną): wgraj pliki strony z rozdziału 4 `web-php/README.md` — m.in. `api.php` (nowe `/api/device`) i nowy folder `fonts/`.
-2. Z folderu `v5` gałęzi `v5` podmień: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `hw_display.cpp`, `hw_display.h`, `hw_touch.cpp`, `net.cpp`, `net.h`, `stats.cpp`, `ui_modern.h` (przy aktualizacji z 5.4.0 wystarczą `app_config.h`, `hw_touch.cpp`, `ui_modern.h`). Swój `secrets.h` zostaw. Biblioteki bez zmian (sprawdzone kompilacją: rdzeń 3.3.12, lvgl 9.3.0, GFX 1.6.9, SensorLib 0.5.1).
-3. Wgraj jak zwykle. Nie trzeba czyścić flasha.
-4. Sprawdź: w logu `v5.4.1`; jedno dotknięcie przełącza widok / kartę tylko raz; po kilku minutach polecenie `l` — „rysowanie w wyswietlanym buforze 0”, druga linia `Host: rewizja co 30 s przez HTTP` (albo `HTTPS`, jeśli hosting nie obsługuje zwykłego HTTP — też dobrze) i `ustawienia z /api/device`.
-
-### Aktualizacja firmware do 5.3.0 (z 5.2.0 lub wcześniejszych; dziś lepiej od razu do 5.4.1 jak wyżej)
-
-1. Hosting: wgraj do `/home/phpmapy1/panel-engine/` pliki `api.php` i `SleepStats.php` z `web-php/engine/` (bez nich karta Sen zostaje z jednym widokiem; nic się nie psuje).
-2. Pobierz gałąź `v5` (Code → Download ZIP) i z folderu `v5` podmień u siebie: `app.cpp`, `app_config.h`, `host_sync.cpp`, `host_sync.h`, `hw_touch.cpp`, `stats.cpp`, `ui_model.h`, `ui_modern.h`. Swój `secrets.h` zostaw (przy aktualizacji z 5.3.0 wystarczą `app_config.h`, `hw_touch.cpp`, `ui_modern.h`).
-3. Wgraj jak zwykle (ustawienia jak w rozdziale „Kompilacja”). Nie trzeba czyścić flasha.
-4. Sprawdź: w logu `v5.3.0` (lub nowszy); na karcie Sen kropki w prawym górnym rogu i po dotknięciu widok „Noc z kamery” (pojawia się do 10 min po starcie, gdy hosting ma przynajmniej jedną zakończoną noc); na karcie Waga wykres przyrostu ze słupkami w każdym tygodniu.
-
-### Historia wersji firmware v5
-
-| Wersja | Zmiany |
-|---|---|
-| 5.0.x | urządzenie tylko wyświetla; dane z hostingu; cache na flashu |
-| 5.1.0 | poprawka licznika EOF sterownika ekranu (przesuwanie obrazu), detektor przesunięcia, polecenia `l`, `h` |
-| 5.2.0 | linia ostatniej nocy z kamery na karcie Sen (`camNight`) |
-| 5.3.0 | karta Sen: drugi widok „Noc z kamery” (`camDev`); wykres przyrostu wagi jak na hostingu (każdy tydzień, szacunki, norma) |
-| 5.4.0 | koniec mrugania animacji (LVGL czeka, aż sterownik przełączy bufor: `on_frame_buf_complete` + `lv_display_set_flush_wait_cb`), liczniki obrazu w `l` i diagnostyce; krótsze przesuwanie stron i wzrost słupków; rewizja co 10/30/60 s zależnie od użycia i zwykłym HTTP (zapas HTTPS); `/api/device` zamiast `/api/status`; sumy dnia liczone tylko po zmianie danych albo minuty |
-| 5.4.1 | obsługa dotyku: jedno dotknięcie = jedno przełączenie (odporność na zaniki odczytu GT911 + odstęp między kliknięciami), patrz „Obsługa dotyku” |
-| 5.5.0 | noc z kamery i ustawienie powiadomień pobierane od razu po zmianie na hostingu (`nrev`); najdłuższa przerwa dziś jak na stronie; odbiór danych nie może się zapętlić bez limitu czasu (rzadki przypadek w `net.cpp`) |
-| 5.4.2 | wykres przyrostu wagi: dwa ważenia w odstępie ≥2 dni (wcześniej ≥3) wystarczą do narysowania słupka („szacunek”); zbieżne z hostingiem; patrz „Odświeżanie wykresów wagi” |
-
-Ważne uwagi z przeglądu (`ulepszenia19-10-26.md`):
-- API nie ma uwierzytelniania — hasła dla całego portalu zostaną dodane później jednym ruchem (P0),
-- auto-sen przy każdym karmieniu dopisuje zdarzenia w przyszłości (P1),
-- zapisy CSV mają wyścigi (P1).
+- pełny przebieg w przeglądarce: pierwsza wizyta → załóż konto → dane maleństwa → strona → dodanie karmienia → wylogowanie → zalogowanie (dane zostają) — na domenie (`/`) i w podkatalogu (`/wiewiorka/`), bez błędów JS;
+- 34 testy API: izolacja dwóch kont (status, wpisy, eksport, próba usunięcia cudzego wpisu), 401 bez logowania, 403 dla zapisu z obcej strony i bez nagłówka `Origin`, podrobione ciasteczko, wyłączone trasy, blokada po 5 błędnych hasłach i 5 błędnych kodach, zmiana hasła wylogowuje inne urządzenia, hasła tylko jako bcrypt;
+- wygląd: start (dzień i noc, maskotka czuwa / śpi), dziennik, statystyki, waga, sen, okno „Konto”, ekrany logowania, zakładania konta i danych maleństwa.

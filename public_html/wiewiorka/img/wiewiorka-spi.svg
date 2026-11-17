@@ -1,0 +1,26 @@
+<!-- wiewiorka.mom: spiaca wiewiorka (rysunek wlasny, SVG) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="tg2" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#b85d27"/><stop offset="1" stop-color="#e3884a"/></linearGradient>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d0743a"/><stop offset="1" stop-color="#b65a26"/></linearGradient>
+  </defs>
+  <ellipse cx="62" cy="104" rx="44" ry="5" fill="#000" opacity=".08"/>
+  <!-- tułów zwinięty -->
+  <path d="M28 100 C22 86 34 70 56 68 C78 66 96 76 96 90 C96 100 84 104 62 104 C44 104 32 104 28 100 Z" fill="url(#bg2)"/>
+  <!-- głowa oparta -->
+  <path d="M18 92 C14 82 22 72 34 72 C46 72 52 80 50 90 C48 99 38 102 30 101 C24 100 20 97 18 92 Z" fill="url(#bg2)"/>
+  <ellipse cx="26" cy="95" rx="8" ry="5.5" fill="#f7e3c4"/>
+  <path d="M36 74 C36 67 40 62 44 60 C45 65 45 70 42 76 Z" fill="#b65a26"/>
+  <path d="M38 73 C39 69 41 66 43 64 C43 68 43 71 41 75 Z" fill="#f2b98d"/>
+  <path d="M28 87 C30 89.5 34 89.5 36 87" fill="none" stroke="#2a1a12" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="18.5" cy="93" r="2" fill="#5a2f1c"/>
+  <circle cx="33" cy="94" r="3" fill="#f08f86" opacity=".45"/>
+  <!-- ogon jak kołderka -->
+  <path d="M66 82 C70 70 86 66 94 74 C98 84 90 96 76 96 Z" fill="#a9531f"/>
+  <path d="M92 100 C112 96 118 70 102 56 C88 44 64 48 56 62 C50 72 56 84 68 84 C78 84 82 74 76 68 C86 66 96 74 94 86 C93 92 90 96 92 100 Z" fill="url(#tg2)"/>
+  <path d="M100 62 C108 70 108 86 98 94" fill="none" stroke="#f3b27c" stroke-width="3" stroke-linecap="round" opacity=".7"/>
+  <!-- Zzz -->
+  <g fill="#7b58d4" font-family="Sora,system-ui,sans-serif" font-weight="800">
+    <text x="58" y="40" font-size="11">z</text><text x="70" y="28" font-size="14">z</text><text x="86" y="16" font-size="17">Z</text>
+  </g>
+</svg>
